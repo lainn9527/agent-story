@@ -844,7 +844,9 @@ function buildBranchTree() {
     });
     for (const branch of kids) {
       result.push({ branch, depth });
-      walk(branch.id, depth + 1);
+      // Only increase depth at true forks (multiple visible children)
+      // Single-child chains stay at the same depth level
+      walk(branch.id, kids.length > 1 ? depth + 1 : depth);
     }
   }
 
@@ -853,6 +855,7 @@ function buildBranchTree() {
 }
 
 async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePreserve } = {}) {
+  clearDeletePreviousBtn();
   closeSummaryModal();
   const container = document.getElementById("messages");
   let savedScrollTop = 0;
@@ -993,6 +996,7 @@ async function createBranchFromIndex(msgIndex) {
 // Edit flow
 // ---------------------------------------------------------------------------
 function startEditing(msgEl, msg) {
+  clearDeletePreviousBtn();
   msgEl.classList.add("editing");
 
   const contentEl = msgEl.querySelector(".content");
@@ -1145,6 +1149,7 @@ async function submitEdit(msg, newText) {
 // Regenerate flow
 // ---------------------------------------------------------------------------
 async function regenerateGmMessage(msg, msgEl) {
+  clearDeletePreviousBtn();
   const parentBranchId = msg.owner_branch_id || currentBranchId;
   const branchPointIndex = msg.index - 1;
 
@@ -1185,9 +1190,11 @@ async function regenerateGmMessage(msg, msgEl) {
       },
       // onDone — switch to new branch
       async (data) => {
+        const previousBranchId = parentBranchId;
         if (data.branch) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
+          showDeletePreviousBtn(previousBranchId);
         }
         activeStreamController = null;
       },
@@ -1210,6 +1217,47 @@ async function regenerateGmMessage(msg, msgEl) {
   }
 
   $sendBtn.disabled = false;
+}
+
+// ---------------------------------------------------------------------------
+// Delete previous branch button (shown temporarily after regen)
+// ---------------------------------------------------------------------------
+let _deletePrevTimer = null;
+let _deletePrevBtn = null;
+
+function showDeletePreviousBtn(oldBranchId) {
+  clearDeletePreviousBtn();
+
+  const messages = document.querySelectorAll("#messages .message.gm");
+  const lastGm = messages[messages.length - 1];
+  if (!lastGm) return;
+
+  const btn = document.createElement("button");
+  btn.className = "msg-action-btn delete-prev-btn";
+  btn.textContent = "\u{1F5D1}";
+  btn.title = "刪除上一個結果";
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await API.deleteBranch(oldBranchId);
+    await loadBranches();
+    await loadMessages();
+    clearDeletePreviousBtn();
+  });
+
+  const actionBtn = lastGm.querySelector(".msg-action-btn");
+  if (actionBtn) {
+    actionBtn.parentNode.insertBefore(btn, actionBtn.nextSibling);
+  } else {
+    lastGm.appendChild(btn);
+  }
+
+  _deletePrevBtn = btn;
+  _deletePrevTimer = setTimeout(clearDeletePreviousBtn, 30000);
+}
+
+function clearDeletePreviousBtn() {
+  if (_deletePrevTimer) { clearTimeout(_deletePrevTimer); _deletePrevTimer = null; }
+  if (_deletePrevBtn) { _deletePrevBtn.remove(); _deletePrevBtn = null; }
 }
 
 function showPlaceholderSwitcher(msgEl, index) {
@@ -1968,6 +2016,7 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
 // Send message
 // ---------------------------------------------------------------------------
 async function sendMessage() {
+  clearDeletePreviousBtn();
   const text = $input.value.trim();
   if (!text || isSending) return;
 
