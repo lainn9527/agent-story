@@ -281,7 +281,13 @@ body.lore-page {
   font-size: 0.75rem;
   color: var(--text-dim);
   margin-top: 4px;
-  opacity: 0.7;
+}
+.lore-entry-source a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.lore-entry-source a:hover {
+  text-decoration: underline;
 }
 
 /* Source info in edit modal */
@@ -296,11 +302,17 @@ body.lore-page {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+.modal-source-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.modal-source-link:hover {
+  text-decoration: underline;
+}
 .modal-source-excerpt {
   margin-top: 4px;
   font-size: 0.78rem;
   color: var(--text-dim);
-  opacity: 0.7;
   line-height: 1.4;
 }
 

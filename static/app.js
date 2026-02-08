@@ -470,8 +470,26 @@ async function init() {
     updateInitStatus("載入角色與事件…");
     await Promise.all([loadNpcs(), loadEvents(), loadSummaries()]);
 
+    // Handle URL params: ?branch=BRANCH_ID&msg=MSG_INDEX (from lore console)
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramBranch = urlParams.get("branch");
+    const paramMsgRaw = urlParams.get("msg");
+    const paramMsg = paramMsgRaw != null ? parseInt(paramMsgRaw, 10) : NaN;
+    if (paramBranch && paramBranch !== currentBranchId) {
+      await switchToBranch(paramBranch, {
+        scrollToIndex: !isNaN(paramMsg) ? paramMsg : undefined,
+        scrollBlock: "center",
+      });
+      // Clean URL without reloading
+      window.history.replaceState({}, "", "/");
+    } else if (!isNaN(paramMsg) && paramMsg >= 0) {
+      const target = document.querySelector(`.message[data-index="${paramMsg}"]`);
+      if (target) target.scrollIntoView({ block: "center" });
+      window.history.replaceState({}, "", "/");
+    }
+
     removeInitOverlay();
-    scrollToBottom();
+    if (!paramBranch && isNaN(paramMsg)) scrollToBottom();
 
     // Show "load earlier" button for auto branches with truncated messages
     if (isAutoBranch(currentBranchId) && allMessages.length < totalMessages) {
