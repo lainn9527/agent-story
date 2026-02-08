@@ -8,6 +8,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from story_utils import get_character_name
+
 log = logging.getLogger("auto_play")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -93,11 +95,15 @@ def generate_summary_async(
 
             messages_text = "\n\n".join(msg_lines)
 
+            character_name = get_character_name(story_id, branch_id)
+
             prompt = (
                 "你是主神空間 RPG 的摘要生成器。根據以下遊戲記錄，生成一段精華摘要。\n\n"
                 f"## 回合範圍\nTurn {turn_start} ~ {turn_end}\n\n"
                 f"## 當前階段\n{phase}\n\n"
                 f"## 遊戲記錄\n{messages_text}\n\n"
+                f"## 重要規則\n"
+                f"記錄中【玩家】的角色名為「{character_name}」。摘要中請一律使用「{character_name}」稱呼玩家角色，不要用其他名字替代。\n\n"
                 "請用繁體中文，嚴格按照以下 JSON 格式回覆（不要加其他文字）：\n"
                 '{"summary": "2-3句精華摘要，描述這段期間的主要進展", '
                 '"key_events": ["事件1", "事件2", ...]}\n'

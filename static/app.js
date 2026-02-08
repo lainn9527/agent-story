@@ -172,6 +172,15 @@ const API = {
   // Auto-play Summaries
   autoPlaySummaries: (branchId) =>
     fetch(`/api/auto-play/summaries?branch_id=${branchId || "main"}`).then(r => r.json()),
+
+  // LLM Config
+  getConfig: () => fetch("/api/config").then(r => r.json()),
+  setConfig: (data) =>
+    fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -288,9 +297,10 @@ function startLivePolling(branchId) {
 
       updateLiveIndicator(true, data.auto_play_state);
 
-      // Refresh summaries if drawer is open and new summaries available
+      // Refresh summaries if drawer is open or modal is open and new summaries available
       if (data.summary_count != null && data.summary_count > _lastSummaryCount) {
-        if (!$drawer.classList.contains("closed")) {
+        const summaryModalVisible = !document.getElementById("summary-modal").classList.contains("hidden");
+        if (!$drawer.classList.contains("closed") || summaryModalVisible) {
           loadSummaries();
         }
       }
@@ -376,6 +386,7 @@ function openDrawer() {
   loadNpcs();
   loadEvents();
   loadSummaries();
+  loadConfigPanel();
 }
 
 function closeDrawer() {
@@ -510,6 +521,7 @@ function renderStoryList() {
 }
 
 async function switchToStory(storyId) {
+  closeSummaryModal();
   stopLivePolling();
   try {
     const result = await API.switchStory(storyId);
@@ -677,13 +689,11 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
       item.appendChild(merge);
     }
 
-    // Show branch ID on the active branch
-    if (branch.id === currentBranchId) {
-      const idTag = document.createElement("div");
-      idTag.className = "branch-id-tag";
-      idTag.textContent = branch.id;
-      item.appendChild(idTag);
-    }
+    // Show branch ID on all branches
+    const idTag = document.createElement("div");
+    idTag.className = "branch-id-tag";
+    idTag.textContent = branch.id;
+    item.appendChild(idTag);
 
     item.addEventListener("click", () => {
       if (branch.id !== currentBranchId) {
@@ -804,6 +814,7 @@ function buildBranchTree() {
 }
 
 async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePreserve } = {}) {
+  closeSummaryModal();
   const container = document.getElementById("messages");
   let savedScrollTop = 0;
   let isAtBottom = false;
@@ -1635,6 +1646,75 @@ function renderEventsPanel(events) {
 }
 
 // ---------------------------------------------------------------------------
+// Config Panel (provider / model switcher)
+// ---------------------------------------------------------------------------
+
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
+const CLAUDE_MODELS = ["claude-sonnet-4-5-20250929", "claude-opus-4-6", "claude-haiku-4-5-20251001"];
+const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
+
+async function loadConfigPanel() {
+  const provSel = document.getElementById("provider-select");
+  const modelSel = document.getElementById("model-select");
+  if (!provSel || !modelSel) return;
+
+  try {
+    const cfg = await API.getConfig();
+    if (!cfg.ok) return;
+
+    // Populate provider dropdown
+    provSel.innerHTML = "";
+    for (const [val, label] of Object.entries(PROVIDER_LABELS)) {
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = label;
+      if (val === cfg.provider) opt.selected = true;
+      provSel.appendChild(opt);
+    }
+
+    // Populate model dropdown based on current provider
+    function updateModelDropdown(provider, currentModel) {
+      modelSel.innerHTML = "";
+      const models = provider === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        if (m === currentModel) opt.selected = true;
+        modelSel.appendChild(opt);
+      }
+    }
+
+    const currentModel = cfg.provider === "gemini"
+      ? cfg.gemini.model
+      : cfg.claude_cli.model;
+    updateModelDropdown(cfg.provider, currentModel);
+
+    // On provider change
+    provSel.onchange = async () => {
+      const newProv = provSel.value;
+      const models = newProv === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+      updateModelDropdown(newProv, models[0]);
+      const update = { provider: newProv };
+      if (newProv === "gemini") update.gemini = { model: models[0] };
+      else update.claude_cli = { model: models[0] };
+      await API.setConfig(update);
+    };
+
+    // On model change
+    modelSel.onchange = async () => {
+      const prov = provSel.value;
+      const update = {};
+      if (prov === "gemini") update.gemini = { model: modelSel.value };
+      else update.claude_cli = { model: modelSel.value };
+      await API.setConfig(update);
+    };
+  } catch (e) {
+    console.error("loadConfigPanel error:", e);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Summary Dashboard (auto-play only)
 // ---------------------------------------------------------------------------
 let _lastSummaryCount = 0;
@@ -1651,6 +1731,10 @@ async function loadSummaries() {
     const summaries = result.summaries || [];
     _lastSummaryCount = summaries.length;
     renderSummaryDashboard(summaries);
+    // If modal is open, refresh timeline too
+    if (!document.getElementById("summary-modal").classList.contains("hidden")) {
+      if (summaries.length) renderSummaryTimeline(summaries);
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -1682,46 +1766,66 @@ function renderSummaryDashboard(summaries) {
     `<div class="summary-metric"><span class="summary-metric-value summary-phase-badge ${currentPhase === "dungeon" ? "dungeon" : "hub"}">${currentPhase === "dungeon" ? "副本中" : "主神空間"}</span><span class="summary-metric-label">階段</span></div>`;
   metricsEl.appendChild(bar);
 
-  // Summary cards (newest first)
-  const reversed = [...summaries].reverse();
-  for (const s of reversed) {
-    const card = document.createElement("div");
-    card.className = "summary-card";
+  // Button to open timeline modal
+  const btn = document.createElement("button");
+  btn.className = "summary-open-modal-btn";
+  btn.textContent = `查看時間軸（${summaries.length} 段摘要）`;
+  btn.onclick = () => openSummaryModal(summaries);
+  timelineEl.appendChild(btn);
+}
 
-    const header = document.createElement("div");
-    header.className = "summary-card-header";
+// ---------------------------------------------------------------------------
+// Summary Timeline Modal
+// ---------------------------------------------------------------------------
+function openSummaryModal(summaries) {
+  const modal = document.getElementById("summary-modal");
+  modal.classList.remove("hidden");
+  renderSummaryTimeline(summaries);
+}
 
-    const turnRange = document.createElement("span");
-    turnRange.className = "summary-turn-range";
-    turnRange.textContent = `Turn ${s.turn_start}-${s.turn_end}`;
+function closeSummaryModal() {
+  document.getElementById("summary-modal").classList.add("hidden");
+}
 
-    const phaseBadge = document.createElement("span");
-    phaseBadge.className = `summary-phase-badge ${s.phase === "dungeon" ? "dungeon" : "hub"}`;
-    phaseBadge.textContent = s.phase === "dungeon" ? "副本" : "主神空間";
+function renderSummaryTimeline(summaries) {
+  const metricsEl = document.getElementById("summary-modal-metrics");
+  const bodyEl = document.getElementById("summary-modal-timeline");
+  bodyEl.innerHTML = "";
+  if (!summaries.length) { metricsEl.innerHTML = ""; return; }
 
-    header.appendChild(turnRange);
-    header.appendChild(phaseBadge);
-    card.appendChild(header);
+  // Metrics
+  const latest = summaries[summaries.length - 1];
+  metricsEl.innerHTML = `
+    <span class="stm-metric"><b>${(latest.turn_end || 0) + 1}</b> 回合</span>
+    <span class="stm-metric-sep">\u00B7</span>
+    <span class="stm-metric"><b>${latest.dungeon_count || 0}</b> 副本</span>
+    <span class="stm-metric-sep">\u00B7</span>
+    <span class="stm-metric stm-phase-${latest.phase === 'dungeon' ? 'dungeon' : 'hub'}">${latest.phase === 'dungeon' ? '副本中' : '主神空間'}</span>`;
 
-    const summaryText = document.createElement("div");
-    summaryText.className = "summary-text";
-    summaryText.textContent = s.summary;
-    card.appendChild(summaryText);
+  // Vertical timeline (chronological, oldest first)
+  const timeline = document.createElement("div");
+  timeline.className = "stm-timeline";
 
-    if (s.key_events && s.key_events.length) {
-      const tags = document.createElement("div");
-      tags.className = "summary-events";
-      for (const ev of s.key_events) {
-        const tag = document.createElement("span");
-        tag.className = "summary-event-tag";
-        tag.textContent = ev;
-        tags.appendChild(tag);
-      }
-      card.appendChild(tags);
-    }
+  for (let i = 0; i < summaries.length; i++) {
+    const s = summaries[i];
+    const node = document.createElement("div");
+    node.className = `stm-node ${s.phase === "dungeon" ? "dungeon" : "hub"}`;
 
-    timelineEl.appendChild(card);
+    node.innerHTML = `
+      <div class="stm-dot"></div>
+      <div class="stm-card">
+        <div class="stm-card-header">
+          <span class="stm-turn">Turn ${s.turn_start}\u2013${s.turn_end}</span>
+          <span class="summary-phase-badge ${s.phase === 'dungeon' ? 'dungeon' : 'hub'}">${s.phase === 'dungeon' ? '副本' : '主神空間'}</span>
+        </div>
+        <div class="stm-summary">${escapeHtml(s.summary)}</div>
+        ${s.key_events?.length ? `<div class="stm-events">${s.key_events.map(e => `<span class="summary-event-tag">${escapeHtml(e)}</span>`).join('')}</div>` : ''}
+      </div>`;
+
+    timeline.appendChild(node);
   }
+
+  bodyEl.appendChild(timeline);
 }
 
 // ---------------------------------------------------------------------------
@@ -2105,6 +2209,7 @@ $newBlankBranchBtn.addEventListener("click", async () => {
 // Promote branch button
 $promoteBtn.addEventListener("click", async () => {
   if (currentBranchId === "main") return;
+  closeSummaryModal();
   const branch = branches[currentBranchId];
   const name = branch ? branch.name : currentBranchId;
   if (!confirm(`確定要將分支「${name}」的內容設為主時間線嗎？`)) return;
@@ -2141,6 +2246,18 @@ document.getElementById("ns-create").addEventListener("click", createNewStory);
 // Close modal on overlay click
 $storyModal.addEventListener("click", (e) => {
   if (e.target === $storyModal) closeNewStoryModal();
+});
+
+// Summary timeline modal
+document.getElementById("summary-modal-close").onclick = closeSummaryModal;
+document.getElementById("summary-modal").addEventListener("click", (e) => {
+  if (e.target.id === "summary-modal") closeSummaryModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("summary-modal").classList.contains("hidden")) {
+    e.stopImmediatePropagation();
+    closeSummaryModal();
+  }
 });
 
 // ---------------------------------------------------------------------------

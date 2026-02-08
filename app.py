@@ -289,6 +289,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             npc_profiles=npc_text,
             team_rules=team_rules,
             narrative_recap=narrative_recap,
+            other_agents="（目前無其他輪迴者資料）",
         )
     # Fallback to prompts.py template
     return build_system_prompt(state_text, summary)
@@ -925,7 +926,7 @@ def _get_fork_points(story_id: str, branch_id: str) -> dict:
         cur = branch.get("parent_branch_id")
 
     for bid, branch in branches.items():
-        if bid == branch_id or branch.get("deleted") or branch.get("blank"):
+        if bid == branch_id or branch.get("deleted") or branch.get("blank") or branch.get("merged"):
             continue
         parent = branch.get("parent_branch_id")
         bp_index = branch.get("branch_point_index")
@@ -962,7 +963,7 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
 
     fork_map = {}
     for bid, b in branches.items():
-        if b.get("deleted") or b.get("blank"):
+        if b.get("deleted") or b.get("blank") or b.get("merged"):
             continue
         parent_id = b.get("parent_branch_id")
         bp_index = b.get("branch_point_index")
@@ -2376,12 +2377,18 @@ def api_branches_merge():
     if parent_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
 
-    # 1. Copy child's delta messages to parent
+    # 1. Merge child's delta messages into parent
+    #    Keep parent messages at or before branch point, then append child messages.
+    branch_point = child.get("branch_point_index", -1)
+    parent_msgs = _load_json(_story_messages_path(story_id, parent_id), [])
+    kept = [m for m in parent_msgs if m.get("index", 0) <= branch_point]
+
     child_msgs = _load_json(_story_messages_path(story_id, branch_id), [])
     for m in child_msgs:
         m.pop("owner_branch_id", None)
         m.pop("inherited", None)
-    _save_json(_story_messages_path(story_id, parent_id), child_msgs)
+    kept.extend(child_msgs)
+    _save_json(_story_messages_path(story_id, parent_id), kept)
 
     # 2. Copy character state
     src_char = _story_character_state_path(story_id, branch_id)
@@ -2805,6 +2812,73 @@ def api_auto_play_summaries():
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
     return jsonify({"ok": True, "summaries": get_summaries(story_id, branch_id)})
+
+
+# ---------------------------------------------------------------------------
+# LLM Config API (provider / model switcher)
+# ---------------------------------------------------------------------------
+
+_LLM_CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
+
+
+@app.route("/api/config")
+def api_config_get():
+    """Return sanitized LLM config (no API keys exposed)."""
+    try:
+        with open(_LLM_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {"provider": "claude_cli"}
+
+    g = cfg.get("gemini", {})
+    # Count keys without exposing them
+    from gemini_key_manager import load_keys
+    key_count = len(load_keys(g))
+
+    return jsonify({
+        "ok": True,
+        "provider": cfg.get("provider", "claude_cli"),
+        "gemini": {
+            "model": g.get("model", "gemini-2.0-flash"),
+            "key_count": key_count,
+        },
+        "claude_cli": {
+            "model": cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929"),
+        },
+    })
+
+
+@app.route("/api/config", methods=["POST"])
+def api_config_set():
+    """Update provider and/or model. Writes to llm_config.json."""
+    data = request.get_json(force=True)
+
+    try:
+        with open(_LLM_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {"provider": "claude_cli"}
+
+    if "provider" in data:
+        cfg["provider"] = data["provider"]
+
+    if "gemini" in data and isinstance(data["gemini"], dict):
+        if "gemini" not in cfg:
+            cfg["gemini"] = {}
+        if "model" in data["gemini"]:
+            cfg["gemini"]["model"] = data["gemini"]["model"]
+
+    if "claude_cli" in data and isinstance(data["claude_cli"], dict):
+        if "claude_cli" not in cfg:
+            cfg["claude_cli"] = {}
+        if "model" in data["claude_cli"]:
+            cfg["claude_cli"]["model"] = data["claude_cli"]["model"]
+
+    with open(_LLM_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+    log.info("api_config_set: updated — provider=%s", cfg.get("provider"))
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
