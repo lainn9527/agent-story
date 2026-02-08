@@ -1260,9 +1260,10 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   }
 
   if (forcePreserve) {
-    container.scrollTop = savedScrollTop;
+    // Keep current scroll position — user may have scrolled during streaming
+    const currentScroll = container.scrollTop;
     requestAnimationFrame(() => {
-      container.scrollTop = savedScrollTop;
+      container.scrollTop = currentScroll;
       $messages.style.minHeight = "";
       fadeIn();
     });
@@ -1502,7 +1503,7 @@ async function regenerateGmMessage(msg, msgEl) {
   const contentEl = msgEl.querySelector(".content");
   const actionBtn = msgEl.querySelector(".msg-action-btn");
   if (contentEl) {
-    contentEl.textContent = "";
+    contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
   }
   if (actionBtn) actionBtn.style.display = "none";
   $sendBtn.disabled = true;
@@ -2391,7 +2392,7 @@ async function sendMessage() {
 
   const contentEl = document.createElement("div");
   contentEl.className = "content";
-  contentEl.textContent = "";
+  contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
 
   gmEl.appendChild(roleTag);
   gmEl.appendChild(contentEl);
