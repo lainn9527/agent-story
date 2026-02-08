@@ -441,8 +441,8 @@ def execute_turn(
     # 11. Trigger compaction if due
     recap = load_recap(story_id, branch_id)
     if should_compact(recap, len(full_timeline) + 1):
-        full_timeline.append(gm_msg)
-        compact_async(story_id, branch_id, full_timeline)
+        tl = list(full_timeline) + [gm_msg]
+        compact_async(story_id, branch_id, tl)
 
     return gm_response
 
