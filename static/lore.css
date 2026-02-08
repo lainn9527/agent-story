@@ -480,6 +480,60 @@ body.lore-page {
   background: var(--bg-user);
 }
 
+/* ---------- Grounding (Google Search sources) ---------- */
+.grounding-section {
+  margin-top: 8px;
+  font-size: 0.82rem;
+}
+.grounding-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  cursor: default;
+}
+.grounding-icon {
+  font-size: 0.85rem;
+}
+.grounding-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 2px 0;
+  margin-left: 10px;
+}
+.grounding-toggle:hover {
+  text-decoration: underline;
+}
+.grounding-toggle.expanded {
+  opacity: 0.7;
+}
+.grounding-source-list {
+  margin-top: 4px;
+  padding-left: 4px;
+}
+.grounding-source-list.collapsed {
+  display: none;
+}
+.grounding-source-item {
+  padding: 2px 0;
+  line-height: 1.5;
+}
+.grounding-source-item a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+.grounding-source-item a:hover {
+  text-decoration: underline;
+}
+.grounding-source-domain {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
 /* Streaming indicator */
 .chat-msg .streaming-cursor::after {
   content: "▋";

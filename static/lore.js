@@ -581,6 +581,70 @@
     return card;
   }
 
+  /** Build a grounding section (search indicator + collapsible source list) */
+  function buildGroundingSection(grounding) {
+    if (!grounding || (!grounding.sources?.length && !grounding.searchQueries?.length)) {
+      return null;
+    }
+
+    const section = document.createElement("div");
+    section.className = "grounding-section";
+
+    // Search indicator
+    const indicator = document.createElement("div");
+    indicator.className = "grounding-indicator";
+    const icon = document.createElement("span");
+    icon.className = "grounding-icon";
+    icon.textContent = "\uD83D\uDD0D";
+    indicator.appendChild(icon);
+    const label = document.createElement("span");
+    label.textContent = " \u5DF2\u641C\u5C0B\u7DB2\u8DEF";
+    indicator.appendChild(label);
+    if (grounding.searchQueries && grounding.searchQueries.length > 0) {
+      indicator.title = grounding.searchQueries.join(", ");
+    }
+    section.appendChild(indicator);
+
+    // Source list (collapsible)
+    const sources = grounding.sources || [];
+    if (sources.length > 0) {
+      const toggle = document.createElement("button");
+      toggle.className = "grounding-toggle";
+      toggle.textContent = `\u4F86\u6E90 (${sources.length})`;
+      section.appendChild(toggle);
+
+      const list = document.createElement("div");
+      list.className = "grounding-source-list collapsed";
+
+      for (const src of sources) {
+        const item = document.createElement("div");
+        item.className = "grounding-source-item";
+        const link = document.createElement("a");
+        link.href = src.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = src.title || src.domain || src.url;
+        item.appendChild(link);
+        if (src.domain) {
+          const domain = document.createElement("span");
+          domain.className = "grounding-source-domain";
+          domain.textContent = ` \u2014 ${src.domain}`;
+          item.appendChild(domain);
+        }
+        list.appendChild(item);
+      }
+
+      section.appendChild(list);
+
+      toggle.addEventListener("click", () => {
+        list.classList.toggle("collapsed");
+        toggle.classList.toggle("expanded");
+      });
+    }
+
+    return section;
+  }
+
   function finishStreaming() {
     isStreaming = false;
     streamAbortController = null;
@@ -611,6 +675,7 @@
 
     let fullText = "";
     let proposals = [];
+    let grounding = null;
     let renderTimer = null;
     let aborted = false;
 
@@ -668,6 +733,7 @@
           } else if (event.type === "done") {
             fullText = event.response || fullText;
             proposals = event.proposals || [];
+            grounding = event.grounding || null;
           } else if (event.type === "error") {
             fullText += `\n[Error: ${event.message}]`;
           }
@@ -688,6 +754,11 @@
       msgBody.textContent = fullText;
     } else {
       msgBody.innerHTML = renderMarkdown(fullText);
+    }
+
+    if (grounding) {
+      const groundingEl = buildGroundingSection(grounding);
+      if (groundingEl) msgDiv.appendChild(groundingEl);
     }
 
     if (proposals.length > 0) {
