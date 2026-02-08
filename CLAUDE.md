@@ -190,8 +190,12 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - CJK search uses bigram (2-char) + trigram (3-char) keyword scoring, not FTS5 tokenizer
 - System prompt uses double-braces `{{}}` for literal braces (Python `.format()`)
 
+## Development Guidelines
+- **This machine is the production server.** Port 5051 is reserved for the live instance. When testing locally, always use a different port (e.g. `PORT=5052 python app.py`). Never bind to 5051 during development.
+- **Use `claude_cli` provider for testing.** Gemini free-tier keys are shared with production and rate-limited. Set `"provider": "claude_cli"` in your local `llm_config.json` to avoid burning Gemini quota.
+
 ## Code Style
 - Python: standard Flask patterns, all helpers take `story_id`
 - JS: vanilla, no framework, no build step
-- CSS: light theme, CSS variables for theming
+- CSS: dark theme, CSS variables for theming
 - Prefer editing existing files over creating new ones
