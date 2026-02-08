@@ -1656,7 +1656,6 @@ async function loadSummaries() {
     renderSummaryDashboard(summaries);
     // If modal is open, refresh timeline too
     if (!document.getElementById("summary-modal").classList.contains("hidden")) {
-      _cachedSummaries = summaries;
       if (summaries.length) renderSummaryTimeline(summaries);
     }
   } catch (e) { /* ignore */ }
@@ -1701,10 +1700,7 @@ function renderSummaryDashboard(summaries) {
 // ---------------------------------------------------------------------------
 // Summary Timeline Modal
 // ---------------------------------------------------------------------------
-let _cachedSummaries = [];
-
 function openSummaryModal(summaries) {
-  _cachedSummaries = summaries;
   const modal = document.getElementById("summary-modal");
   modal.classList.remove("hidden");
   renderSummaryTimeline(summaries);
@@ -1718,7 +1714,7 @@ function renderSummaryTimeline(summaries) {
   const metricsEl = document.getElementById("summary-modal-metrics");
   const bodyEl = document.getElementById("summary-modal-timeline");
   bodyEl.innerHTML = "";
-  if (!summaries.length) return;
+  if (!summaries.length) { metricsEl.innerHTML = ""; return; }
 
   // Metrics
   const latest = summaries[summaries.length - 1];
@@ -1727,7 +1723,7 @@ function renderSummaryTimeline(summaries) {
     <span class="stm-metric-sep">\u00B7</span>
     <span class="stm-metric"><b>${latest.dungeon_count || 0}</b> 副本</span>
     <span class="stm-metric-sep">\u00B7</span>
-    <span class="stm-metric stm-phase-${latest.phase || 'hub'}">${latest.phase === 'dungeon' ? '副本中' : '主神空間'}</span>`;
+    <span class="stm-metric stm-phase-${latest.phase === 'dungeon' ? 'dungeon' : 'hub'}">${latest.phase === 'dungeon' ? '副本中' : '主神空間'}</span>`;
 
   // Vertical timeline (chronological, oldest first)
   const timeline = document.createElement("div");
