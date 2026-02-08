@@ -57,6 +57,7 @@ LEGACY_NEW_MESSAGES_PATH = os.path.join(DATA_DIR, "new_messages.json")
 
 DEFAULT_CHARACTER_STATE = {
     "name": "Eddy",
+    "current_phase": "主神空間",
     "gene_lock": "未開啟（進度 15%）",
     "physique": "普通人類（稍強）",
     "spirit": "普通人類（偏高）",
@@ -77,6 +78,7 @@ DEFAULT_CHARACTER_STATE = {
 DEFAULT_CHARACTER_SCHEMA = {
     "fields": [
         {"key": "name", "label": "姓名", "type": "text"},
+        {"key": "current_phase", "label": "階段", "type": "text"},
         {"key": "gene_lock", "label": "基因鎖", "type": "text"},
         {"key": "physique", "label": "體質", "type": "text"},
         {"key": "spirit", "label": "精神力", "type": "text"},
@@ -88,8 +90,10 @@ DEFAULT_CHARACTER_SCHEMA = {
         {"key": "completed_missions", "label": "已完成任務", "state_add_key": "completed_missions_add"},
         {"key": "relationships", "label": "人際關係", "type": "map"},
     ],
-    "direct_overwrite_keys": ["gene_lock", "physique", "spirit", "current_status"],
+    "direct_overwrite_keys": ["gene_lock", "physique", "spirit", "current_status", "current_phase"],
 }
+
+VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +248,9 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
         state = _load_json(default_path, {})
     if not state:
         state = copy.deepcopy(DEFAULT_CHARACTER_STATE)
+    # Backfill current_phase for legacy branches
+    if "current_phase" not in state:
+        state["current_phase"] = "主神空間"
     _save_json(path, state)
     return state
 
@@ -647,9 +654,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 列表型欄位用 `_add` / `_remove` 後綴（如 `inventory_add`, `inventory_remove`）\n"
                 "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
                 "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
+                "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
-                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
-                '- 角色死亡時 `current_status` 設為 `"end"`\n'
+                "- **禁止**新增臨時性/場景性欄位（如 threat_level, combat_status, escape_options 等一次性描述）\n"
+                '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
                 "格式：只填有變化的欄位。\n\n"
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
@@ -797,6 +805,11 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     1. Immediately applies the raw update (never blocks)
     2. Kicks off background LLM normalization for non-standard fields
     """
+    # Soft-validate current_phase (log only, never block)
+    phase = update.get("current_phase")
+    if phase and phase not in VALID_PHASES:
+        log.warning("Invalid current_phase '%s' (expected one of %s)", phase, VALID_PHASES)
+
     schema = _load_character_schema(story_id)
 
     # Apply immediately with raw update
@@ -1170,6 +1183,8 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     gm_response, state_updates = _extract_state_tag(gm_response)
     for state_update in state_updates:
         _apply_state_update(story_id, branch_id, state_update)
+    if not state_updates:
+        log.warning("GM response missing STATE tag (msg_index=%d)", msg_index)
 
     gm_response, lore_entries = _extract_lore_tag(gm_response)
     for lore_entry in lore_entries:
