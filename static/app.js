@@ -264,6 +264,20 @@ function isAutoBranch(branchId) {
   return branchId && branchId.startsWith("auto_");
 }
 
+function updateBranchIndicator() {
+  const $indicator = document.getElementById("branch-indicator");
+  if (!$indicator) return;
+
+  const branch = branches[currentBranchId];
+  if (currentBranchId === "main") {
+    $indicator.textContent = "main";
+  } else if (branch && branch.name) {
+    $indicator.textContent = branch.name;
+  } else {
+    $indicator.textContent = currentBranchId;
+  }
+}
+
 function startLivePolling(branchId) {
   stopLivePolling();
   _livePollingBranchId = branchId;
@@ -419,6 +433,7 @@ async function init() {
     // 3. Load branches
     updateInitStatus("載入分支資訊…");
     await loadBranches();
+    updateBranchIndicator();
 
     // 4. Load messages for active branch
     updateInitStatus("載入對話紀錄…");
@@ -537,6 +552,7 @@ async function switchToStory(storyId) {
 
     // Reload branches, messages, status for the new story
     await loadBranches();
+    updateBranchIndicator();
     await loadMessages(currentBranchId);
     const status = await API.status(currentBranchId);
     renderCharacterStatus(status);
@@ -556,6 +572,7 @@ async function loadBranches() {
   currentBranchId = result.active_branch_id || currentBranchId;
   // Show/hide promote button
   $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
+  updateBranchIndicator();
 }
 
 function renderBranchList() {
@@ -842,6 +859,7 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
   await API.switchBranch(branchId);
   currentBranchId = branchId;
   $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
+  updateBranchIndicator();
 
   if (scrollToIndex != null || preserveScroll) {
     $messages.style.minHeight = $messages.scrollHeight + "px";

@@ -85,6 +85,19 @@ body {
   color: var(--text-dim);
 }
 
+.branch-indicator {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  font-family: 'Monaco', 'Menlo', monospace;
+  letter-spacing: 0.02em;
+}
+
 #live-indicator {
   display: inline-flex;
   align-items: center;

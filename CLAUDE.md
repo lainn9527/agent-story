@@ -194,6 +194,24 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - **This machine is the production server.** Port 5051 is reserved for the live instance. When testing locally, always use a different port (e.g. `PORT=5052 python app.py`). Never bind to 5051 during development.
 - **Use `claude_cli` provider for testing.** Gemini free-tier keys are shared with production and rate-limited. Set `"provider": "claude_cli"` in your local `llm_config.json` to avoid burning Gemini quota.
 
+### Git Workflow
+- **Default branch**: `main`
+- **Always use git worktree.** Create a new branch based on `main` in a worktree for every task. Never work directly on `main`.
+  ```bash
+  git worktree add ../story-<branch-name> -b <branch-name> main
+  ```
+- **Test before merging.** After implementation, run tests and include test results in the PR. For testing, you can use auto-play (`python auto_play.py`) or create a new branch with a `test` prefix in the web UI.
+- **Open a PR** when the work is ready for review.
+- **PR Review process**: Spawn 4 subagents (BE, FE, UI/UX, Game Director) to review the PR and leave comments via `gh pr review` / `gh pr comment`.
+  - If any reviewer leaves actionable comments, address them and reply on the same comment thread.
+  - Repeat until all reviewers have no remaining issues.
+- **Merge process**: Once all reviews pass, rebase onto `main`, merge the PR, and clean up the worktree.
+  ```bash
+  git rebase main
+  gh pr merge <pr-number> --rebase --delete-branch
+  git worktree remove ../story-<branch-name>
+  ```
+
 ## Code Style
 - Python: standard Flask patterns, all helpers take `story_id`
 - JS: vanilla, no framework, no build step
