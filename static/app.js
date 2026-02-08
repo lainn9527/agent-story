@@ -1146,13 +1146,15 @@ async function _btDeleteSelected() {
   const failures = [];
   for (const id of deduped) {
     try {
-      await API.deleteBranch(id);
+      const res = await API.deleteBranch(id);
+      if (!res.ok) failures.push(id);
     } catch (e) {
       failures.push(id);
     }
   }
   if (failures.length > 0) {
-    alert(`${failures.length} 個分支刪除失敗：${failures.join(", ")}`);
+    const names = failures.map(id => branches[id]?.name || id).join(", ");
+    alert(`${failures.length} 個分支刪除失敗：${names}`);
   }
   _btSelected.clear();
   await loadBranches();
