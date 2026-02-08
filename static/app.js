@@ -469,6 +469,7 @@ async function init() {
     updateInitStatus("載入角色狀態…");
     const status = await API.status(currentBranchId);
     renderCharacterStatus(status);
+    updateWorldDayDisplay(status.world_day);
 
     // 6. Load NPCs, events, and summaries
     updateInitStatus("載入角色與事件…");
@@ -2060,7 +2061,9 @@ async function sendMessage() {
           smartScrollToBottom();
         }
 
-        renderCharacterStatus(await API.status(currentBranchId));
+        const status = await API.status(currentBranchId);
+        renderCharacterStatus(status);
+        updateWorldDayDisplay(status.world_day);
         loadNpcs();
         loadEvents();
       },
