@@ -656,7 +656,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
                 "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
-                "- **禁止**新增臨時性/場景性欄位（如 threat_level, combat_status, escape_options 等一次性描述）\n"
+                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
                 "格式：只填有變化的欄位。\n\n"
                 "## 輸出\n"
@@ -1184,7 +1184,7 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     for state_update in state_updates:
         _apply_state_update(story_id, branch_id, state_update)
     if not state_updates:
-        log.warning("GM response missing STATE tag (msg_index=%d)", msg_index)
+        log.info("GM response missing STATE tag (msg_index=%d)", msg_index)
 
     gm_response, lore_entries = _extract_lore_tag(gm_response)
     for lore_entry in lore_entries:
