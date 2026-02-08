@@ -825,10 +825,19 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
   }
 
   // Add fade-out transition for smooth variant switching
-  if (preserveScroll || forcePreserve) {
+  const useFade = preserveScroll || forcePreserve;
+  if (useFade) {
     container.style.transition = 'opacity 0.15s ease-out';
     container.style.opacity = '0.4';
   }
+
+  const fadeIn = () => {
+    if (!useFade) return;
+    container.style.opacity = '1';
+    setTimeout(() => { container.style.transition = ''; }, 150);
+  };
+
+  try {
 
   await API.switchBranch(branchId);
   currentBranchId = branchId;
@@ -872,12 +881,7 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
     requestAnimationFrame(() => {
       container.scrollTop = savedScrollTop;
       $messages.style.minHeight = "";
-      // Fade back in
-      container.style.opacity = '1';
-      // Remove transition after animation completes
-      setTimeout(() => {
-        container.style.transition = '';
-      }, 150);
+      fadeIn();
     });
     return;
   }
@@ -886,26 +890,21 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
     if (isAtBottom) {
       scrollToBottom();
       $messages.style.minHeight = "";
-      // Fade back in
-      requestAnimationFrame(() => {
-        container.style.opacity = '1';
-        setTimeout(() => {
-          container.style.transition = '';
-        }, 150);
-      });
+      requestAnimationFrame(() => { fadeIn(); });
     } else {
       container.scrollTop = savedScrollTop;
       requestAnimationFrame(() => {
         container.scrollTop = savedScrollTop;
         $messages.style.minHeight = "";
-        // Fade back in
-        container.style.opacity = '1';
-        setTimeout(() => {
-          container.style.transition = '';
-        }, 150);
+        fadeIn();
       });
     }
     return;
+  }
+
+  } catch (err) {
+    fadeIn();
+    throw err;
   }
 
   if (scrollToIndex != null) {
@@ -1956,17 +1955,17 @@ async function sendMessage() {
 
   gmEl.appendChild(roleTag);
   gmEl.appendChild(contentEl);
+
+  // Capture scroll position BEFORE appending/scrolling so the check is meaningful
+  const container = document.getElementById("messages");
+  const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+  let userScrolledDuringStream = false;
+
   $messages.appendChild(gmEl);
   scrollToBottom();
 
-  // Track scroll intent during streaming
-  const container = document.getElementById("messages");
-  const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
-  let userScrolledDuringStream = false;
-
   const scrollHandler = () => {
-    // If user scrolls during streaming, mark it
-    const currentlyAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+    const currentlyAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
     if (!currentlyAtBottom) {
       userScrolledDuringStream = true;
     }
