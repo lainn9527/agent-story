@@ -112,6 +112,21 @@ body.lore-page {
   border-color: var(--accent);
 }
 
+#lore-toggle-all-btn {
+  padding: 6px 10px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#lore-toggle-all-btn:hover {
+  color: var(--text);
+  background: var(--bg-user);
+}
+
 #lore-add-btn {
   padding: 6px 14px;
   background: var(--accent);
@@ -172,6 +187,37 @@ body.lore-page {
   margin-left: 4px;
 }
 
+/* Sub-groups */
+.lore-subgroup {
+  margin-bottom: 2px;
+}
+.lore-subgroup-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px 5px 28px;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+  font-size: 0.85rem;
+  user-select: none;
+}
+.lore-subgroup-header:hover {
+  background: var(--bg-user);
+}
+.lore-subgroup.collapsed .lore-cat-arrow {
+  transform: rotate(-90deg);
+}
+.lore-subgroup.collapsed .lore-subgroup-entries {
+  display: none;
+}
+.lore-subgroup-entries .lore-entry {
+  padding-left: 42px;
+}
+.lore-subgroup-entries .lore-entry-preview {
+  padding-left: 42px;
+}
+
 .lore-entry {
   display: flex;
   align-items: center;
@@ -223,6 +269,8 @@ body.lore-page {
   white-space: pre-wrap;
   word-break: break-word;
   border-bottom: 1px solid var(--border);
+  max-height: 400px;
+  overflow-y: auto;
 }
 .lore-entry.selected + .lore-entry-preview {
   display: block;
