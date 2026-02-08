@@ -2483,19 +2483,23 @@ def api_branches_delete(branch_id):
     deleted_parent = branch.get("parent_branch_id", "main") or "main"
     deleted_bp = branch.get("branch_point_index")
 
-    # Find direct non-deleted, non-merged children
-    children = [
+    # Reparent ALL children (including deleted/merged) to prevent dangling refs
+    all_children = [
         b for b in branches.values()
         if b.get("parent_branch_id") == branch_id
-        and not b.get("deleted")
-        and not b.get("merged")
     ]
 
-    if children:
+    # Only materialize messages for active (non-deleted, non-merged) children
+    active_children = [
+        b for b in all_children
+        if not b.get("deleted") and not b.get("merged")
+    ]
+
+    if active_children:
         # Load deleted branch's delta messages before we remove the branch dir
         deleted_delta = _load_json(_story_messages_path(story_id, branch_id), [])
 
-        for child in children:
+        for child in active_children:
             child_id = child["id"]
             child_bp = child.get("branch_point_index")
 
@@ -2515,8 +2519,9 @@ def api_branches_delete(branch_id):
                     pass
             # else: blank child (bp=-1) — no messages inherited, bp stays -1
 
-            # Always reparent to grandparent
-            child["parent_branch_id"] = deleted_parent
+    # Reparent all children (including deleted/merged) to grandparent
+    for child in all_children:
+        child["parent_branch_id"] = deleted_parent
 
     # Delete the branch itself (preserve existing was_main soft-delete logic)
     if branch.get("was_main"):
@@ -2534,7 +2539,7 @@ def api_branches_delete(branch_id):
 
     _save_tree(story_id, tree)
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "switch_to": deleted_parent})
 
 
 # ---------------------------------------------------------------------------
