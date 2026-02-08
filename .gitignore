@@ -1,2 +1,20 @@
-data/
 __pycache__/
+
+# ── Data directory ──
+# Track story config templates (system_prompt, schema, world_lore, default state)
+# Ignore everything else (runtime state, branches, databases, images, logs)
+
+# Ignore all data by default
+data/*
+
+# But allow story directories
+!data/stories/
+data/stories/*
+!data/stories/*/
+
+# Track only story config templates
+data/stories/*/*
+!data/stories/*/system_prompt.txt
+!data/stories/*/character_schema.json
+!data/stories/*/default_character_state.json
+!data/stories/*/world_lore.json
