@@ -260,6 +260,10 @@ let characterSchema = {};
 let _livePollingTimer = null;
 let _livePollingBranchId = null;
 
+// Incomplete branch polling state (edit/regen interrupted)
+let _incompletePollTimer = null;
+let _incompletePollBranchId = null;
+
 function isAutoBranch(branchId) {
   return branchId && branchId.startsWith("auto_");
 }
@@ -362,6 +366,81 @@ function stopLivePolling() {
   if ($sendBtn) $sendBtn.disabled = false;
 
   updateLiveIndicator(false, null);
+}
+
+function startIncompletePolling(branchId, parentBranchId) {
+  stopIncompletePolling();
+  _incompletePollBranchId = branchId;
+  const startTime = Date.now();
+
+  const $input = document.getElementById("user-input");
+  const $sendBtn = document.getElementById("send-btn");
+  if ($input) { $input.disabled = true; $input.placeholder = "等待 GM 回應中..."; }
+  if ($sendBtn) $sendBtn.disabled = true;
+
+  const poll = async () => {
+    if (_incompletePollBranchId !== branchId) return;
+    try {
+      const data = await API.messages(branchId, 0, 99999);
+      if (_incompletePollBranchId !== branchId) return;
+
+      if (!data.incomplete) {
+        // Response arrived — reload branch fully
+        stopIncompletePolling();
+        await loadMessages(branchId);
+        scrollToBottom();
+        return;
+      }
+
+      // Timeout after 60s — update banner
+      if (Date.now() - startTime > 60000) {
+        const banner = document.getElementById("incomplete-banner");
+        if (banner) {
+          banner.querySelector(".incomplete-banner-text").textContent = "回應可能已中斷。";
+        }
+        stopIncompletePolling();
+        return;
+      }
+    } catch (e) { /* ignore, retry next cycle */ }
+    if (_incompletePollBranchId === branchId) {
+      _incompletePollTimer = setTimeout(poll, 3000);
+    }
+  };
+  _incompletePollTimer = setTimeout(poll, 3000);
+}
+
+function stopIncompletePolling() {
+  if (_incompletePollTimer) {
+    clearTimeout(_incompletePollTimer);
+    _incompletePollTimer = null;
+  }
+  _incompletePollBranchId = null;
+
+  const $input = document.getElementById("user-input");
+  const $sendBtn = document.getElementById("send-btn");
+  if ($input) { $input.disabled = false; $input.placeholder = "輸入你的行動..."; }
+  if ($sendBtn) $sendBtn.disabled = false;
+}
+
+function showIncompleteBanner(incomplete) {
+  removeIncompleteBanner();
+  const banner = document.createElement("div");
+  banner.id = "incomplete-banner";
+  banner.className = "incomplete-banner";
+  banner.innerHTML =
+    `<span class="incomplete-banner-text">此分支的 GM 回應尚未完成，可能仍在處理中…</span>` +
+    `<button class="incomplete-banner-btn">回到上一分支</button>`;
+  banner.querySelector(".incomplete-banner-btn").addEventListener("click", () => {
+    stopIncompletePolling();
+    removeIncompleteBanner();
+    switchToBranch(incomplete.parent_branch_id);
+  });
+  document.getElementById("messages").appendChild(banner);
+}
+
+function removeIncompleteBanner() {
+  const el = document.getElementById("incomplete-banner");
+  if (el) el.remove();
 }
 
 function updateLiveIndicator(isLive, autoState) {
@@ -1341,6 +1420,15 @@ async function loadMessages(branchId, { tail } = {}) {
   siblingGroups = msgResult.sibling_groups || {};
   renderMessages(allMessages);
   updateWorldDayDisplay(msgResult.world_day);
+
+  // Handle incomplete branch (edit/regen interrupted before GM response)
+  if (msgResult.incomplete) {
+    showIncompleteBanner(msgResult.incomplete);
+    startIncompletePolling(branchId, msgResult.incomplete.parent_branch_id);
+  } else {
+    removeIncompleteBanner();
+    stopIncompletePolling();
+  }
 }
 
 // ---------------------------------------------------------------------------

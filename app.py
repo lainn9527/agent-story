@@ -1438,6 +1438,19 @@ def api_messages():
         result["auto_play_state"] = auto_state
         result["summary_count"] = len(get_summaries(story_id, branch_id))
 
+    # Detect incomplete branch (edit/regen interrupted before GM response saved)
+    branch_meta = tree.get("branches", {}).get(branch_id, {})
+    if (branch_id != "main"
+            and not branch_id.startswith("auto_")
+            and not branch_meta.get("blank")
+            and not any(m.get("role") == "gm" for m in branch_delta)):
+        parent_id = branch_meta.get("parent_branch_id", "main")
+        parent_meta = tree.get("branches", {}).get(parent_id, {})
+        result["incomplete"] = {
+            "parent_branch_id": parent_id,
+            "parent_branch_name": parent_meta.get("name", "主時間線" if parent_id == "main" else parent_id),
+        }
+
     return jsonify(result)
 
 
@@ -3191,7 +3204,54 @@ def _init_lore_indexes():
             rebuild_lore_index(story_dir_name)
 
 
+def _cleanup_incomplete_branches():
+    """Remove branches orphaned by server crash (no GM response saved)."""
+    if not os.path.exists(STORIES_DIR):
+        return
+    for story_dir_name in os.listdir(STORIES_DIR):
+        tree_path = os.path.join(STORIES_DIR, story_dir_name, "timeline_tree.json")
+        if not os.path.exists(tree_path):
+            continue
+        tree = _load_json(tree_path, {})
+        branches = tree.get("branches", {})
+        modified = False
+        to_delete = []
+
+        for bid, branch in branches.items():
+            if bid == "main":
+                continue
+            if branch.get("deleted") or branch.get("blank") or branch.get("merged"):
+                continue
+            if bid.startswith("auto_"):
+                continue
+            # Check messages.json in the branch directory (avoid _branch_dir which calls makedirs)
+            msgs_path = os.path.join(STORIES_DIR, story_dir_name, "branches", bid, "messages.json")
+            msgs = _load_json(msgs_path, [])
+            has_gm = any(m.get("role") == "gm" for m in msgs)
+            if not has_gm:
+                to_delete.append(bid)
+
+        for bid in to_delete:
+            parent = branches[bid].get("parent_branch_id", "main")
+            # Reparent children to deleted branch's parent
+            for other_bid, other_branch in branches.items():
+                if other_branch.get("parent_branch_id") == bid:
+                    other_branch["parent_branch_id"] = parent
+            del branches[bid]
+            if tree.get("active_branch_id") == bid:
+                tree["active_branch_id"] = parent
+            bdir = os.path.join(STORIES_DIR, story_dir_name, "branches", bid)
+            if os.path.isdir(bdir):
+                shutil.rmtree(bdir)
+            log.warning("Startup cleanup: removed incomplete branch %s from story %s (no GM response)", bid, story_dir_name)
+            modified = True
+
+        if modified:
+            _save_json(tree_path, tree)
+
+
 if __name__ == "__main__":
     _ensure_data_dir()
+    _cleanup_incomplete_branches()
     _init_lore_indexes()
     app.run(debug=True, host='0.0.0.0', port=5051)

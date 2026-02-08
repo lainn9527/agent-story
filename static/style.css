@@ -141,6 +141,36 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+.incomplete-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.3);
+  border-radius: 8px;
+  text-align: center;
+}
+.incomplete-banner-text {
+  color: #ffaa00;
+  font-size: 0.9rem;
+}
+.incomplete-banner-btn {
+  padding: 6px 16px;
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  border-radius: 6px;
+  background: rgba(255, 170, 0, 0.15);
+  color: #ffaa00;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.incomplete-banner-btn:hover {
+  background: rgba(255, 170, 0, 0.25);
+}
+
 .auto-branch-badge {
   padding: 1px 6px;
   border-radius: 4px;
