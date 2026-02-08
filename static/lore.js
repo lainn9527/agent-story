@@ -819,20 +819,25 @@
         ? topics.map((t) => `「${t}」`).join("\n")
         : topics.slice(0, 5).map((t) => `「${t}」`).join("\n") + `\n...及其他 ${topics.length - 5} 項`;
       if (!confirm(`確定要刪除以下 ${topics.length} 個設定？\n\n${preview}`)) return;
+      $batchDeleteBtn.disabled = true;
+      $batchDeleteBtn.textContent = `刪除中 0/${topics.length}...`;
       const failures = [];
-      for (const topic of topics) {
+      for (let i = 0; i < topics.length; i++) {
+        $batchDeleteBtn.textContent = `刪除中 ${i + 1}/${topics.length}...`;
         try {
-          const res = await deleteEntry(topic);
+          const res = await deleteEntry(topics[i]);
           if (res.ok) {
-            checkedTopics.delete(topic);
-            selectedTopics.delete(topic);
+            checkedTopics.delete(topics[i]);
+            selectedTopics.delete(topics[i]);
           } else {
-            failures.push(topic);
+            failures.push(topics[i]);
           }
         } catch {
-          failures.push(topic);
+          failures.push(topics[i]);
         }
       }
+      $batchDeleteBtn.disabled = false;
+      $batchDeleteBtn.textContent = "刪除所選";
       if (failures.length > 0) {
         alert(`以下項目刪除失敗：${failures.join("、")}`);
       }
