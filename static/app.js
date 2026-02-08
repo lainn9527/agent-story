@@ -1238,9 +1238,13 @@ function showDeletePreviousBtn(oldBranchId) {
   btn.title = "刪除上一個結果";
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
-    await API.deleteBranch(oldBranchId);
-    await loadBranches();
-    await loadMessages();
+    try {
+      await API.deleteBranch(oldBranchId);
+      await loadBranches();
+      await loadMessages();
+    } catch (err) {
+      console.error("Failed to delete previous branch:", err);
+    }
     clearDeletePreviousBtn();
   });
 
