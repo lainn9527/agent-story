@@ -1,0 +1,6 @@
+{
+  "agents": [
+    {"branch_id": "auto_18f8d831", "max_turns": 200, "provider": "claude_cli"},
+    {"branch_id": "auto_a46a7941", "max_turns": 200, "provider": "claude_cli"}
+  ]
+}

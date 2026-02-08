@@ -1,0 +1,23 @@
+{
+  "active_branch_id": "branch_1c8cf517",
+  "branches": {
+    "main": {
+      "id": "main",
+      "name": "主時間線",
+      "parent_branch_id": null,
+      "branch_point_index": null,
+      "created_at": "2026-02-07T06:51:45.368495+00:00",
+      "session_id": null,
+      "character_state_file": "character_state_main.json"
+    },
+    "branch_1c8cf517": {
+      "id": "branch_1c8cf517",
+      "name": "Re: 感覺我在這個副本的形象,…",
+      "parent_branch_id": "main",
+      "branch_point_index": 56,
+      "created_at": "2026-02-07T09:09:31.373354+00:00",
+      "session_id": null,
+      "character_state_file": "character_state_branch_1c8cf517.json"
+    }
+  }
+}

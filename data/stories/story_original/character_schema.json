@@ -1,0 +1,60 @@
+{
+  "fields": [
+    {
+      "key": "name",
+      "label": "姓名",
+      "type": "text"
+    },
+    {
+      "key": "gene_lock",
+      "label": "基因鎖",
+      "type": "text"
+    },
+    {
+      "key": "physique",
+      "label": "體質",
+      "type": "text"
+    },
+    {
+      "key": "spirit",
+      "label": "精神力",
+      "type": "text"
+    },
+    {
+      "key": "reward_points",
+      "label": "獎勵點",
+      "type": "number",
+      "highlight": true,
+      "suffix": " 點"
+    },
+    {
+      "key": "current_status",
+      "label": "狀態",
+      "type": "text"
+    }
+  ],
+  "lists": [
+    {
+      "key": "inventory",
+      "label": "道具欄",
+      "state_add_key": "inventory_add",
+      "state_remove_key": "inventory_remove"
+    },
+    {
+      "key": "completed_missions",
+      "label": "已完成任務",
+      "state_add_key": "completed_missions_add"
+    },
+    {
+      "key": "relationships",
+      "label": "人際關係",
+      "type": "map"
+    }
+  ],
+  "direct_overwrite_keys": [
+    "gene_lock",
+    "physique",
+    "spirit",
+    "current_status"
+  ]
+}

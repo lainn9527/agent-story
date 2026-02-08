@@ -1,0 +1,10 @@
+{
+  "provider": "claude_cli",
+  "gemini": {
+    "api_key": "AIzaSyAQCsNd9CK7dP2KQ_9PzAsxvUiDf7za4Ug",
+    "model": "gemini-2.5-flash"
+  },
+  "claude_cli": {
+    "model": "claude-sonnet-4-5-20250929"
+  }
+}

@@ -1,0 +1,24 @@
+[2026-02-08 10:16:31] llm_bridge: provider override set to claude_cli
+[2026-02-08 10:16:31] Resuming from turn 203 on branch auto_18f8d831
+[2026-02-08 10:16:31] Auto-play started: story=story_original branch=auto_18f8d831
+[2026-02-08 10:16:31] llm_bridge: loaded config — provider=claude_cli
+[2026-02-08 10:16:56]     gemini_grounded_search: OK query_len=692 response_len=810
+[2026-02-08 10:16:56]     web_search_enrichment: got 810 chars
+[2026-02-08 10:16:57]     claude_bridge: calling CLI mode=resume prompt_len=5365
+[2026-02-08 10:18:00]     claude_bridge: OK in 63.0s response_len=2429
+[2026-02-08 10:18:15]     claude_bridge: calling CLI mode=resume prompt_len=4074
+[2026-02-08 10:18:46]     claude_bridge: OK in 30.2s response_len=1000
+[2026-02-08 10:19:01]     claude_bridge: calling CLI mode=resume prompt_len=4520
+[2026-02-08 10:21:23]     claude_bridge: OK in 142.1s response_len=2011
+[2026-02-08 10:21:52]     gemini_grounded_search: OK query_len=692 response_len=3536
+[2026-02-08 10:21:52]     web_search_enrichment: got 3536 chars
+[2026-02-08 10:21:52]     claude_bridge: calling CLI mode=resume prompt_len=8106
+[2026-02-08 10:23:13]     claude_bridge: OK in 80.9s response_len=2762
+[2026-02-08 10:23:29]     claude_bridge: calling CLI mode=resume prompt_len=4516
+[2026-02-08 10:24:41]     claude_bridge: OK in 72.3s response_len=2546
+[2026-02-08 10:24:58]     claude_bridge: calling CLI mode=resume prompt_len=4384
+[2026-02-08 10:26:47]     claude_bridge: OK in 109.7s response_len=3774
+[2026-02-08 10:27:14]     gemini_grounded_search: OK query_len=692 response_len=746
+[2026-02-08 10:27:14]     web_search_enrichment: got 746 chars
+[2026-02-08 10:27:15]     claude_bridge: calling CLI mode=resume prompt_len=5256
+[2026-02-08 10:28:23]     claude_bridge: OK in 68.4s response_len=2412
