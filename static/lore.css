@@ -218,6 +218,36 @@ body.lore-page {
   padding-left: 42px;
 }
 
+/* Batch action bar */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #3a2d2d;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 0.82rem;
+}
+.batch-bar.hidden { display: none; }
+.batch-bar #batch-count {
+  color: #db7f7f;
+  font-weight: 600;
+  margin-right: auto;
+}
+.batch-bar .btn-danger { padding: 4px 12px; font-size: 0.8rem; }
+.batch-bar .btn-secondary { padding: 4px 12px; font-size: 0.8rem; }
+
+/* Entry checkbox */
+.lore-entry-check {
+  width: 15px;
+  height: 15px;
+  margin-right: 6px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
 .lore-entry {
   display: flex;
   align-items: center;
@@ -336,9 +366,27 @@ body.lore-page {
 .chat-msg-content {
   font-size: 0.9rem;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
 }
+.chat-msg.user .chat-msg-content {
+  white-space: pre-wrap;
+}
+
+/* Markdown styles in chat */
+.chat-msg-content p { margin: 0 0 0.5em 0; }
+.chat-msg-content p:last-child { margin-bottom: 0; }
+.chat-msg-content ul, .chat-msg-content ol { margin: 0.3em 0; padding-left: 1.5em; }
+.chat-msg-content li { margin: 0.2em 0; }
+.chat-msg-content strong { color: var(--gold); }
+.chat-msg-content em { font-style: italic; }
+.chat-msg-content code { background: var(--input-bg); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+.chat-msg-content pre { background: var(--input-bg); padding: 10px; border-radius: var(--radius); overflow-x: auto; margin: 0.5em 0; white-space: pre-wrap; }
+.chat-msg-content pre code { padding: 0; background: none; }
+.chat-msg-content blockquote { border-left: 3px solid var(--accent); padding-left: 10px; margin: 0.5em 0; color: var(--text-dim); }
+.chat-msg-content h1, .chat-msg-content h2, .chat-msg-content h3 { color: var(--gold); margin: 0.5em 0 0.3em; }
+.chat-msg-content h1 { font-size: 1.1em; }
+.chat-msg-content h2 { font-size: 1em; }
+.chat-msg-content h3 { font-size: 0.95em; }
 
 /* Proposal cards */
 .proposal-cards {
@@ -480,6 +528,23 @@ body.lore-page {
 #chat-send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+#chat-stop-btn {
+  padding: 8px 14px;
+  background: #5a2d2d;
+  color: #db7f7f;
+  border: 1px solid #6b3333;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  cursor: pointer;
+  align-self: flex-end;
+}
+#chat-stop-btn:hover {
+  background: #6b3333;
+}
+#chat-stop-btn.hidden {
+  display: none;
 }
 
 /* ---------- Modal ---------- */

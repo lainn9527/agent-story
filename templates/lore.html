@@ -33,6 +33,11 @@
         <button id="lore-toggle-all-btn" title="全部展開/收起">&#x25BC;</button>
         <button id="lore-add-btn" title="新增設定">+ 新增</button>
       </div>
+      <div id="batch-bar" class="batch-bar hidden">
+        <span id="batch-count"></span>
+        <button id="batch-delete-btn" class="btn-danger">刪除所選</button>
+        <button id="batch-clear-btn" class="btn-secondary">取消選取</button>
+      </div>
       <div id="lore-list" class="panel-body">
         <!-- Populated by JS -->
       </div>
@@ -42,17 +47,12 @@
     <div id="lore-chat-panel" class="panel hidden-mobile">
       <div id="chat-messages" class="panel-body">
         <div class="chat-msg assistant">
-          <div class="chat-msg-content">歡迎使用世界設定管理助手。你可以：
-• 詢問現有設定的細節或矛盾
-• 請我幫你新增、修改或刪除設定
-• 討論設定間的一致性
-
-變更會即時同步到遊戲中，影響 GM 的下一次回覆。
-有什麼我能幫忙的嗎？</div>
+          <div class="chat-msg-content"><p>歡迎使用世界設定管理助手。你可以：</p><ul><li>詢問現有設定的細節或矛盾</li><li>請我幫你新增、修改或刪除設定</li><li>討論設定間的一致性</li></ul><p>變更會即時同步到遊戲中，影響 GM 的下一次回覆。<br>有什麼我能幫忙的嗎？</p></div>
         </div>
       </div>
       <div id="chat-input-area">
-        <textarea id="chat-input" placeholder="輸入訊息..." rows="2"></textarea>
+        <textarea id="chat-input" placeholder="輸入訊息... (Ctrl+Enter 送出)" rows="2"></textarea>
+        <button id="chat-stop-btn" class="hidden" title="停止輸出">停止</button>
         <button id="chat-send-btn" title="送出">送出</button>
       </div>
     </div>
@@ -83,6 +83,8 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
   <script src="/static/lore.js"></script>
 </body>
 </html>

@@ -12,7 +12,8 @@
   let categories = [];
   let collapsedCats = new Set(); // preserve collapsed state across re-renders
   let allCollapsed = true; // default: everything collapsed
-  let selectedTopic = null;
+  let selectedTopics = new Set(); // allow multiple expanded entries
+  let checkedTopics = new Set(); // for batch delete
   let chatMessages = []; // {role, content} history for LLM
   let isStreaming = false;
   let editingEntry = null; // null = create, {topic, ...} = edit
@@ -37,6 +38,11 @@
   const $modalClose = document.getElementById("modal-close");
   const $modalDelete = document.getElementById("modal-delete");
   const $storyName = document.getElementById("story-name");
+  const $chatStopBtn = document.getElementById("chat-stop-btn");
+  const $batchBar = document.getElementById("batch-bar");
+  const $batchCount = document.getElementById("batch-count");
+  const $batchDeleteBtn = document.getElementById("batch-delete-btn");
+  const $batchClearBtn = document.getElementById("batch-clear-btn");
 
   // ------------------------------------------------------------------
   // Helpers
@@ -50,6 +56,24 @@
   function truncate(str, len) {
     if (!str) return "";
     return str.length > len ? str.slice(0, len) + "..." : str;
+  }
+
+  /** Render markdown to sanitized HTML */
+  function renderMarkdown(text) {
+    if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined" && text) {
+      return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+    }
+    return escapeHtml(text || "");
+  }
+
+  /** Update batch action bar visibility */
+  function updateBatchBar() {
+    if (checkedTopics.size > 0) {
+      $batchBar.classList.remove("hidden");
+      $batchCount.textContent = `已選 ${checkedTopics.size} 項`;
+    } else {
+      $batchBar.classList.add("hidden");
+    }
   }
 
   // ------------------------------------------------------------------
@@ -172,8 +196,10 @@
 
   function renderEntryHtml(e, displayName) {
     const label = displayName || e.topic;
-    const sel = e.topic === selectedTopic ? " selected" : "";
+    const sel = selectedTopics.has(e.topic) ? " selected" : "";
+    const checked = checkedTopics.has(e.topic) ? " checked" : "";
     let html = `<div class="lore-entry${sel}" data-topic="${escapeHtml(e.topic)}">`;
+    html += `<input type="checkbox" class="lore-entry-check" data-topic="${escapeHtml(e.topic)}" aria-label="選取 ${escapeHtml(label)}"${checked}>`;
     html += `<span class="lore-entry-topic">${escapeHtml(label)}</span>`;
     html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
     html += `</div>`;
@@ -282,13 +308,25 @@
       });
     });
 
-    // Bind click handlers — entries
+    // Bind click handlers — entries (multiple selection)
     $loreList.querySelectorAll(".lore-entry").forEach((el) => {
       el.addEventListener("click", (ev) => {
         if (ev.target.closest(".lore-entry-edit")) return;
+        if (ev.target.closest(".lore-entry-check")) return;
         const topic = el.dataset.topic;
-        selectedTopic = selectedTopic === topic ? null : topic;
+        if (selectedTopics.has(topic)) selectedTopics.delete(topic);
+        else selectedTopics.add(topic);
         renderLoreList($searchInput.value);
+      });
+    });
+
+    // Bind checkbox handlers
+    $loreList.querySelectorAll(".lore-entry-check").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const topic = cb.dataset.topic;
+        if (cb.checked) checkedTopics.add(topic);
+        else checkedTopics.delete(topic);
+        updateBatchBar();
       });
     });
 
@@ -401,8 +439,9 @@
       alert(res.error || "刪除失敗");
       return;
     }
+    const deletedTopic = editingEntry.topic;
     closeModal();
-    selectedTopic = null;
+    selectedTopics.delete(deletedTopic);
     await refreshLoreList();
   }
 
@@ -411,6 +450,15 @@
   // ------------------------------------------------------------------
   async function refreshLoreList() {
     await fetchLoreAll();
+    // Prune stale checked/selected entries
+    const existing = new Set(allEntries.map((e) => e.topic));
+    for (const t of checkedTopics) {
+      if (!existing.has(t)) checkedTopics.delete(t);
+    }
+    for (const t of selectedTopics) {
+      if (!existing.has(t)) selectedTopics.delete(t);
+    }
+    updateBatchBar();
     renderLoreList($searchInput.value);
   }
 
@@ -428,7 +476,11 @@
 
     const body = document.createElement("div");
     body.className = "chat-msg-content";
-    body.textContent = content;
+    if (role === "assistant" && content) {
+      body.innerHTML = renderMarkdown(content);
+    } else {
+      body.textContent = content;
+    }
     div.appendChild(body);
 
     if (proposals && proposals.length > 0) {
@@ -533,6 +585,7 @@
     isStreaming = false;
     streamAbortController = null;
     $chatSendBtn.disabled = false;
+    $chatStopBtn.classList.add("hidden");
   }
 
   async function sendChat() {
@@ -547,8 +600,10 @@
     chatMessages.push({ role: "user", content: text });
     appendChatMessage("user", text);
     $chatInput.value = "";
+    $chatInput.focus();
     isStreaming = true;
     $chatSendBtn.disabled = true;
+    $chatStopBtn.classList.remove("hidden");
     streamAbortController = new AbortController();
 
     const { div: msgDiv, body: msgBody } = appendChatMessage("assistant", "");
@@ -556,6 +611,8 @@
 
     let fullText = "";
     let proposals = [];
+    let renderTimer = null;
+    let aborted = false;
 
     try {
       const response = await fetch("/api/lore/chat/stream", {
@@ -596,11 +653,18 @@
 
           if (event.type === "text") {
             fullText += event.chunk;
-            msgBody.textContent = fullText;
-            const cursor = document.createElement("span");
-            cursor.className = "streaming-cursor";
-            msgBody.appendChild(cursor);
-            $chatMessages.scrollTop = $chatMessages.scrollHeight;
+            if (!renderTimer) {
+              renderTimer = setTimeout(() => {
+                msgBody.innerHTML = renderMarkdown(fullText);
+                const cursor = document.createElement("span");
+                cursor.className = "streaming-cursor";
+                const lastEl = msgBody.lastElementChild;
+                if (lastEl) lastEl.appendChild(cursor);
+                else msgBody.appendChild(cursor);
+                $chatMessages.scrollTop = $chatMessages.scrollHeight;
+                renderTimer = null;
+              }, 120);
+            }
           } else if (event.type === "done") {
             fullText = event.response || fullText;
             proposals = event.proposals || [];
@@ -615,10 +679,16 @@
       } else {
         fullText += `\n[連線錯誤: ${err.message}]`;
       }
+      aborted = true;
     }
 
-    // Finalize message
-    msgBody.textContent = fullText;
+    // Finalize message with markdown
+    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+    if (aborted) {
+      msgBody.textContent = fullText;
+    } else {
+      msgBody.innerHTML = renderMarkdown(fullText);
+    }
 
     if (proposals.length > 0) {
       const cardsDiv = document.createElement("div");
@@ -629,7 +699,9 @@
       msgDiv.appendChild(cardsDiv);
     }
 
-    chatMessages.push({ role: "assistant", content: fullText });
+    if (!aborted) {
+      chatMessages.push({ role: "assistant", content: fullText });
+    }
     finishStreaming();
     $chatMessages.scrollTop = $chatMessages.scrollHeight;
   }
@@ -683,6 +755,10 @@
     fetchStoryName();
     setupMobileTabs();
 
+    // Platform-aware shortcut hint
+    const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+    $chatInput.placeholder = `輸入訊息... (${mod}+Enter 送出)`;
+
     // Search
     $searchInput.addEventListener("input", () => {
       renderLoreList($searchInput.value);
@@ -721,13 +797,53 @@
       }
     });
 
-    // Chat send
+    // Chat send — Cmd/Ctrl+Enter
     $chatSendBtn.addEventListener("click", sendChat);
     $chatInput.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && !ev.shiftKey) {
+      if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
         ev.preventDefault();
         sendChat();
       }
+    });
+
+    // Stop button — abort streaming
+    $chatStopBtn.addEventListener("click", () => {
+      if (streamAbortController) streamAbortController.abort();
+    });
+
+    // Batch delete
+    $batchDeleteBtn.addEventListener("click", async () => {
+      if (checkedTopics.size === 0) return;
+      const topics = [...checkedTopics];
+      const preview = topics.length <= 5
+        ? topics.map((t) => `「${t}」`).join("\n")
+        : topics.slice(0, 5).map((t) => `「${t}」`).join("\n") + `\n...及其他 ${topics.length - 5} 項`;
+      if (!confirm(`確定要刪除以下 ${topics.length} 個設定？\n\n${preview}`)) return;
+      const failures = [];
+      for (const topic of topics) {
+        try {
+          const res = await deleteEntry(topic);
+          if (res.ok) {
+            checkedTopics.delete(topic);
+            selectedTopics.delete(topic);
+          } else {
+            failures.push(topic);
+          }
+        } catch {
+          failures.push(topic);
+        }
+      }
+      if (failures.length > 0) {
+        alert(`以下項目刪除失敗：${failures.join("、")}`);
+      }
+      updateBatchBar();
+      await refreshLoreList();
+    });
+
+    $batchClearBtn.addEventListener("click", () => {
+      checkedTopics.clear();
+      updateBatchBar();
+      renderLoreList($searchInput.value);
     });
   }
 
