@@ -109,8 +109,10 @@ def _load_json(path, default=None):
 
 def _save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -684,68 +686,6 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
 
     # Background: normalize non-standard fields and re-apply
     _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
-
-    # Process list fields from schema
-    for list_def in schema.get("lists", []):
-        key = list_def["key"]
-        list_type = list_def.get("type", "list")
-
-        if list_type == "map":
-            # Map merge (e.g. relationships)
-            if key in update:
-                existing = state.get(key, {})
-                existing.update(update[key])
-                state[key] = existing
-        else:
-            # List add
-            add_key = list_def.get("state_add_key")
-            if add_key and add_key in update:
-                lst = state.get(key, [])
-                for item in update[add_key]:
-                    if item not in lst:
-                        lst.append(item)
-                state[key] = lst
-
-            # List remove (match by name prefix before " — ")
-            remove_key = list_def.get("state_remove_key")
-            if remove_key and remove_key in update:
-                lst = state.get(key, [])
-                for rm_item in update[remove_key]:
-                    rm_name = rm_item.split(" — ")[0].strip()
-                    lst = [x for x in lst if x.split(" — ")[0].strip() != rm_name]
-                state[key] = lst
-
-    # If GM sets reward_points directly instead of using delta, accept it
-    if "reward_points" in update and "reward_points_delta" not in update:
-        val = update["reward_points"]
-        if isinstance(val, (int, float)):
-            state["reward_points"] = int(val)
-
-    # reward_points_delta (special convention)
-    if "reward_points_delta" in update:
-        state["reward_points"] = state.get("reward_points", 0) + update["reward_points_delta"]
-
-    # Direct overwrite fields from schema
-    for key in schema.get("direct_overwrite_keys", []):
-        if key in update:
-            state[key] = update[key]
-
-    # Save any extra keys not handled above (GM can freely add new fields)
-    handled_keys = set()
-    handled_keys.add("reward_points_delta")
-    for list_def in schema.get("lists", []):
-        handled_keys.add(list_def["key"])
-        if list_def.get("state_add_key"):
-            handled_keys.add(list_def["state_add_key"])
-        if list_def.get("state_remove_key"):
-            handled_keys.add(list_def["state_remove_key"])
-    for key in schema.get("direct_overwrite_keys", []):
-        handled_keys.add(key)
-    for key, val in update.items():
-        if key not in handled_keys and isinstance(val, (str, int, float, bool)):
-            state[key] = val
-
-    _save_json(_story_character_state_path(story_id, branch_id), state)
 
 
 # ---------------------------------------------------------------------------
@@ -1767,6 +1707,8 @@ def api_branches_edit():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    from world_timer import copy_world_day
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -1827,6 +1769,11 @@ def api_branches_edit():
     delta.append(gm_msg)
     _save_json(_story_messages_path(story_id, branch_id), delta)
 
+    # Trigger compaction if due
+    recap = load_recap(story_id, branch_id)
+    if should_compact(recap, len(full_timeline) + 2):
+        compact_async(story_id, branch_id, list(full_timeline) + [user_msg, gm_msg])
+
     log.info("/api/branches/edit DONE   total=%.1fs", time.time() - t_start)
     return jsonify({
         "ok": True,
@@ -1873,6 +1820,9 @@ def api_branches_edit_stream():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    from world_timer import copy_world_day
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -1902,7 +1852,8 @@ def api_branches_edit_stream():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state)
     if dice_result:
@@ -1939,6 +1890,12 @@ def api_branches_edit_stream():
                     gm_msg.update(snapshots)
                     delta.append(gm_msg)
                     _save_json(_story_messages_path(story_id, branch_id), delta)
+
+                    # Trigger compaction if due
+                    recap = load_recap(story_id, branch_id)
+                    if should_compact(recap, len(full_timeline) + 2):
+                        tl = list(full_timeline) + [user_msg, gm_msg]
+                        compact_async(story_id, branch_id, tl)
 
                     log.info("/api/branches/edit/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
@@ -1992,6 +1949,9 @@ def api_branches_regenerate():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    from world_timer import copy_world_day
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2012,7 +1972,8 @@ def api_branches_regenerate():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -2040,6 +2001,11 @@ def api_branches_regenerate():
         gm_msg["dice"] = dice_result
     gm_msg.update(snapshots)
     _save_json(_story_messages_path(story_id, branch_id), [gm_msg])
+
+    # Trigger compaction if due
+    recap = load_recap(story_id, branch_id)
+    if should_compact(recap, len(full_timeline) + 1):
+        compact_async(story_id, branch_id, list(full_timeline) + [gm_msg])
 
     log.info("/api/branches/regenerate DONE   total=%.1fs", time.time() - t_start)
     return jsonify({
@@ -2089,6 +2055,9 @@ def api_branches_regenerate_stream():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    from world_timer import copy_world_day
+    copy_world_day(story_id, parent_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
@@ -2108,7 +2077,8 @@ def api_branches_regenerate_stream():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state)
 
@@ -2145,6 +2115,11 @@ def api_branches_regenerate_stream():
                         gm_msg["dice"] = dice_result
                     gm_msg.update(snapshots)
                     _save_json(_story_messages_path(story_id, branch_id), [gm_msg])
+
+                    # Trigger compaction if due
+                    recap = load_recap(story_id, branch_id)
+                    if should_compact(recap, len(full_timeline) + 1):
+                        compact_async(story_id, branch_id, list(full_timeline) + [gm_msg])
 
                     log.info("/api/branches/regenerate/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
@@ -2255,12 +2230,19 @@ def api_branches_merge():
     if parent_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
 
-    # 1. Copy child's delta messages to parent
+    # 1. Merge child's delta messages into parent
+    # Keep parent's messages up to branch point, then append child's messages
+    parent_msgs = _load_json(_story_messages_path(story_id, parent_id), [])
     child_msgs = _load_json(_story_messages_path(story_id, branch_id), [])
+    branch_point = child.get("branch_point_index")
+    if branch_point is not None and branch_point >= 0:
+        # Keep parent messages up to branch point (by index)
+        parent_msgs = [m for m in parent_msgs if m.get("index", 0) <= branch_point]
     for m in child_msgs:
         m.pop("owner_branch_id", None)
         m.pop("inherited", None)
-    _save_json(_story_messages_path(story_id, parent_id), child_msgs)
+    merged_msgs = parent_msgs + child_msgs
+    _save_json(_story_messages_path(story_id, parent_id), merged_msgs)
 
     # 2. Copy character state
     src_char = _story_character_state_path(story_id, branch_id)

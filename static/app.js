@@ -550,6 +550,8 @@ function renderStoryList() {
 
 async function switchToStory(storyId) {
   stopLivePolling();
+  // Clear agent polling timer
+  if (_agentPollTimer) { clearInterval(_agentPollTimer); _agentPollTimer = null; }
   try {
     const result = await API.switchStory(storyId);
     if (!result.ok) {
@@ -2185,7 +2187,7 @@ function renderAgentPanel(agents) {
           if (!res.ok) throw new Error(res.error || "操作失敗");
         } catch (err) {
           startBtn.disabled = false;
-          showToast?.(`啟動失敗: ${err.message}`) ?? alert(`啟動失敗: ${err.message}`);
+          alert(`啟動失敗: ${err.message}`);
           return;
         }
         setTimeout(loadAgents, 500);
@@ -2206,7 +2208,7 @@ function renderAgentPanel(agents) {
           if (!res.ok) throw new Error(res.error || "操作失敗");
         } catch (err) {
           pauseBtn.disabled = false;
-          showToast?.(`暫停失敗: ${err.message}`) ?? alert(`暫停失敗: ${err.message}`);
+          alert(`暫停失敗: ${err.message}`);
           return;
         }
         setTimeout(loadAgents, 500);
@@ -2225,7 +2227,7 @@ function renderAgentPanel(agents) {
           if (!res.ok) throw new Error(res.error || "操作失敗");
         } catch (err) {
           stopBtn.disabled = false;
-          showToast?.(`停止失敗: ${err.message}`) ?? alert(`停止失敗: ${err.message}`);
+          alert(`停止失敗: ${err.message}`);
           return;
         }
         setTimeout(loadAgents, 500);
@@ -2258,7 +2260,7 @@ function renderAgentPanel(agents) {
         const res = await API.deleteAgent(agent.id);
         if (!res.ok) throw new Error(res.error || "刪除失敗");
       } catch (err) {
-        showToast?.(`刪除失敗: ${err.message}`) ?? alert(`刪除失敗: ${err.message}`);
+        alert(`刪除失敗: ${err.message}`);
         return;
       }
       loadAgents();

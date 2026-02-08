@@ -234,9 +234,6 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
     Returns (story_id, branch_id).
     """
     story_id = config.story_id
-    tree = _load_tree(story_id)
-    branches = tree.get("branches", {})
-
     branch_id = config.branch_id or f"auto_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
@@ -260,20 +257,24 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
             story_id, config.parent_branch_id, config.branch_point_index
         )
 
-    # Register branch in timeline_tree
-    branch_meta = {
-        "id": branch_id,
-        "name": f"Auto-Play {datetime.now().strftime('%m/%d %H:%M')}",
-        "parent_branch_id": config.parent_branch_id,
-        "branch_point_index": -1 if config.blank else config.branch_point_index,
-        "created_at": now,
-        "session_id": None,
-    }
-    if config.blank:
-        branch_meta["blank"] = True
-    branches[branch_id] = branch_meta
-    tree["branches"] = branches
-    _save_tree(story_id, tree)
+    # Register branch in timeline_tree (under lock for concurrent safety)
+    from agent_manager import get_tree_lock
+    with get_tree_lock(story_id):
+        tree = _load_tree(story_id)  # reload under lock
+        branches = tree.get("branches", {})
+        branch_meta = {
+            "id": branch_id,
+            "name": f"Auto-Play {datetime.now().strftime('%m/%d %H:%M')}",
+            "parent_branch_id": config.parent_branch_id,
+            "branch_point_index": -1 if config.blank else config.branch_point_index,
+            "created_at": now,
+            "session_id": None,
+        }
+        if config.blank:
+            branch_meta["blank"] = True
+        branches[branch_id] = branch_meta
+        tree["branches"] = branches
+        _save_tree(story_id, tree)
 
     # Save character state
     _save_json(_story_character_state_path(story_id, branch_id), state)
@@ -302,7 +303,6 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
 
 # Search every N turns to avoid excessive API calls
 _WEB_SEARCH_INTERVAL = 3
-_web_search_turn_counter = 0
 
 
 def _web_search_enrichment(player_text: str, gm_last: str, state: RunState) -> str:
@@ -310,11 +310,8 @@ def _web_search_enrichment(player_text: str, gm_last: str, state: RunState) -> s
 
     Returns a formatted context block or empty string.
     """
-    global _web_search_turn_counter
-    _web_search_turn_counter += 1
-
-    # Only search every N turns
-    if _web_search_turn_counter % _WEB_SEARCH_INTERVAL != 1:
+    # Use per-agent turn counter (state.turn) instead of global counter
+    if state.turn % _WEB_SEARCH_INTERVAL != 1:
         return ""
 
     # Build search query based on current game context
