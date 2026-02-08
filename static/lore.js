@@ -441,8 +441,9 @@
       });
     }
 
-    // Accept with confirmation for delete, error recovery
-    card.querySelector(".btn-accept").addEventListener("click", async () => {
+    // Accept with confirmation for delete — use event delegation so retry buttons work too
+    card.addEventListener("click", async (ev) => {
+      if (!ev.target.closest(".btn-accept")) return;
       if (action === "delete") {
         if (!confirm(`確定要刪除「${proposal.topic}」？`)) return;
       }
