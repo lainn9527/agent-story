@@ -590,7 +590,7 @@
     const section = document.createElement("div");
     section.className = "grounding-section";
 
-    // Search indicator
+    // Search indicator with inline queries (visible on mobile, not tooltip-only)
     const indicator = document.createElement("div");
     indicator.className = "grounding-indicator";
     const icon = document.createElement("span");
@@ -601,16 +601,22 @@
     label.textContent = " \u5DF2\u641C\u5C0B\u7DB2\u8DEF";
     indicator.appendChild(label);
     if (grounding.searchQueries && grounding.searchQueries.length > 0) {
-      indicator.title = grounding.searchQueries.join(", ");
+      const queries = document.createElement("span");
+      queries.className = "grounding-queries";
+      queries.textContent = `\uFF1A${grounding.searchQueries.join("\u3001")}`;
+      indicator.appendChild(queries);
     }
     section.appendChild(indicator);
 
     // Source list (collapsible)
-    const sources = grounding.sources || [];
+    const sources = (grounding.sources || []).filter(
+      (s) => /^https?:\/\//i.test(s.url)
+    );
     if (sources.length > 0) {
       const toggle = document.createElement("button");
       toggle.className = "grounding-toggle";
-      toggle.textContent = `\u4F86\u6E90 (${sources.length})`;
+      toggle.textContent = `\u4F86\u6E90 (${sources.length}) \u25B8`;
+      toggle.setAttribute("aria-expanded", "false");
       section.appendChild(toggle);
 
       const list = document.createElement("div");
@@ -625,7 +631,7 @@
         link.rel = "noopener noreferrer";
         link.textContent = src.title || src.domain || src.url;
         item.appendChild(link);
-        if (src.domain) {
+        if (src.domain && src.title !== src.domain) {
           const domain = document.createElement("span");
           domain.className = "grounding-source-domain";
           domain.textContent = ` \u2014 ${src.domain}`;
@@ -637,8 +643,13 @@
       section.appendChild(list);
 
       toggle.addEventListener("click", () => {
-        list.classList.toggle("collapsed");
+        const expanded = list.classList.toggle("collapsed");
         toggle.classList.toggle("expanded");
+        const isExpanded = !list.classList.contains("collapsed");
+        toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        toggle.textContent = isExpanded
+          ? `\u4F86\u6E90 (${sources.length}) \u25BE`
+          : `\u4F86\u6E90 (${sources.length}) \u25B8`;
       });
     }
 

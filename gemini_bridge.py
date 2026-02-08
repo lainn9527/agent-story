@@ -160,7 +160,8 @@ def _format_grounding(metadata: dict) -> dict | None:
     if not metadata:
         return None
 
-    search_queries = metadata.get("searchEntryPoint", {}).get("renderedContent", "")
+    from urllib.parse import urlparse
+
     web_queries = metadata.get("webSearchQueries", [])
     chunks = metadata.get("groundingChunks", [])
 
@@ -173,7 +174,6 @@ def _format_grounding(metadata: dict) -> dict | None:
         if url and url not in seen_urls:
             seen_urls.add(url)
             try:
-                from urllib.parse import urlparse
                 domain = urlparse(url).netloc
             except Exception:
                 domain = ""
