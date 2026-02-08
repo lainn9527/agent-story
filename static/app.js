@@ -757,7 +757,7 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
       if (res.ok) {
         await loadBranches();
         if (currentBranchId === branch.id || !branches[currentBranchId]) {
-          await switchToBranch("main");
+          await switchToBranch(res.switch_to || "main");
         }
         renderBranchList();
       } else {
@@ -1050,13 +1050,13 @@ function _btRenderTree(container, modal) {
         e.stopPropagation();
         const desc = countDescendants(branch.id);
         let msg = `刪除「${branch.name}」？`;
-        if (desc > 0) msg += `\n（${desc} 個子分支將重新掛載）`;
+        if (desc > 0) msg += `\n（${desc} 個子分支將重新掛載到上層）`;
         if (!(await showConfirm(msg))) return;
         const res = await API.deleteBranch(branch.id);
         if (res.ok) {
           await loadBranches();
           if (currentBranchId === branch.id || !branches[currentBranchId]) {
-            await switchToBranch("main");
+            await switchToBranch(res.switch_to || "main");
           }
           _btRenderTree(container, modal);
           renderBranchList();
@@ -1155,17 +1155,19 @@ async function _btDeleteSelected() {
   let totalDesc = 0;
   for (const id of deduped) totalDesc += countDescendants(id);
   let msg = `確定刪除 ${deduped.length} 個分支？`;
-  if (totalDesc > 0) msg += `\n（另含 ${totalDesc} 個子分支將重新掛載）`;
+  if (totalDesc > 0) msg += `\n（另含 ${totalDesc} 個子分支將重新掛載到上層）`;
   if (!(await showConfirm(msg))) return;
 
   // Sort leaf-first (most descendants = delete last)
   deduped.sort((a, b) => countDescendants(a) - countDescendants(b));
 
   const failures = [];
+  let lastSwitchTo = "main";
   for (const id of deduped) {
     try {
       const res = await API.deleteBranch(id);
       if (!res.ok) failures.push(id);
+      else if (res.switch_to) lastSwitchTo = res.switch_to;
     } catch (e) {
       failures.push(id);
     }
@@ -1176,7 +1178,7 @@ async function _btDeleteSelected() {
   }
   _btSelected.clear();
   await loadBranches();
-  if (!branches[currentBranchId]) await switchToBranch("main");
+  if (!branches[currentBranchId]) await switchToBranch(lastSwitchTo || "main");
   const modal = document.getElementById("branch-tree-modal");
   const container = document.getElementById("branch-tree-container");
   _btRenderTree(container, modal);
@@ -1793,7 +1795,7 @@ function renderMessages(messages) {
           const branchToDelete = currentVariant.branch_id;
           const descCount = countDescendants(branchToDelete);
           let msg = "刪除此版本？";
-          if (descCount > 0) msg += `\n（${descCount} 個子分支將重新掛載）`;
+          if (descCount > 0) msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
           if (!(await showConfirm(msg))) return;
           try {
             const res = await API.deleteBranch(branchToDelete);
@@ -1804,7 +1806,7 @@ function renderMessages(messages) {
               if (adjacent && adjacent.branch_id !== branchToDelete) {
                 await switchToBranch(adjacent.branch_id, { preserveScroll: true });
               } else {
-                await switchToBranch("main");
+                await switchToBranch(res.switch_to || "main");
               }
               renderBranchList();
             } else {
