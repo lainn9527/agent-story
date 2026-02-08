@@ -28,6 +28,7 @@ from event_db import insert_event, search_relevant_events, get_events, get_event
 from image_gen import generate_image_async, get_image_status, get_image_path
 from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc
 from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
+from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
 from parser import parse_conversation, save_parsed
 from prompts import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
@@ -1283,6 +1284,7 @@ def api_messages():
         else:
             result["live_status"] = "running"
         result["auto_play_state"] = auto_state
+        result["summary_count"] = len(get_summaries(story_id, branch_id))
 
     return jsonify(result)
 
@@ -2623,6 +2625,18 @@ def api_npc_activities():
     branch_id = request.args.get("branch_id", "main")
     activities = get_all_activities(story_id, branch_id)
     return jsonify({"ok": True, "activities": activities})
+
+
+# ---------------------------------------------------------------------------
+# Auto-Play Summaries API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/auto-play/summaries")
+def api_auto_play_summaries():
+    """Return auto-play summaries for a branch."""
+    story_id = _active_story_id()
+    branch_id = request.args.get("branch_id", "main")
+    return jsonify({"ok": True, "summaries": get_summaries(story_id, branch_id)})
 
 
 # ---------------------------------------------------------------------------

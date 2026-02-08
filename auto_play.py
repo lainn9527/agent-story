@@ -67,6 +67,7 @@ from app import (
 )
 from llm_bridge import call_claude_gm, call_oneshot, set_provider, web_search
 from npc_evolution import should_run_evolution, run_npc_evolution_async
+from auto_summary import should_generate_summary, generate_summary_async, _load_summaries
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -842,6 +843,18 @@ def auto_play(config: AutoPlayConfig):
             # F. Save state
             state.last_turn_at = datetime.now(timezone.utc).isoformat()
             save_run_state(story_id, branch_id, state)
+
+            # G. Generate summary if due
+            phase_changed = analysis.get("dungeon_start") or analysis.get("dungeon_end")
+            if should_generate_summary(story_id, branch_id, state.turn, phase_changed):
+                existing = _load_summaries(story_id, branch_id)
+                last_turn = existing[-1]["turn_end"] + 1 if existing else 0
+                full_tl = get_full_timeline(story_id, branch_id)
+                summary_msgs = full_tl[last_turn * 2:][-20:]  # cap 20 msgs
+                generate_summary_async(
+                    story_id, branch_id, last_turn, state.turn,
+                    state.phase, summary_msgs, state.to_dict(),
+                )
 
             state.turn += 1
             time.sleep(config.turn_delay)

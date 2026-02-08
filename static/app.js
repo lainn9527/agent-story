@@ -168,6 +168,10 @@ const API = {
   // NPC Activities
   npcActivities: (branchId) =>
     fetch(`/api/npc-activities?branch_id=${branchId || "main"}`).then(r => r.json()),
+
+  // Auto-play Summaries
+  autoPlaySummaries: (branchId) =>
+    fetch(`/api/auto-play/summaries?branch_id=${branchId || "main"}`).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -284,8 +288,16 @@ function startLivePolling(branchId) {
 
       updateLiveIndicator(true, data.auto_play_state);
 
+      // Refresh summaries if drawer is open and new summaries available
+      if (data.summary_count != null && data.summary_count > _lastSummaryCount) {
+        if (!$drawer.classList.contains("closed")) {
+          loadSummaries();
+        }
+      }
+
       if (data.live_status === "finished") {
         stopLivePolling();
+        loadSummaries();
         return;
       }
     } catch (e) { /* ignore fetch errors, retry next cycle */ }
@@ -363,6 +375,7 @@ function openDrawer() {
   renderBranchList();
   loadNpcs();
   loadEvents();
+  loadSummaries();
 }
 
 function closeDrawer() {
@@ -409,9 +422,9 @@ async function init() {
     const status = await API.status(currentBranchId);
     renderCharacterStatus(status);
 
-    // 6. Load NPCs and events
+    // 6. Load NPCs, events, and summaries
     updateInitStatus("載入角色與事件…");
-    await Promise.all([loadNpcs(), loadEvents()]);
+    await Promise.all([loadNpcs(), loadEvents(), loadSummaries()]);
 
     removeInitOverlay();
     scrollToBottom();
@@ -515,7 +528,7 @@ async function switchToStory(storyId) {
     await loadMessages(currentBranchId);
     const status = await API.status(currentBranchId);
     renderCharacterStatus(status);
-    await Promise.all([loadNpcs(), loadEvents()]);
+    await Promise.all([loadNpcs(), loadEvents(), loadSummaries()]);
     scrollToBottom();
   } catch (err) {
     alert("切換故事錯誤：" + err.message);
@@ -817,6 +830,7 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
   renderCharacterStatus(status);
   loadNpcs();
   loadEvents();
+  loadSummaries();
 
   // Show/hide "load earlier" button for auto branches with truncated messages
   if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
@@ -1617,6 +1631,96 @@ function renderEventsPanel(events) {
     item.appendChild(title);
     item.appendChild(desc);
     panel.appendChild(item);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Summary Dashboard (auto-play only)
+// ---------------------------------------------------------------------------
+let _lastSummaryCount = 0;
+
+async function loadSummaries() {
+  const section = document.getElementById("summary-section");
+  if (!isAutoBranch(currentBranchId)) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "";
+  try {
+    const result = await API.autoPlaySummaries(currentBranchId);
+    const summaries = result.summaries || [];
+    _lastSummaryCount = summaries.length;
+    renderSummaryDashboard(summaries);
+  } catch (e) { /* ignore */ }
+}
+
+function renderSummaryDashboard(summaries) {
+  const metricsEl = document.getElementById("summary-metrics");
+  const timelineEl = document.getElementById("summary-timeline");
+  metricsEl.innerHTML = "";
+  timelineEl.innerHTML = "";
+
+  if (!summaries.length) {
+    const empty = document.createElement("div");
+    empty.className = "npc-empty";
+    empty.textContent = "摘要將在第 5 回合後自動生成";
+    timelineEl.appendChild(empty);
+    return;
+  }
+
+  // Metrics bar
+  const latest = summaries[summaries.length - 1];
+  const totalTurns = (latest.turn_end || 0) + 1;
+  const dungeonCount = latest.dungeon_count || 0;
+  const currentPhase = latest.phase || "hub";
+
+  const bar = document.createElement("div");
+  bar.className = "summary-metrics-bar";
+  bar.innerHTML =
+    `<div class="summary-metric"><span class="summary-metric-value">${totalTurns}</span><span class="summary-metric-label">回合</span></div>` +
+    `<div class="summary-metric"><span class="summary-metric-value">${dungeonCount}</span><span class="summary-metric-label">副本</span></div>` +
+    `<div class="summary-metric"><span class="summary-metric-value summary-phase-badge ${currentPhase === "dungeon" ? "dungeon" : "hub"}">${currentPhase === "dungeon" ? "副本中" : "主神空間"}</span><span class="summary-metric-label">階段</span></div>`;
+  metricsEl.appendChild(bar);
+
+  // Summary cards (newest first)
+  const reversed = [...summaries].reverse();
+  for (const s of reversed) {
+    const card = document.createElement("div");
+    card.className = "summary-card";
+
+    const header = document.createElement("div");
+    header.className = "summary-card-header";
+
+    const turnRange = document.createElement("span");
+    turnRange.className = "summary-turn-range";
+    turnRange.textContent = `Turn ${s.turn_start}-${s.turn_end}`;
+
+    const phaseBadge = document.createElement("span");
+    phaseBadge.className = `summary-phase-badge ${s.phase === "dungeon" ? "dungeon" : "hub"}`;
+    phaseBadge.textContent = s.phase === "dungeon" ? "副本" : "主神空間";
+
+    header.appendChild(turnRange);
+    header.appendChild(phaseBadge);
+    card.appendChild(header);
+
+    const summaryText = document.createElement("div");
+    summaryText.className = "summary-text";
+    summaryText.textContent = s.summary;
+    card.appendChild(summaryText);
+
+    if (s.key_events && s.key_events.length) {
+      const tags = document.createElement("div");
+      tags.className = "summary-events";
+      for (const ev of s.key_events) {
+        const tag = document.createElement("span");
+        tag.className = "summary-event-tag";
+        tag.textContent = ev;
+        tags.appendChild(tag);
+      }
+      card.appendChild(tags);
+    }
+
+    timelineEl.appendChild(card);
   }
 }
 
