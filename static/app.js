@@ -821,7 +821,7 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
 
   if (preserveScroll || forcePreserve) {
     savedScrollTop = container.scrollTop;
-    isAtBottom = (container.scrollTop + container.clientHeight >= container.scrollHeight - 50);
+    isAtBottom = (container.scrollTop + container.clientHeight >= container.scrollHeight - 100);
   }
 
   // Add fade-out transition for smooth variant switching
