@@ -104,6 +104,7 @@ class AutoPlayConfig:
     provider: str | None = None   # Override LLM provider ("gemini" / "claude_cli")
     max_errors: int = 10          # Max consecutive errors before stopping
     web_search: bool = True       # Enable web search enrichment for lore/dungeons
+    agent_id: str | None = None   # If set, check agents.json for cooperative stop
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +236,7 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
 
-    branch_id = f"auto_{uuid.uuid4().hex[:8]}"
+    branch_id = config.branch_id or f"auto_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
     if config.blank:
@@ -402,11 +403,18 @@ def execute_turn(
         _save_json(delta_path, delta_msgs)
         raise GMError(gm_response)
 
-    # 6. Update session_id if changed
+    # 6. Update session_id if changed (thread-safe for multi-agent)
     if new_session_id and new_session_id != session_id:
-        tree = _load_tree(story_id)  # Reload in case of concurrent writes
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
+        try:
+            from agent_manager import _get_tree_lock
+            with _get_tree_lock(story_id):
+                tree = _load_tree(story_id)
+                tree["branches"][branch_id]["session_id"] = new_session_id
+                _save_tree(story_id, tree)
+        except ImportError:
+            tree = _load_tree(story_id)
+            tree["branches"][branch_id]["session_id"] = new_session_id
+            _save_tree(story_id, tree)
 
     # 7. Strip IMG tags if skip_images
     if skip_images:
@@ -648,12 +656,24 @@ def should_stop(state: RunState, config: AutoPlayConfig) -> bool:
     if config.max_dungeons and state.dungeon_count >= config.max_dungeons:
         log.info("STOP: Max dungeons reached (%d)", config.max_dungeons)
         return True
-    if os.path.exists(STOP_FILE):
-        log.info("STOP: Stop file detected (%s)", STOP_FILE)
-        return True
     if state.consecutive_errors >= config.max_errors:
         log.info("STOP: Too many consecutive errors (%d >= %d)", state.consecutive_errors, config.max_errors)
         return True
+
+    # Cooperative stop via agent registry
+    if config.agent_id:
+        from agent_manager import _load_agents
+        agents_data = _load_agents(config.story_id)
+        agent = agents_data.get("agents", {}).get(config.agent_id)
+        if agent and agent.get("status") not in ("running",):
+            log.info("STOP: Agent status changed to '%s'", agent.get("status"))
+            return True
+    else:
+        # Legacy CLI mode — check stop file
+        if os.path.exists(STOP_FILE):
+            log.info("STOP: Stop file detected (%s)", STOP_FILE)
+            return True
+
     return False
 
 
@@ -855,6 +875,21 @@ def auto_play(config: AutoPlayConfig):
                     story_id, branch_id, last_turn, state.turn,
                     state.phase, summary_msgs, state.to_dict(),
                 )
+
+            # H. Shared world rebuild + adventure summary (agent mode)
+            if config.agent_id and state.turn % 10 == 0:
+                try:
+                    from shared_world import rebuild_shared_world, generate_adventure_summary, update_agent_npc
+                    rebuild_shared_world(config.story_id)
+                    update_agent_npc(config.story_id, config.agent_id)
+                except Exception as e:
+                    log.warning("shared_world rebuild failed: %s", e)
+            if config.agent_id and state.turn % 20 == 0:
+                try:
+                    from shared_world import generate_adventure_summary
+                    generate_adventure_summary(config.story_id, config.agent_id)
+                except Exception as e:
+                    log.warning("adventure summary generation failed: %s", e)
 
             state.turn += 1
             time.sleep(config.turn_delay)

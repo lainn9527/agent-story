@@ -172,6 +172,24 @@ const API = {
   // Auto-play Summaries
   autoPlaySummaries: (branchId) =>
     fetch(`/api/auto-play/summaries?branch_id=${branchId || "main"}`).then(r => r.json()),
+
+  // Agent APIs (multi-agent shared universe)
+  agents: () => fetch("/api/agents").then(r => r.json()),
+
+  createAgent: (name, characterConfig, autoPlayConfig) =>
+    fetch("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, character_config: characterConfig, auto_play_config: autoPlayConfig }),
+    }).then(r => r.json()),
+
+  agentAction: (agentId, action) =>
+    fetch(`/api/agents/${agentId}/${action}`, { method: "POST" }).then(r => r.json()),
+
+  deleteAgent: (agentId) =>
+    fetch(`/api/agents/${agentId}`, { method: "DELETE" }).then(r => r.json()),
+
+  leaderboard: () => fetch("/api/leaderboard").then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -376,6 +394,7 @@ function openDrawer() {
   loadNpcs();
   loadEvents();
   loadSummaries();
+  loadAgents();
 }
 
 function closeDrawer() {
@@ -1493,6 +1512,12 @@ function renderNpcPanel(npcs) {
     role.textContent = npc.role || "";
 
     header.appendChild(name);
+    if (npc.is_agent) {
+      const agentBadge = document.createElement("span");
+      agentBadge.className = "npc-agent-badge";
+      agentBadge.textContent = "AI";
+      header.appendChild(agentBadge);
+    }
     header.appendChild(role);
     card.appendChild(header);
 
@@ -2055,6 +2080,239 @@ function removeInitOverlay() {
 }
 
 // ---------------------------------------------------------------------------
+// Agent panel (multi-agent shared universe)
+// ---------------------------------------------------------------------------
+async function loadAgents() {
+  try {
+    const result = await API.agents();
+    renderAgentPanel(result.agents || []);
+  } catch (e) { /* ignore */ }
+}
+
+function renderAgentPanel(agents) {
+  const panel = document.getElementById("agent-panel");
+  panel.innerHTML = "";
+
+  if (!agents.length) {
+    const empty = document.createElement("div");
+    empty.className = "agent-empty";
+    empty.textContent = "尚無其他輪迴者。點擊 + 建立 AI 輪迴者。";
+    panel.appendChild(empty);
+    return;
+  }
+
+  for (const agent of agents) {
+    const card = document.createElement("div");
+    card.className = "agent-card";
+
+    // Header: name + status badge
+    const header = document.createElement("div");
+    header.className = "agent-card-header";
+
+    const name = document.createElement("span");
+    name.className = "agent-name";
+    name.textContent = agent.name;
+
+    const badge = document.createElement("span");
+    badge.className = `agent-status-badge agent-status-${agent.status}`;
+    badge.textContent = {
+      created: "待啟動",
+      running: "運行中",
+      paused: "已暫停",
+      stopped: "已停止",
+      error: "錯誤",
+    }[agent.status] || agent.status;
+
+    header.appendChild(name);
+    header.appendChild(badge);
+    card.appendChild(header);
+
+    // Run state info
+    const rs = agent.run_state;
+    if (rs) {
+      const info = document.createElement("div");
+      info.className = "agent-info";
+      info.innerHTML = `<span>回合 ${rs.turn}</span><span>${rs.phase === "dungeon" ? "副本中" : "主神空間"}</span><span>副本 ×${rs.dungeon_count}</span>`;
+      card.appendChild(info);
+    }
+
+    // Controls
+    const controls = document.createElement("div");
+    controls.className = "agent-controls";
+
+    if (agent.status === "created" || agent.status === "paused" || agent.status === "stopped" || agent.status === "error") {
+      const startBtn = document.createElement("button");
+      startBtn.className = "agent-ctrl-btn agent-start-btn";
+      startBtn.textContent = agent.status === "created" ? "啟動" : "繼續";
+      startBtn.title = "啟動輪迴者";
+      startBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        startBtn.disabled = true;
+        const action = agent.status === "paused" ? "resume" : "start";
+        await API.agentAction(agent.id, action);
+        setTimeout(loadAgents, 500);
+      });
+      controls.appendChild(startBtn);
+    }
+
+    if (agent.status === "running") {
+      const pauseBtn = document.createElement("button");
+      pauseBtn.className = "agent-ctrl-btn agent-pause-btn";
+      pauseBtn.textContent = "暫停";
+      pauseBtn.title = "暫停輪迴者";
+      pauseBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        pauseBtn.disabled = true;
+        await API.agentAction(agent.id, "pause");
+        setTimeout(loadAgents, 500);
+      });
+      controls.appendChild(pauseBtn);
+
+      const stopBtn = document.createElement("button");
+      stopBtn.className = "agent-ctrl-btn agent-stop-btn";
+      stopBtn.textContent = "停止";
+      stopBtn.title = "停止輪迴者";
+      stopBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        stopBtn.disabled = true;
+        await API.agentAction(agent.id, "stop");
+        setTimeout(loadAgents, 500);
+      });
+      controls.appendChild(stopBtn);
+    }
+
+    // View branch button
+    const viewBtn = document.createElement("button");
+    viewBtn.className = "agent-ctrl-btn agent-view-btn";
+    viewBtn.textContent = "查看";
+    viewBtn.title = "查看輪迴者的分支";
+    viewBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      closeDrawer();
+      await switchToBranch(agent.branch_id);
+    });
+    controls.appendChild(viewBtn);
+
+    // Delete button
+    const delBtn = document.createElement("button");
+    delBtn.className = "agent-ctrl-btn agent-del-btn";
+    delBtn.textContent = "\u2715";
+    delBtn.title = "刪除輪迴者";
+    delBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = await showConfirm(`確定刪除輪迴者「${agent.name}」嗎？分支資料會保留。`);
+      if (!ok) return;
+      await API.deleteAgent(agent.id);
+      loadAgents();
+    });
+    controls.appendChild(delBtn);
+
+    card.appendChild(controls);
+    panel.appendChild(card);
+  }
+
+  // Leaderboard toggle
+  const lbPanel = document.getElementById("leaderboard-panel");
+  const lbToggle = document.createElement("button");
+  lbToggle.className = "agent-lb-toggle";
+  lbToggle.textContent = "排行榜";
+  lbToggle.addEventListener("click", async () => {
+    if (lbPanel.style.display === "none") {
+      await loadLeaderboard();
+      lbPanel.style.display = "";
+    } else {
+      lbPanel.style.display = "none";
+    }
+  });
+  panel.appendChild(lbToggle);
+}
+
+async function loadLeaderboard() {
+  const panel = document.getElementById("leaderboard-panel");
+  try {
+    const result = await API.leaderboard();
+    const lb = result.leaderboard || [];
+    if (!lb.length) {
+      panel.innerHTML = '<div class="agent-empty">尚無排行資料</div>';
+      return;
+    }
+    let html = '<div class="leaderboard">';
+    html += '<div class="lb-header"><span>#</span><span>名稱</span><span>獎勵點</span><span>副本</span><span>狀態</span></div>';
+    for (let i = 0; i < lb.length; i++) {
+      const e = lb[i];
+      const statusClass = e.status === "running" ? "running" : "";
+      html += `<div class="lb-row ${statusClass}">`;
+      html += `<span class="lb-rank">${i + 1}</span>`;
+      html += `<span class="lb-name">${escapeHtml(e.name)}</span>`;
+      html += `<span class="lb-pts">${e.reward_points}</span>`;
+      html += `<span class="lb-missions">${e.completed_missions}</span>`;
+      html += `<span class="lb-status">${e.current_phase === "dungeon" ? "副本中" : "空間"}</span>`;
+      html += `</div>`;
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+  } catch (e) {
+    panel.innerHTML = '<div class="agent-empty">載入失敗</div>';
+  }
+}
+
+// Agent creation modal
+function openAgentModal() {
+  document.getElementById("new-agent-modal").classList.remove("hidden");
+}
+
+function closeAgentModal() {
+  document.getElementById("new-agent-modal").classList.add("hidden");
+  document.getElementById("na-name").value = "";
+  document.getElementById("na-personality").value = "";
+  document.getElementById("na-opening").value = "";
+  document.getElementById("na-physique").value = "";
+  document.getElementById("na-spirit").value = "";
+}
+
+async function createNewAgent() {
+  const name = document.getElementById("na-name").value.trim();
+  if (!name) { alert("請輸入角色名稱"); return; }
+
+  const personality = document.getElementById("na-personality").value.trim() || "保持角色一致性，做出符合角色性格的選擇。";
+  const opening = document.getElementById("na-opening").value.trim() || `我叫${name}，剛到這裡，準備開始冒險。`;
+  const physique = document.getElementById("na-physique").value.trim() || "普通人類";
+  const spirit = document.getElementById("na-spirit").value.trim() || "普通人類";
+
+  const characterConfig = {
+    personality,
+    opening_message: opening,
+    character_state: {
+      name,
+      gene_lock: "未開啟",
+      physique,
+      spirit,
+      reward_points: 0,
+      current_status: "新人，剛進入主神空間",
+      inventory: [],
+      completed_missions: [],
+      relationships: {},
+    },
+  };
+
+  try {
+    const res = await API.createAgent(name, characterConfig, {
+      turn_delay: 3.0,
+      skip_images: true,
+      web_search: true,
+    });
+    if (!res.ok) {
+      alert(res.error || "建立失敗");
+      return;
+    }
+    closeAgentModal();
+    loadAgents();
+  } catch (err) {
+    alert("網路錯誤：" + err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event listeners
 // ---------------------------------------------------------------------------
 $sendBtn.addEventListener("click", sendMessage);
@@ -2141,6 +2399,17 @@ document.getElementById("ns-create").addEventListener("click", createNewStory);
 // Close modal on overlay click
 $storyModal.addEventListener("click", (e) => {
   if (e.target === $storyModal) closeNewStoryModal();
+});
+
+// Agent modal listeners
+document.getElementById("new-agent-btn").addEventListener("click", () => {
+  closeDrawer();
+  openAgentModal();
+});
+document.getElementById("na-cancel").addEventListener("click", closeAgentModal);
+document.getElementById("na-create").addEventListener("click", createNewAgent);
+document.getElementById("new-agent-modal").addEventListener("click", (e) => {
+  if (e.target.id === "new-agent-modal") closeAgentModal();
 });
 
 // ---------------------------------------------------------------------------

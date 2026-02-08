@@ -32,6 +32,10 @@ from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
 from parser import parse_conversation, save_parsed
 from prompts import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
+from compaction import (
+    load_recap, save_recap, get_recap_text, should_compact, compact_async,
+    get_context_window, copy_recap_to_branch,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -49,7 +53,7 @@ LEGACY_CHARACTER_STATE_PATH = os.path.join(DATA_DIR, "character_state.json")
 LEGACY_SUMMARY_PATH = os.path.join(DATA_DIR, "story_summary.txt")
 LEGACY_NEW_MESSAGES_PATH = os.path.join(DATA_DIR, "new_messages.json")
 
-RECENT_MESSAGE_COUNT = 10
+RECENT_MESSAGE_COUNT = 20
 
 DEFAULT_CHARACTER_STATE = {
     "name": "Eddy",
@@ -259,7 +263,7 @@ _TEAM_RULES = {
 }
 
 
-def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main") -> str:
+def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main", narrative_recap: str = "") -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
     # Blank branches are fresh starts — no story summary or NPC context from parent
     tree = _load_tree(story_id)
@@ -267,12 +271,36 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     if branch.get("blank"):
         summary = ""
 
+    if not narrative_recap:
+        narrative_recap = "（尚無回顧，完整對話記錄已提供。）"
+
     prompt_path = _story_system_prompt_path(story_id)
     lore_text = _build_lore_text(story_id)
     npc_text = _build_npc_text(story_id, branch_id)
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
+
+    # Build other agents text (human branches only)
+    other_agents_text = ""
+    if not branch_id.startswith("auto_"):
+        try:
+            from shared_world import get_hub_presence, get_leaderboard
+            hub = get_hub_presence(story_id)
+            lb = get_leaderboard(story_id)
+            lines = []
+            if hub:
+                lines.append("目前在主神空間的其他輪迴者：")
+                for p in hub:
+                    lines.append(f"- {p['name']}：{p.get('current_status', '')}")
+            if lb:
+                lines.append("排行榜前三：" + "、".join(
+                    f"{e['name']}({e['reward_points']}點)" for e in lb[:3]
+                ))
+            other_agents_text = "\n".join(lines)
+        except Exception:
+            pass
+
     if os.path.exists(prompt_path):
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
@@ -282,6 +310,8 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             world_lore=lore_text,
             npc_profiles=npc_text,
             team_rules=team_rules,
+            narrative_recap=narrative_recap,
+            other_agents=other_agents_text,
         )
     # Fallback to prompts.py template
     return build_system_prompt(state_text, summary)
@@ -1143,6 +1173,26 @@ def _build_augmented_message(
     if activities:
         parts.append(activities)
 
+    # Cross-agent awareness
+    if not branch_id.startswith("auto_"):
+        # Human player: inject other agents' status + leaderboard
+        try:
+            from shared_world import get_agents_context
+            agents_ctx = get_agents_context(story_id, branch_id, user_text)
+            if agents_ctx:
+                parts.append(agents_ctx)
+        except Exception:
+            pass
+    else:
+        # Agent branch: inject encounter events (bidirectional awareness)
+        try:
+            from shared_world import get_encounter_context
+            enc_ctx = get_encounter_context(story_id, branch_id)
+            if enc_ctx:
+                parts.append(enc_ctx)
+        except Exception:
+            pass
+
     # Dice roll
     dice_result = None
     if character_state:
@@ -1324,12 +1374,13 @@ def api_send():
     full_timeline.append(player_msg)
     log.info("  save_user_msg: %.0fms", (time.time() - t0) * 1000)
 
-    # 2. Build system prompt
+    # 2. Build system prompt (with narrative recap)
     t0 = time.time()
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     # 3. Gather recent context
@@ -1343,27 +1394,20 @@ def api_send():
         _save_json(delta_path, delta_msgs)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
-    # 4. Call Claude with branch session
+    # 4. Call Claude (stateless)
     t0 = time.time()
-    session_id = branch.get("session_id")
-    has_session = bool(session_id)
-    gm_response, new_session_id = call_claude_gm(
-        augmented_text, system_prompt, recent, session_id=session_id
+    gm_response, _ = call_claude_gm(
+        augmented_text, system_prompt, recent, session_id=None
     )
-    log.info("  claude_call: %.1fs (resume=%s)", time.time() - t0, has_session)
+    log.info("  claude_call: %.1fs", time.time() - t0)
 
-    # 5. Update session_id in tree if changed
-    if new_session_id and new_session_id != session_id:
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
-
-    # 6. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
+    # 5. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
     t0 = time.time()
     gm_msg_index = len(full_timeline)
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
     log.info("  parse_tags: %.0fms", (time.time() - t0) * 1000)
 
-    # 7. Save GM response
+    # 6. Save GM response
     t0 = time.time()
     gm_msg = {
         "role": "gm",
@@ -1377,12 +1421,40 @@ def api_send():
     _save_json(delta_path, delta_msgs)
     log.info("  save_gm_msg: %.0fms", (time.time() - t0) * 1000)
 
-    # 8. Trigger NPC evolution if due
+    # 7. Trigger NPC evolution if due
     turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
     if _load_npcs(story_id, branch_id) and should_run_evolution(story_id, branch_id, turn_count):
         npc_text = _build_npc_text(story_id, branch_id)
         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
         run_npc_evolution_async(story_id, branch_id, turn_count, npc_text, recent_text)
+
+    # 8. Write cross-branch encounter if player mentioned an agent
+    if not branch_id.startswith("auto_"):
+        try:
+            from shared_world import _find_mentioned_agent, write_encounter
+            from agent_manager import _load_agents
+            agents_data = _load_agents(story_id)
+            matched = _find_mentioned_agent(user_text, agents_data)
+            if matched:
+                # Brief summary from GM response (~100 chars)
+                summary_snippet = gm_response[:100].replace("\n", " ")
+                player_name = state.get("name", "玩家") if state else "玩家"
+                write_encounter(
+                    story_id,
+                    agent_branch_id=matched["branch_id"],
+                    from_name=player_name,
+                    from_branch_id=branch_id,
+                    summary=summary_snippet,
+                    turn_index=gm_msg_index,
+                )
+        except Exception:
+            pass
+
+    # 9. Trigger compaction if due
+    recap = load_recap(story_id, branch_id)
+    if should_compact(recap, len(full_timeline) + 1):
+        full_timeline.append(gm_msg)
+        compact_async(story_id, branch_id, full_timeline)
 
     log.info("/api/send DONE   total=%.1fs", time.time() - t_start)
     return jsonify({"ok": True, "player": player_msg, "gm": gm_msg})
@@ -1427,11 +1499,12 @@ def api_send_stream():
     _save_json(delta_path, delta_msgs)
     full_timeline.append(player_msg)
 
-    # 2. Build system prompt
+    # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
@@ -1440,8 +1513,6 @@ def api_send_stream():
         player_msg["dice"] = dice_result
         _save_json(delta_path, delta_msgs)
 
-    # 4. Session
-    session_id = branch.get("session_id")
     gm_msg_index = len(full_timeline)
 
     def generate():
@@ -1450,7 +1521,7 @@ def api_send_stream():
             yield _sse_event({"type": "dice", "dice": dice_result})
         try:
             for event_type, payload in call_claude_gm_stream(
-                augmented_text, system_prompt, recent, session_id=session_id
+                augmented_text, system_prompt, recent, session_id=None
             ):
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})
@@ -1459,12 +1530,6 @@ def api_send_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
-                    new_session_id = payload["session_id"]
-
-                    # Update session_id
-                    if new_session_id and new_session_id != session_id:
-                        tree["branches"][branch_id]["session_id"] = new_session_id
-                        _save_tree(story_id, tree)
 
                     # Extract tags
                     gm_response, image_info, snapshots = _process_gm_response(
@@ -1489,6 +1554,12 @@ def api_send_stream():
                         npc_text = _build_npc_text(story_id, branch_id)
                         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
                         run_npc_evolution_async(story_id, branch_id, turn_count, npc_text, recent_text)
+
+                    # Trigger compaction if due
+                    recap = load_recap(story_id, branch_id)
+                    if should_compact(recap, len(full_timeline) + 1):
+                        tl = list(full_timeline) + [gm_msg]
+                        compact_async(story_id, branch_id, tl)
 
                     log.info("/api/send/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
@@ -1703,6 +1774,7 @@ def api_branches_edit():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -1732,7 +1804,8 @@ def api_branches_edit():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -1744,14 +1817,10 @@ def api_branches_edit():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    gm_response, new_session_id = call_claude_gm(
+    gm_response, _ = call_claude_gm(
         augmented_edit, system_prompt, recent, session_id=None
     )
-    log.info("  claude_call: %.1fs (new session)", time.time() - t0)
-
-    if new_session_id:
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
+    log.info("  claude_call: %.1fs", time.time() - t0)
 
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
 
@@ -2637,6 +2706,148 @@ def api_auto_play_summaries():
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
     return jsonify({"ok": True, "summaries": get_summaries(story_id, branch_id)})
+
+
+# ---------------------------------------------------------------------------
+# Agent API (multi-agent shared universe)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents", methods=["GET"])
+def api_agents_list():
+    """List all agents with their auto_play_state."""
+    from agent_manager import list_agents
+    from auto_play import load_run_state
+
+    story_id = _active_story_id()
+    agents = list_agents(story_id)
+    result = []
+    for ag in agents:
+        entry = dict(ag)
+        try:
+            run_state = load_run_state(story_id, ag["branch_id"])
+            entry["run_state"] = run_state.to_dict() if run_state else None
+        except Exception:
+            entry["run_state"] = None
+        result.append(entry)
+    return jsonify({"ok": True, "agents": result})
+
+
+@app.route("/api/agents", methods=["POST"])
+def api_agents_create():
+    """Create a new agent."""
+    from agent_manager import create_agent
+
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    name = body.get("name", "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "name required"}), 400
+
+    character_config = body.get("character_config", {})
+    provider = body.get("provider", "claude_cli")
+    auto_play_config = body.get("auto_play_config", {})
+
+    agent = create_agent(story_id, name, character_config, provider, auto_play_config)
+    return jsonify({"ok": True, "agent": agent})
+
+
+@app.route("/api/agents/<agent_id>", methods=["GET"])
+def api_agents_get(agent_id):
+    """Get a single agent with adventure summary."""
+    from agent_manager import get_agent
+    from auto_play import load_run_state
+
+    story_id = _active_story_id()
+    agent = get_agent(story_id, agent_id)
+    if not agent:
+        return jsonify({"ok": False, "error": "agent not found"}), 404
+
+    try:
+        run_state = load_run_state(story_id, agent["branch_id"])
+        rs_dict = run_state.to_dict() if run_state else None
+    except Exception:
+        rs_dict = None
+    result = dict(agent)
+    result["run_state"] = rs_dict
+
+    # Load adventure summary
+    summary_path = os.path.join(
+        _branch_dir(story_id, agent["branch_id"]),
+        "adventure_summary.json"
+    )
+    result["adventure_summary"] = _load_json(summary_path)
+
+    return jsonify({"ok": True, "agent": result})
+
+
+@app.route("/api/agents/<agent_id>", methods=["DELETE"])
+def api_agents_delete(agent_id):
+    """Stop and remove agent from registry."""
+    from agent_manager import delete_agent
+
+    story_id = _active_story_id()
+    ok = delete_agent(story_id, agent_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "agent not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agents/<agent_id>/start", methods=["POST"])
+def api_agents_start(agent_id):
+    """Start an agent."""
+    from agent_manager import start_agent
+
+    story_id = _active_story_id()
+    ok = start_agent(story_id, agent_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "cannot start agent"}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agents/<agent_id>/pause", methods=["POST"])
+def api_agents_pause(agent_id):
+    """Pause a running agent."""
+    from agent_manager import pause_agent
+
+    story_id = _active_story_id()
+    ok = pause_agent(story_id, agent_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "cannot pause agent"}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agents/<agent_id>/resume", methods=["POST"])
+def api_agents_resume(agent_id):
+    """Resume a paused/stopped agent."""
+    from agent_manager import resume_agent
+
+    story_id = _active_story_id()
+    ok = resume_agent(story_id, agent_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "cannot resume agent"}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agents/<agent_id>/stop", methods=["POST"])
+def api_agents_stop(agent_id):
+    """Stop a running agent."""
+    from agent_manager import stop_agent
+
+    story_id = _active_story_id()
+    ok = stop_agent(story_id, agent_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "cannot stop agent"}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/leaderboard")
+def api_leaderboard():
+    """Get the shared world leaderboard."""
+    from shared_world import get_leaderboard
+
+    story_id = _active_story_id()
+    lb = get_leaderboard(story_id)
+    return jsonify({"ok": True, "leaderboard": lb})
 
 
 # ---------------------------------------------------------------------------
