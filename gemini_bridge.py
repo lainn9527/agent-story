@@ -111,7 +111,7 @@ def _is_key_error(http_code: int, body_text: str) -> bool:
     """Check if an HTTP error indicates a bad/expired API key (should try next)."""
     if http_code == 429:
         return True
-    if http_code == 400 and "API key" in body_text:
+    if http_code == 400 and "api key" in body_text.lower():
         return True
     if http_code in (401, 403):
         return True
