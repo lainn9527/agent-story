@@ -2376,12 +2376,18 @@ def api_branches_merge():
     if parent_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
 
-    # 1. Copy child's delta messages to parent
+    # 1. Merge child's delta messages into parent
+    #    Keep parent messages at or before branch point, then append child messages.
+    branch_point = child.get("branch_point_index", -1)
+    parent_msgs = _load_json(_story_messages_path(story_id, parent_id), [])
+    kept = [m for m in parent_msgs if m.get("index", 0) <= branch_point]
+
     child_msgs = _load_json(_story_messages_path(story_id, branch_id), [])
     for m in child_msgs:
         m.pop("owner_branch_id", None)
         m.pop("inherited", None)
-    _save_json(_story_messages_path(story_id, parent_id), child_msgs)
+    kept.extend(child_msgs)
+    _save_json(_story_messages_path(story_id, parent_id), kept)
 
     # 2. Copy character state
     src_char = _story_character_state_path(story_id, branch_id)
