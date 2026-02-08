@@ -470,8 +470,9 @@ def _load_lore(story_id: str) -> list[dict]:
     return _load_json(_story_lore_path(story_id), [])
 
 
-def _find_similar_topic(new_topic: str, existing_topics: set[str], threshold: float = 0.5) -> str | None:
-    """Find an existing topic with high CJK bigram overlap. Returns match or None."""
+def _find_similar_topic(new_topic: str, new_category: str,
+                        topic_categories: dict[str, str], threshold: float = 0.5) -> str | None:
+    """Find an existing topic with high CJK bigram overlap, scoped to same category."""
     cjk_re = re.compile(r'[\u4e00-\u9fff]+')
 
     def _bigrams(text):
@@ -487,7 +488,9 @@ def _find_similar_topic(new_topic: str, existing_topics: set[str], threshold: fl
 
     best_topic = None
     best_sim = 0.0
-    for existing in existing_topics:
+    for existing, cat in topic_categories.items():
+        if cat != new_category:
+            continue  # only compare within same category
         ex_bgs = _bigrams(existing)
         if not ex_bgs:
             continue
@@ -640,7 +643,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             # Collect context for dedup
             toc = get_lore_toc(story_id)
             lore = _load_lore(story_id)
-            existing_topics = {e.get("topic", "") for e in lore}
+            topic_categories = {e.get("topic", ""): e.get("category", "") for e in lore}
             existing_titles = get_event_titles(story_id, branch_id)
 
             # Build schema summary for state extraction
@@ -730,17 +733,18 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             # Lore — similarity guard to prevent fragmentation
             for entry in data.get("lore", []):
                 topic = entry.get("topic", "").strip()
+                category = entry.get("category", "").strip()
                 if not topic:
                     continue
                 # If exact topic exists, upsert handles it.
-                # If not, check for a similar existing topic to merge into.
-                if topic not in existing_topics:
-                    similar = _find_similar_topic(topic, existing_topics)
+                # If not, check for a similar existing topic (same category) to merge into.
+                if topic not in topic_categories:
+                    similar = _find_similar_topic(topic, category, topic_categories)
                     if similar:
                         log.info("    lore merge: '%s' → '%s'", topic, similar)
                         entry["topic"] = similar
                 _save_lore_entry(story_id, entry)
-                existing_topics.add(entry.get("topic", topic))
+                topic_categories[entry.get("topic", topic)] = category
                 saved_counts["lore"] += 1
 
             # Events — dedup by title
