@@ -470,6 +470,35 @@ def _load_lore(story_id: str) -> list[dict]:
     return _load_json(_story_lore_path(story_id), [])
 
 
+def _find_similar_topic(new_topic: str, existing_topics: set[str], threshold: float = 0.5) -> str | None:
+    """Find an existing topic with high CJK bigram overlap. Returns match or None."""
+    cjk_re = re.compile(r'[\u4e00-\u9fff]+')
+
+    def _bigrams(text):
+        bgs = set()
+        for run in cjk_re.findall(text):
+            for i in range(len(run) - 1):
+                bgs.add(run[i:i + 2])
+        return bgs
+
+    new_bgs = _bigrams(new_topic)
+    if not new_bgs:
+        return None
+
+    best_topic = None
+    best_sim = 0.0
+    for existing in existing_topics:
+        ex_bgs = _bigrams(existing)
+        if not ex_bgs:
+            continue
+        sim = len(new_bgs & ex_bgs) / len(new_bgs | ex_bgs)
+        if sim > best_sim:
+            best_sim = sim
+            best_topic = existing
+
+    return best_topic if best_sim >= threshold else None
+
+
 def _save_lore_entry(story_id: str, entry: dict):
     """Save a lore entry. If same topic exists, update it. Also updates search index."""
     lore = _load_lore(story_id)
@@ -695,13 +724,21 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
             saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False}
 
-            # Lore — upsert by topic (_save_lore_entry handles dedup)
+            # Lore — similarity guard to prevent fragmentation
             for entry in data.get("lore", []):
                 topic = entry.get("topic", "").strip()
-                if topic:
-                    _save_lore_entry(story_id, entry)
-                    existing_topics.add(topic)
-                    saved_counts["lore"] += 1
+                if not topic:
+                    continue
+                # If exact topic exists, upsert handles it.
+                # If not, check for a similar existing topic to merge into.
+                if topic not in existing_topics:
+                    similar = _find_similar_topic(topic, existing_topics)
+                    if similar:
+                        log.info("    lore merge: '%s' → '%s'", topic, similar)
+                        entry["topic"] = similar
+                _save_lore_entry(story_id, entry)
+                existing_topics.add(entry.get("topic", topic))
+                saved_counts["lore"] += 1
 
             # Events — dedup by title
             for event in data.get("events", []):
