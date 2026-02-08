@@ -468,6 +468,9 @@ _PLAYER_SYSTEM_PROMPT = """\
 8. 每 3-5 回合至少做一次探索性行動（研究體系、詢問 NPC 背景、調查環境線索等）
 9. **明確詢問具體規則**——例如「基因鎖二階的具體條件是什麼？」「這個副本的世界觀背景是什麼？」「商城的兌換規則怎麼運作？」——用提問引出詳細設定
 
+## 至今的故事回顧
+{narrative_recap}
+
 ## 當前角色狀態
 {character_state}
 
@@ -479,10 +482,7 @@ _PLAYER_TURN_PROMPT = """\
 最近的故事進展：
 {recent_context}
 
-GM 最後的回覆：
-{gm_last}
-
-請輸出你的下一步行動（50-150字，第一人稱）。\
+請根據以上最新劇情，輸出你的下一步行動（50-150字，第一人稱）。\
 """
 
 
@@ -517,36 +517,29 @@ def generate_player_action(
     char_state = _load_character_state(story_id, branch_id)
     state_text = json.dumps(char_state, ensure_ascii=False, indent=2)
 
+    # Load narrative recap for long-term memory
+    recap_text = get_recap_text(story_id, branch_id)
+
     # Build system prompt
     phase_hint = _get_phase_hint(state, config)
     system_prompt = _PLAYER_SYSTEM_PROMPT.format(
         personality=config.character_personality,
+        narrative_recap=recap_text,
         character_state=state_text,
         phase_hint=phase_hint,
     )
 
-    # Build turn prompt with recent context
+    # Build turn prompt with recent context (last 4 messages = 2 full rounds)
     full_timeline = get_full_timeline(story_id, branch_id)
-    recent = full_timeline[-6:]
+    recent = full_timeline[-4:]
     context_lines = []
     for msg in recent:
         prefix = "【玩家】" if msg.get("role") == "user" else "【GM】"
         content = msg.get("content", "")
-        if len(content) > 300:
-            content = content[:300] + "..."
         context_lines.append(f"{prefix}\n{content}")
-
-    gm_last = ""
-    for msg in reversed(full_timeline):
-        if msg.get("role") == "gm":
-            gm_last = msg.get("content", "")
-            if len(gm_last) > 600:
-                gm_last = gm_last[:600] + "..."
-            break
 
     turn_prompt = _PLAYER_TURN_PROMPT.format(
         recent_context="\n\n".join(context_lines) if context_lines else "(開局)",
-        gm_last=gm_last or "(尚無GM回覆)",
     )
 
     response = call_oneshot(turn_prompt, system_prompt=system_prompt)
