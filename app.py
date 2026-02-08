@@ -2905,6 +2905,19 @@ def api_lore_chat_stream():
 - 可在一次回覆中輸出多個提案標籤
 - 提案標籤必須放在回覆最末尾"""
 
+    # Conditional Google Search grounding (Gemini only, zero cost when unused)
+    from llm_bridge import get_provider
+    provider = get_provider()
+    tools = None
+    if provider == "gemini":
+        tools = [{"googleSearch": {}}]
+        lore_system += """
+
+網路搜尋：
+- 你可以使用 Google Search 搜尋外部資料（動漫/小說/遊戲設定等）
+- 當用戶提到外部作品或需要查證資料時，主動搜尋以獲得準確資訊
+- 搜尋到的資料可以作為建議設定的依據"""
+
     # Extract prior messages and last user message (safe access)
     prior = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages[:-1]]
     last_user_msg = messages[-1].get("content", "")
@@ -2912,7 +2925,8 @@ def api_lore_chat_stream():
     def generate():
         try:
             for event_type, payload in call_claude_gm_stream(
-                last_user_msg, lore_system, prior, session_id=None
+                last_user_msg, lore_system, prior, session_id=None,
+                tools=tools,
             ):
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})
@@ -2931,11 +2945,14 @@ def api_lore_chat_stream():
                             pass
                     # Strip tags from display text
                     display_text = _LORE_PROPOSE_RE.sub("", full_response).strip()
-                    yield _sse_event({
+                    done_event = {
                         "type": "done",
                         "response": display_text,
                         "proposals": proposals,
-                    })
+                    }
+                    if payload.get("grounding"):
+                        done_event["grounding"] = payload["grounding"]
+                    yield _sse_event(done_event)
         except Exception as e:
             log.info("/api/lore/chat/stream EXCEPTION %s", e)
             yield _sse_event({"type": "error", "message": str(e)})

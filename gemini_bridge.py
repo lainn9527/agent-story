@@ -66,7 +66,8 @@ def _build_contents(recent_messages: list[dict], user_message: str) -> list[dict
 
 
 def _make_request_body(system_prompt: str, contents: list[dict],
-                       temperature: float = 1.0, max_tokens: int = 65536) -> dict:
+                       temperature: float = 1.0, max_tokens: int = 65536,
+                       tools: list[dict] | None = None) -> dict:
     body: dict = {
         "contents": contents,
         "generationConfig": {
@@ -82,6 +83,8 @@ def _make_request_body(system_prompt: str, contents: list[dict],
     }
     if system_prompt:
         body["system_instruction"] = {"parts": [{"text": system_prompt}]}
+    if tools:
+        body["tools"] = tools
     return body
 
 
@@ -146,6 +149,43 @@ def _with_key_fallback(gemini_cfg: dict, fn):
             return None, f"Gemini API 錯誤：{e}"
 
     return None, f"【系統錯誤】所有 API key 都失敗：{last_err}"
+
+
+def _format_grounding(metadata: dict) -> dict | None:
+    """Normalize Gemini groundingMetadata into a frontend-friendly structure.
+
+    Returns {"searchQueries": [...], "sources": [{"url", "title", "domain"}, ...]}
+    or None if the metadata has no useful data.
+    """
+    if not metadata:
+        return None
+
+    search_queries = metadata.get("searchEntryPoint", {}).get("renderedContent", "")
+    web_queries = metadata.get("webSearchQueries", [])
+    chunks = metadata.get("groundingChunks", [])
+
+    sources = []
+    seen_urls = set()
+    for chunk in chunks:
+        web = chunk.get("web", {})
+        url = web.get("uri", "")
+        title = web.get("title", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+            except Exception:
+                domain = ""
+            sources.append({"url": url, "title": title, "domain": domain})
+
+    if not sources and not web_queries:
+        return None
+
+    return {
+        "searchQueries": web_queries,
+        "sources": sources,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -216,16 +256,17 @@ def call_gemini_gm_stream(
     gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
     session_id: str | None = None,
+    tools: list[dict] | None = None,
 ):
     """Stream a GM response from Gemini API.
 
     Yields tuples:
       ("text", delta_str)                 — incremental text chunk
-      ("done", {response, session_id})    — final result
+      ("done", {response, session_id, ...})  — final result (may include grounding)
       ("error", msg)                      — on failure
     """
     contents = _build_contents(recent_messages, user_message)
-    body = _make_request_body(system_prompt, contents)
+    body = _make_request_body(system_prompt, contents, tools=tools)
     payload = json.dumps(body).encode("utf-8")
 
     log.info("    gemini_bridge_stream: calling API model=%s contents_len=%d", model, len(contents))
@@ -271,6 +312,7 @@ def call_gemini_gm_stream(
 
     accumulated = ""
     truncated = False
+    grounding_metadata = None
     try:
         while True:
             raw_line = resp.readline()
@@ -298,13 +340,16 @@ def call_gemini_gm_stream(
                 accumulated += text
                 yield ("text", text)
 
-            # Check for MAX_TOKENS truncation
+            # Check for MAX_TOKENS truncation and grounding metadata
             candidates = event_data.get("candidates", [])
             if candidates:
                 finish_reason = candidates[0].get("finishReason", "")
                 if finish_reason == "MAX_TOKENS":
                     log.warning("    gemini_bridge_stream: response truncated (MAX_TOKENS)")
                     truncated = True
+                gm = candidates[0].get("groundingMetadata")
+                if gm:
+                    grounding_metadata = gm
 
         resp.close()
         elapsed = time.time() - t0
@@ -319,7 +364,14 @@ def call_gemini_gm_stream(
             accumulated += suffix
             yield ("text", suffix)
 
-        yield ("done", {"response": accumulated, "session_id": None})
+        done_payload = {"response": accumulated, "session_id": None}
+        grounding = _format_grounding(grounding_metadata)
+        if grounding:
+            done_payload["grounding"] = grounding
+            log.info("    gemini_bridge_stream: grounding — %d sources, queries=%s",
+                     len(grounding.get("sources", [])),
+                     grounding.get("searchQueries", []))
+        yield ("done", done_payload)
 
     except Exception as e:
         log.info("    gemini_bridge_stream: EXCEPTION %s", e)
