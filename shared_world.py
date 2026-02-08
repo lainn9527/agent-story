@@ -126,45 +126,52 @@ def generate_snapshot_summaries(story_id: str, agent_branch_id: str):
     """Generate narrative summaries for unsummarized snapshots.
 
     Called after auto_play completes or periodically during play.
-    Uses lock to prevent concurrent writes.
+    LLM calls are made outside the lock to avoid blocking save_agent_snapshot().
     """
     from llm_bridge import call_oneshot
 
+    # 1. Read snapshots and identify unsummarized indices (under lock)
+    path = _snapshots_path(story_id, agent_branch_id)
     with _get_snapshot_lock(story_id, agent_branch_id):
-        path = _snapshots_path(story_id, agent_branch_id)
         snapshots = _load_json(path, [])
-        if not snapshots:
-            return
+    if not snapshots:
+        return
 
-        updated = False
-        for snap in snapshots:
-            if snap.get("summary"):
-                continue
+    # 2. Generate summaries outside the lock
+    summaries: dict[int, str] = {}  # index → summary text
+    for i, snap in enumerate(snapshots):
+        if snap.get("summary"):
+            continue
 
-            cs = snap.get("character_state", {})
-            name = cs.get("name", "未知")
-            missions = snap.get("completed_missions", [])
-            phase = snap.get("phase", "unknown")
-            turn = snap.get("turn", 0)
+        cs = snap.get("character_state", {})
+        name = cs.get("name", "未知")
+        missions = snap.get("completed_missions", [])
+        phase = snap.get("phase", "unknown")
+        turn = snap.get("turn", 0)
 
-            prompt = (
-                f"用繁體中文寫一句話（50-80字）總結輪迴者「{name}」在回合{turn}的狀態。\n"
-                f"當前階段：{'副本中' if phase == 'dungeon' else '主神空間'}\n"
-                f"已完成副本：{', '.join(str(m) for m in missions) if missions else '無'}\n"
-                f"獎勵點：{cs.get('reward_points', 0)}\n"
-                f"狀態：{cs.get('current_status', '未知')}\n\n"
-                f"直接輸出摘要文字，不要加標記。"
-            )
+        prompt = (
+            f"用繁體中文寫一句話（50-80字）總結輪迴者「{name}」在回合{turn}的狀態。\n"
+            f"當前階段：{'副本中' if phase == 'dungeon' else '主神空間'}\n"
+            f"已完成副本：{', '.join(str(m) for m in missions) if missions else '無'}\n"
+            f"獎勵點：{cs.get('reward_points', 0)}\n"
+            f"狀態：{cs.get('current_status', '未知')}\n\n"
+            f"直接輸出摘要文字，不要加標記。"
+        )
 
-            try:
-                summary = call_oneshot(prompt)
-                if summary:
-                    snap["summary"] = summary.strip()
-                    updated = True
-            except Exception as e:
-                log.warning("snapshot summary generation failed: %s", e)
+        try:
+            summary = call_oneshot(prompt)
+            if summary:
+                summaries[i] = summary.strip()
+        except Exception as e:
+            log.warning("snapshot summary generation failed: %s", e)
 
-        if updated:
+    # 3. Write summaries back (under lock)
+    if summaries:
+        with _get_snapshot_lock(story_id, agent_branch_id):
+            snapshots = _load_json(path, [])
+            for i, text in summaries.items():
+                if i < len(snapshots) and not snapshots[i].get("summary"):
+                    snapshots[i]["summary"] = text
             _save_json(path, snapshots)
 
 
@@ -187,8 +194,11 @@ def get_agents_context(
     lines = ["[其他輪迴者動態]"]
 
     # Single pass: load each agent's snapshot once, cache for reuse
+    # Skip the agent whose branch_id matches the calling branch (avoid self-referencing)
     agent_snapshots: dict[str, dict | None] = {}
     for agent_id, agent in agents_data["agents"].items():
+        if agent["branch_id"] == branch_id:
+            continue  # don't inject an agent's own data into its context
         agent_snapshots[agent_id] = get_agent_snapshot_at(
             story_id, agent["branch_id"], current_day,
         )

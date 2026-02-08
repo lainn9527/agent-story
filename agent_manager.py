@@ -204,16 +204,20 @@ def start_agent(story_id: str, agent_id: str) -> bool:
     )
 
     def _run():
+        error_msg = None
         try:
             auto_play(config)
         except Exception as e:
             log.exception("Agent %s crashed: %s", agent_id, e)
+            error_msg = str(e)
         finally:
             with _get_agents_lock(story_id):
                 data = load_agents(story_id)
                 ag = data["agents"].get(agent_id)
                 if ag and ag["status"] == "running":
-                    ag["status"] = "stopped"
+                    ag["status"] = "error" if error_msg else "stopped"
+                    if error_msg:
+                        ag["error_message"] = error_msg
                     _save_agents(story_id, data)
             with _active_threads_lock:
                 _active_threads.pop(agent_id, None)

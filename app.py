@@ -2970,7 +2970,9 @@ def api_agents_action(agent_id, action):
         ok = agent_manager.stop_agent(story_id, agent_id)
     else:
         return jsonify({"ok": False, "error": f"unknown action: {action}"}), 400
-    return jsonify({"ok": ok})
+    if not ok:
+        return jsonify({"ok": False, "error": f"cannot {action} agent {agent_id}"}), 409
+    return jsonify({"ok": True})
 
 
 @app.route("/api/agents/<agent_id>", methods=["DELETE"])
@@ -2978,7 +2980,9 @@ def api_agents_delete(agent_id):
     """Delete an agent (branch data is kept)."""
     story_id = _active_story_id()
     ok = agent_manager.delete_agent(story_id, agent_id)
-    return jsonify({"ok": ok})
+    if not ok:
+        return jsonify({"ok": False, "error": "agent not found"}), 404
+    return jsonify({"ok": True})
 
 
 @app.route("/api/leaderboard")
