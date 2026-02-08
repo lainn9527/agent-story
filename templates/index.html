@@ -44,6 +44,7 @@
     <div class="drawer-section">
       <div class="drawer-section-title">
         <span>&#x1F500; 分支</span>
+        <button id="branch-tree-btn" class="drawer-add-btn" title="分支樹全覽">&#x1F333;</button>
         <button id="new-blank-branch-btn" class="drawer-add-btn" title="新建空白分支（全新開始）">⊕</button>
         <button id="new-branch-btn" class="drawer-add-btn" title="新分支">+</button>
       </div>
@@ -180,6 +181,22 @@
         <button id="summary-modal-close" class="summary-modal-close-btn">&times;</button>
       </div>
       <div id="summary-modal-timeline" class="summary-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Branch Tree Modal -->
+  <div id="branch-tree-modal" class="modal-overlay hidden">
+    <div class="modal-content branch-tree-modal-content">
+      <div class="branch-tree-modal-header">
+        <h2>分支樹</h2>
+        <div id="bt-toolbar" class="bt-toolbar">
+          <button id="bt-select-toggle" class="bt-toolbar-btn" title="多選模式">&#x2610;</button>
+          <button id="bt-delete-selected" class="bt-toolbar-btn bt-danger hidden" title="刪除選取">&#x2715; 刪除</button>
+          <button id="bt-merge-selected" class="bt-toolbar-btn bt-merge hidden" title="合併選取">&#x2934; 合併</button>
+        </div>
+        <button id="branch-tree-modal-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="branch-tree-container" class="branch-tree-container"></div>
     </div>
   </div>
 
