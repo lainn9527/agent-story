@@ -728,9 +728,10 @@ body {
 
 /* ---------- Delete Previous Button ---------- */
 .delete-prev-btn {
+  left: 40px !important;
   color: var(--accent);
   opacity: 0.7;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   transition: opacity 0.2s;
   animation: fadeInBtn 0.3s ease;
 }
