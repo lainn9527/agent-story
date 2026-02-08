@@ -2480,33 +2480,57 @@ def api_branches_delete(branch_id):
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
     branch = branches[branch_id]
+    deleted_parent = branch.get("parent_branch_id", "main") or "main"
+    deleted_bp = branch.get("branch_point_index")
 
-    # Collect this branch + all descendants (BFS)
-    to_delete = []
-    queue = [branch_id]
-    while queue:
-        bid = queue.pop(0)
-        to_delete.append(bid)
-        for b in branches.values():
-            if b.get("parent_branch_id") == bid and b["id"] not in to_delete and not b.get("deleted"):
-                queue.append(b["id"])
+    # Find direct non-deleted, non-merged children
+    children = [
+        b for b in branches.values()
+        if b.get("parent_branch_id") == branch_id
+        and not b.get("deleted")
+        and not b.get("merged")
+    ]
 
-    for bid in to_delete:
-        b = branches.get(bid)
-        if not b:
-            continue
-        if b.get("was_main"):
-            now = datetime.now(timezone.utc).isoformat()
-            b["deleted"] = True
-            b["deleted_at"] = now
-        else:
-            bdir = _branch_dir(story_id, bid)
-            if os.path.isdir(bdir):
-                shutil.rmtree(bdir)
-            del branches[bid]
+    if children:
+        # Load deleted branch's delta messages before we remove the branch dir
+        deleted_delta = _load_json(_story_messages_path(story_id, branch_id), [])
 
-    if tree.get("active_branch_id") in to_delete:
-        tree["active_branch_id"] = "main"
+        for child in children:
+            child_id = child["id"]
+            child_bp = child.get("branch_point_index")
+
+            if child_bp is not None and child_bp >= 0 and deleted_bp is not None:
+                if child_bp >= deleted_bp:
+                    # Case A: child forked within deleted's delta range
+                    # Inherit messages from deleted's delta up to child's bp
+                    inherited = [m for m in deleted_delta if m.get("index", 0) <= child_bp]
+                    if inherited:
+                        child_delta = _load_json(_story_messages_path(story_id, child_id), [])
+                        _save_json(_story_messages_path(story_id, child_id), inherited + child_delta)
+                        child["branch_point_index"] = deleted_bp
+                    # else: deleted_delta empty → treat like Case B (keep bp, just reparent)
+                else:
+                    # Case B: child_bp < deleted_bp — child doesn't inherit anything
+                    # bp stays the same (still valid in grandparent's timeline)
+                    pass
+            # else: blank child (bp=-1) — no messages inherited, bp stays -1
+
+            # Always reparent to grandparent
+            child["parent_branch_id"] = deleted_parent
+
+    # Delete the branch itself (preserve existing was_main soft-delete logic)
+    if branch.get("was_main"):
+        now = datetime.now(timezone.utc).isoformat()
+        branch["deleted"] = True
+        branch["deleted_at"] = now
+    else:
+        bdir = _branch_dir(story_id, branch_id)
+        if os.path.isdir(bdir):
+            shutil.rmtree(bdir)
+        del branches[branch_id]
+
+    if tree.get("active_branch_id") == branch_id:
+        tree["active_branch_id"] = deleted_parent
 
     _save_tree(story_id, tree)
 
