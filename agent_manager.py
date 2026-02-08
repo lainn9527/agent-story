@@ -23,14 +23,24 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _active_threads: dict[str, threading.Thread] = {}  # agent_id → thread
 _tree_locks: dict[str, threading.Lock] = {}         # story_id → lock
 _tree_locks_lock = threading.Lock()                  # protects _tree_locks dict
+_agents_locks: dict[str, threading.Lock] = {}        # story_id → agents.json lock
+_agents_locks_lock = threading.Lock()                # protects _agents_locks dict
 
 
-def _get_tree_lock(story_id: str) -> threading.Lock:
+def get_tree_lock(story_id: str) -> threading.Lock:
     """Get or create a lock for timeline_tree.json writes."""
     with _tree_locks_lock:
         if story_id not in _tree_locks:
             _tree_locks[story_id] = threading.Lock()
         return _tree_locks[story_id]
+
+
+def _get_agents_lock(story_id: str) -> threading.Lock:
+    """Get or create a lock for agents.json reads/writes."""
+    with _agents_locks_lock:
+        if story_id not in _agents_locks:
+            _agents_locks[story_id] = threading.Lock()
+        return _agents_locks[story_id]
 
 
 # ---------------------------------------------------------------------------
@@ -41,29 +51,38 @@ def _agents_path(story_id: str) -> str:
     return os.path.join(BASE_DIR, "data", "stories", story_id, "agents.json")
 
 
-def _load_agents(story_id: str) -> dict:
+def load_agents(story_id: str) -> dict:
+    """Load agents.json. Caller should hold _get_agents_lock() if mutating."""
     path = _agents_path(story_id)
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
     return {"agents": {}}
 
 
 def _save_agents(story_id: str, data: dict):
+    """Save agents.json. Caller should hold _get_agents_lock()."""
     path = _agents_path(story_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def get_agent(story_id: str, agent_id: str) -> dict | None:
     """Return a single agent dict or None."""
-    return _load_agents(story_id).get("agents", {}).get(agent_id)
+    with _get_agents_lock(story_id):
+        return load_agents(story_id).get("agents", {}).get(agent_id)
 
 
 def list_agents(story_id: str) -> list[dict]:
     """Return all agents as a list."""
-    return list(_load_agents(story_id).get("agents", {}).values())
+    with _get_agents_lock(story_id):
+        return list(load_agents(story_id).get("agents", {}).values())
 
 
 # ---------------------------------------------------------------------------
@@ -123,9 +142,10 @@ def create_agent(
         "auto_play_config": ap_cfg,
     }
 
-    agents_data = _load_agents(story_id)
-    agents_data["agents"][agent_id] = agent
-    _save_agents(story_id, agents_data)
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        agents_data["agents"][agent_id] = agent
+        _save_agents(story_id, agents_data)
 
     return agent
 
@@ -138,20 +158,21 @@ def start_agent(story_id: str, agent_id: str) -> bool:
     """Start or resume an agent in a background thread."""
     from auto_play import AutoPlayConfig, auto_play, load_run_state
 
-    agents_data = _load_agents(story_id)
-    agent = agents_data["agents"].get(agent_id)
-    if not agent or agent["status"] == "running":
-        return False
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        agent = agents_data["agents"].get(agent_id)
+        if not agent or agent["status"] == "running":
+            return False
 
-    # Check if resuming
-    branch_id = agent["branch_id"]
-    has_state = load_run_state(story_id, branch_id) is not None
-    is_resume = has_state and agent["status"] in ("paused", "stopped", "error")
+        # Check if resuming
+        branch_id = agent["branch_id"]
+        has_state = load_run_state(story_id, branch_id) is not None
+        is_resume = has_state and agent["status"] in ("paused", "stopped", "error")
 
-    agent["status"] = "running"
-    agent["started_at"] = datetime.now(timezone.utc).isoformat()
-    agent["paused_at"] = None
-    _save_agents(story_id, agents_data)
+        agent["status"] = "running"
+        agent["started_at"] = datetime.now(timezone.utc).isoformat()
+        agent["paused_at"] = None
+        _save_agents(story_id, agents_data)
 
     char_config = agent.get("character_config", {})
     ap_cfg = agent.get("auto_play_config", {})
@@ -182,11 +203,12 @@ def start_agent(story_id: str, agent_id: str) -> bool:
         except Exception as e:
             log.exception("Agent %s crashed: %s", agent_id, e)
         finally:
-            data = _load_agents(story_id)
-            ag = data["agents"].get(agent_id)
-            if ag and ag["status"] == "running":
-                ag["status"] = "stopped"
-                _save_agents(story_id, data)
+            with _get_agents_lock(story_id):
+                data = load_agents(story_id)
+                ag = data["agents"].get(agent_id)
+                if ag and ag["status"] == "running":
+                    ag["status"] = "stopped"
+                    _save_agents(story_id, data)
             _active_threads.pop(agent_id, None)
 
     t = threading.Thread(target=_run, daemon=True, name=f"agent-{agent_id}")
@@ -205,36 +227,53 @@ resume_agent = start_agent
 
 def pause_agent(story_id: str, agent_id: str) -> bool:
     """Set status='paused'. The running thread exits on its next turn check."""
-    agents_data = _load_agents(story_id)
-    agent = agents_data["agents"].get(agent_id)
-    if not agent or agent["status"] != "running":
-        return False
-    agent["status"] = "paused"
-    agent["paused_at"] = datetime.now(timezone.utc).isoformat()
-    _save_agents(story_id, agents_data)
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        agent = agents_data["agents"].get(agent_id)
+        if not agent or agent["status"] != "running":
+            return False
+        agent["status"] = "paused"
+        agent["paused_at"] = datetime.now(timezone.utc).isoformat()
+        _save_agents(story_id, agents_data)
     return True
 
 
 def stop_agent(story_id: str, agent_id: str) -> bool:
     """Set status='stopped'. The running thread exits on its next turn check."""
-    agents_data = _load_agents(story_id)
-    agent = agents_data["agents"].get(agent_id)
-    if not agent:
-        return False
-    agent["status"] = "stopped"
-    _save_agents(story_id, agents_data)
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        agent = agents_data["agents"].get(agent_id)
+        if not agent:
+            return False
+        agent["status"] = "stopped"
+        _save_agents(story_id, agents_data)
     return True
 
 
 def delete_agent(story_id: str, agent_id: str) -> bool:
     """Stop agent and remove from registry (branch data is kept)."""
-    agents_data = _load_agents(story_id)
-    agent = agents_data["agents"].pop(agent_id, None)
-    if not agent:
-        return False
-    agent["status"] = "stopped"
-    _save_agents(story_id, agents_data)
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        agent = agents_data["agents"].get(agent_id)
+        if not agent:
+            return False
+
+        # Signal cooperative stop first (thread checks status each turn)
+        if agent["status"] == "running":
+            agent["status"] = "stopped"
+            _save_agents(story_id, agents_data)
+
+    # Wait outside the lock so thread can update agents.json on exit
+    t = _active_threads.get(agent_id)
+    if t and t.is_alive():
+        t.join(timeout=5)
     _active_threads.pop(agent_id, None)
+
+    # Now remove from registry
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        agents_data["agents"].pop(agent_id, None)
+        _save_agents(story_id, agents_data)
     return True
 
 
@@ -246,34 +285,34 @@ def migrate_auto_branches(story_id: str):
     """Scan timeline_tree for auto_ branches not in agents.json, import them."""
     from app import _load_tree, _load_character_state
 
-    agents_data = _load_agents(story_id)
-    known_branches = {a["branch_id"] for a in agents_data["agents"].values()}
+    with _get_agents_lock(story_id):
+        agents_data = load_agents(story_id)
+        known_branches = {a["branch_id"] for a in agents_data["agents"].values()}
 
-    tree = _load_tree(story_id)
-    for bid, branch in tree.get("branches", {}).items():
-        if not bid.startswith("auto_") or bid in known_branches:
-            continue
-        if branch.get("deleted"):
-            continue
+        tree = _load_tree(story_id)
+        for bid, branch in tree.get("branches", {}).items():
+            if not bid.startswith("auto_") or bid in known_branches:
+                continue
+            if branch.get("deleted"):
+                continue
 
-        # Build minimal agent entry
-        char_state = _load_character_state(story_id, bid)
-        name = char_state.get("name", "Unknown") if char_state else "Unknown"
-        agent_id = f"agent_{bid.replace('auto_', '')}"
+            char_state = _load_character_state(story_id, bid)
+            name = char_state.get("name", "Unknown") if char_state else "Unknown"
+            agent_id = f"agent_{bid.replace('auto_', '')}"
 
-        agent = {
-            "id": agent_id,
-            "name": name,
-            "branch_id": bid,
-            "character_config": {"character_state": char_state or {}},
-            "status": "stopped",
-            "created_at": branch.get("created_at", ""),
-            "started_at": None,
-            "paused_at": None,
-            "provider": "claude_cli",
-            "max_turns": 200,
-            "auto_play_config": {},
-        }
-        agents_data["agents"][agent_id] = agent
+            agent = {
+                "id": agent_id,
+                "name": name,
+                "branch_id": bid,
+                "character_config": {"character_state": char_state or {}},
+                "status": "stopped",
+                "created_at": branch.get("created_at", ""),
+                "started_at": None,
+                "paused_at": None,
+                "provider": "claude_cli",
+                "max_turns": 200,
+                "auto_play_config": {},
+            }
+            agents_data["agents"][agent_id] = agent
 
-    _save_agents(story_id, agents_data)
+        _save_agents(story_id, agents_data)

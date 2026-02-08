@@ -287,9 +287,9 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
         try:
             from shared_world import get_leaderboard
             from world_timer import get_world_day
-            from agent_manager import _load_agents
+            from agent_manager import load_agents
             current_day = get_world_day(story_id, branch_id)
-            agents_data = _load_agents(story_id)
+            agents_data = load_agents(story_id)
             if agents_data.get("agents"):
                 lb = get_leaderboard(story_id, world_day=current_day)
                 lines = []
@@ -1430,8 +1430,7 @@ def api_send():
     # 8. Trigger compaction if due
     recap = load_recap(story_id, branch_id)
     if should_compact(recap, len(full_timeline) + 1):
-        full_timeline.append(gm_msg)
-        compact_async(story_id, branch_id, full_timeline)
+        compact_async(story_id, branch_id, list(full_timeline) + [gm_msg])
 
     log.info("/api/send DONE   total=%.1fs", time.time() - t_start)
     return jsonify({"ok": True, "player": player_msg, "gm": gm_msg})
@@ -1572,8 +1571,8 @@ def api_branches():
     # Collect agent branch IDs to filter them out
     agent_branch_ids = set()
     try:
-        from agent_manager import _load_agents
-        agents_data = _load_agents(story_id)
+        from agent_manager import load_agents
+        agents_data = load_agents(story_id)
         for agent in agents_data.get("agents", {}).values():
             agent_branch_ids.add(agent["branch_id"])
     except Exception:
@@ -1925,11 +1924,6 @@ def api_branches_edit_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
-                    new_session_id = payload["session_id"]
-
-                    if new_session_id:
-                        tree["branches"][branch_id]["session_id"] = new_session_id
-                        _save_tree(story_id, tree)
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -2027,14 +2021,10 @@ def api_branches_regenerate():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    gm_response, new_session_id = call_claude_gm(
+    gm_response, _ = call_claude_gm(
         augmented_regen, system_prompt, recent, session_id=None
     )
     log.info("  claude_call: %.1fs (new session)", time.time() - t0)
-
-    if new_session_id:
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
 
     gm_msg_index = branch_point_index + 1
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
@@ -2139,11 +2129,6 @@ def api_branches_regenerate_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
-                    new_session_id = payload["session_id"]
-
-                    if new_session_id:
-                        tree["branches"][branch_id]["session_id"] = new_session_id
-                        _save_tree(story_id, tree)
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index

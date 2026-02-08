@@ -2103,10 +2103,21 @@ function removeInitOverlay() {
 // ---------------------------------------------------------------------------
 // Agent panel (multi-agent shared universe)
 // ---------------------------------------------------------------------------
+let _agentPollTimer = null;
 async function loadAgents() {
   try {
     const result = await API.agents();
-    renderAgentPanel(result.agents || []);
+    const agents = result.agents || [];
+    renderAgentPanel(agents);
+
+    // Auto-poll every 5s while any agent is running
+    const hasRunning = agents.some(a => a.status === "running");
+    if (hasRunning && !_agentPollTimer) {
+      _agentPollTimer = setInterval(loadAgents, 5000);
+    } else if (!hasRunning && _agentPollTimer) {
+      clearInterval(_agentPollTimer);
+      _agentPollTimer = null;
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -2119,7 +2130,6 @@ function renderAgentPanel(agents) {
     empty.className = "agent-empty";
     empty.textContent = "尚無其他輪迴者。點擊 + 建立 AI 輪迴者。";
     panel.appendChild(empty);
-    return;
   }
 
   for (const agent of agents) {
@@ -2169,8 +2179,15 @@ function renderAgentPanel(agents) {
       startBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         startBtn.disabled = true;
-        const action = agent.status === "paused" ? "resume" : "start";
-        await API.agentAction(agent.id, action);
+        try {
+          const action = agent.status === "paused" ? "resume" : "start";
+          const res = await API.agentAction(agent.id, action);
+          if (!res.ok) throw new Error(res.error || "操作失敗");
+        } catch (err) {
+          startBtn.disabled = false;
+          showToast?.(`啟動失敗: ${err.message}`) ?? alert(`啟動失敗: ${err.message}`);
+          return;
+        }
         setTimeout(loadAgents, 500);
       });
       controls.appendChild(startBtn);
@@ -2184,7 +2201,14 @@ function renderAgentPanel(agents) {
       pauseBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         pauseBtn.disabled = true;
-        await API.agentAction(agent.id, "pause");
+        try {
+          const res = await API.agentAction(agent.id, "pause");
+          if (!res.ok) throw new Error(res.error || "操作失敗");
+        } catch (err) {
+          pauseBtn.disabled = false;
+          showToast?.(`暫停失敗: ${err.message}`) ?? alert(`暫停失敗: ${err.message}`);
+          return;
+        }
         setTimeout(loadAgents, 500);
       });
       controls.appendChild(pauseBtn);
@@ -2196,7 +2220,14 @@ function renderAgentPanel(agents) {
       stopBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         stopBtn.disabled = true;
-        await API.agentAction(agent.id, "stop");
+        try {
+          const res = await API.agentAction(agent.id, "stop");
+          if (!res.ok) throw new Error(res.error || "操作失敗");
+        } catch (err) {
+          stopBtn.disabled = false;
+          showToast?.(`停止失敗: ${err.message}`) ?? alert(`停止失敗: ${err.message}`);
+          return;
+        }
         setTimeout(loadAgents, 500);
       });
       controls.appendChild(stopBtn);
@@ -2223,7 +2254,13 @@ function renderAgentPanel(agents) {
       e.stopPropagation();
       const ok = await showConfirm(`確定刪除輪迴者「${agent.name}」嗎？分支資料會保留。`);
       if (!ok) return;
-      await API.deleteAgent(agent.id);
+      try {
+        const res = await API.deleteAgent(agent.id);
+        if (!res.ok) throw new Error(res.error || "刪除失敗");
+      } catch (err) {
+        showToast?.(`刪除失敗: ${err.message}`) ?? alert(`刪除失敗: ${err.message}`);
+        return;
+      }
       loadAgents();
     });
     controls.appendChild(delBtn);

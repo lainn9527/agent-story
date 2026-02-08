@@ -42,8 +42,10 @@ def _load_json(path: str, default=None):
 
 def _save_json(path: str, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -157,23 +159,28 @@ def get_agents_context(
     story_id: str, branch_id: str, user_text: str = "",
 ) -> str:
     """Build [其他輪迴者動態] using snapshots at current branch's world_day."""
-    from agent_manager import _load_agents
+    from agent_manager import load_agents
     from world_timer import get_world_day
 
-    agents_data = _load_agents(story_id)
+    agents_data = load_agents(story_id)
     if not agents_data.get("agents"):
         return ""
 
     current_day = get_world_day(story_id, branch_id)
     lines = ["[其他輪迴者動態]"]
 
-    # Status list for each agent
+    # Single pass: load each agent's snapshot once, cache for reuse
+    agent_snapshots: dict[str, dict | None] = {}
     for agent_id, agent in agents_data["agents"].items():
-        snapshot = get_agent_snapshot_at(
+        agent_snapshots[agent_id] = get_agent_snapshot_at(
             story_id, agent["branch_id"], current_day,
         )
+
+    # Status list for each agent
+    entries = []
+    for agent_id, agent in agents_data["agents"].items():
+        snapshot = agent_snapshots[agent_id]
         if not snapshot:
-            # No snapshot yet — show as newly arrived
             lines.append(f"- {agent['name']}：剛進入主神空間（新人）")
             continue
 
@@ -189,30 +196,22 @@ def get_agents_context(
         else:
             lines.append(f"- {name}：狀態未知")
 
-    # Leaderboard from snapshots
-    entries = []
-    for agent_id, agent in agents_data["agents"].items():
-        snapshot = get_agent_snapshot_at(
-            story_id, agent["branch_id"], current_day,
-        )
-        if snapshot:
-            cs = snapshot.get("character_state", {})
-            entries.append({
-                "name": cs.get("name", agent["name"]),
-                "reward_points": cs.get("reward_points", 0),
-            })
+        entries.append({
+            "name": name,
+            "reward_points": cs.get("reward_points", 0),
+        })
+
+    # Leaderboard from cached snapshots
     entries.sort(key=lambda x: x["reward_points"], reverse=True)
     if entries:
         lines.append("排行榜（獎勵點）：")
         for i, e in enumerate(entries[:5], 1):
             lines.append(f"  {i}. {e['name']} — {e['reward_points']}點")
 
-    # Name-match: detailed profile from snapshot
+    # Name-match: detailed profile from cached snapshot
     matched_agent = _find_mentioned_agent(user_text, agents_data)
     if matched_agent:
-        snapshot = get_agent_snapshot_at(
-            story_id, matched_agent["branch_id"], current_day,
-        )
+        snapshot = agent_snapshots.get(matched_agent["id"])
         if snapshot:
             profile = _build_profile_from_snapshot(matched_agent, snapshot)
             lines.append("")
@@ -223,9 +222,9 @@ def get_agents_context(
 
 def get_leaderboard(story_id: str, world_day: float | None = None) -> list[dict]:
     """Build leaderboard from snapshots. If world_day is None, use latest snapshots."""
-    from agent_manager import _load_agents
+    from agent_manager import load_agents
 
-    agents_data = _load_agents(story_id)
+    agents_data = load_agents(story_id)
     entries = []
 
     for agent_id, agent in agents_data.get("agents", {}).items():

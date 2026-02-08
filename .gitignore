@@ -1,4 +1,7 @@
 __pycache__/
+.DS_Store
+*.bak
+*.tmp
 
 # ── Data directory ──
 # Track story config templates (system_prompt, schema, world_lore, default state)

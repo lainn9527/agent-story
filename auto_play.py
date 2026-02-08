@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -406,8 +407,8 @@ def execute_turn(
     # 6. Update session_id if changed (thread-safe for multi-agent)
     if new_session_id and new_session_id != session_id:
         try:
-            from agent_manager import _get_tree_lock
-            with _get_tree_lock(story_id):
+            from agent_manager import get_tree_lock
+            with get_tree_lock(story_id):
                 tree = _load_tree(story_id)
                 tree["branches"][branch_id]["session_id"] = new_session_id
                 _save_tree(story_id, tree)
@@ -674,8 +675,8 @@ def should_stop(state: RunState, config: AutoPlayConfig) -> bool:
 
     # Cooperative stop via agent registry
     if config.agent_id:
-        from agent_manager import _load_agents
-        agents_data = _load_agents(config.story_id)
+        from agent_manager import load_agents
+        agents_data = load_agents(config.story_id)
         agent = agents_data.get("agents", {}).get(config.agent_id)
         if agent and agent.get("status") not in ("running",):
             log.info("STOP: Agent status changed to '%s'", agent.get("status"))
@@ -937,7 +938,12 @@ def auto_play(config: AutoPlayConfig):
                 turn=state.turn, phase=state.phase,
                 char_state=char_state,
             )
-            generate_snapshot_summaries(story_id, branch_id)
+            # Run summary generation in background to avoid blocking
+            threading.Thread(
+                target=generate_snapshot_summaries,
+                args=(story_id, branch_id),
+                daemon=True,
+            ).start()
         except Exception as e:
             log.warning("final snapshot/summary failed: %s", e)
 

@@ -1432,7 +1432,7 @@ body {
 }
 
 .agent-ctrl-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-sidebar);
 }
 
 .agent-ctrl-btn:disabled {
@@ -1481,7 +1481,7 @@ body {
 }
 
 .agent-lb-toggle:hover {
-  background: var(--bg-hover);
+  background: var(--bg-sidebar);
 }
 
 /* NPC Agent badge */
