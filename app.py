@@ -2028,6 +2028,7 @@ def api_branches_edit_stream():
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})
                 elif event_type == "error":
+                    _cleanup_branch(story_id, branch_id)
                     yield _sse_event({"type": "error", "message": payload})
                     return
                 elif event_type == "done":
@@ -2063,6 +2064,7 @@ def api_branches_edit_stream():
                     })
         except Exception as e:
             log.info("/api/branches/edit/stream EXCEPTION %s", e)
+            _cleanup_branch(story_id, branch_id)
             yield _sse_event({"type": "error", "message": str(e)})
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
@@ -2253,6 +2255,7 @@ def api_branches_regenerate_stream():
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})
                 elif event_type == "error":
+                    _cleanup_branch(story_id, branch_id)
                     yield _sse_event({"type": "error", "message": payload})
                     return
                 elif event_type == "done":
@@ -2288,6 +2291,7 @@ def api_branches_regenerate_stream():
                     })
         except Exception as e:
             log.info("/api/branches/regenerate/stream EXCEPTION %s", e)
+            _cleanup_branch(story_id, branch_id)
             yield _sse_event({"type": "error", "message": str(e)})
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
@@ -2437,6 +2441,22 @@ def api_branches_merge():
     _save_tree(story_id, tree)
 
     return jsonify({"ok": True, "parent_branch_id": parent_id})
+
+
+def _cleanup_branch(story_id, branch_id):
+    """Remove a failed branch (no cascade, just this one)."""
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+    if branch_id not in branches:
+        return
+    parent = branches[branch_id].get("parent_branch_id", "main")
+    del branches[branch_id]
+    if tree.get("active_branch_id") == branch_id:
+        tree["active_branch_id"] = parent
+    _save_tree(story_id, tree)
+    bdir = _branch_dir(story_id, branch_id)
+    if os.path.isdir(bdir):
+        shutil.rmtree(bdir)
 
 
 @app.route("/api/branches/<branch_id>", methods=["DELETE"])

@@ -665,6 +665,25 @@ body {
   color: var(--gold);
 }
 
+.sw-delete {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+.sibling-switcher:hover .sw-delete {
+  opacity: 0.6;
+}
+.sw-delete:hover {
+  opacity: 1 !important;
+  color: var(--accent);
+}
+
 /* ---------- Message Action Button ---------- */
 .msg-action-btn {
   position: absolute;
