@@ -370,10 +370,11 @@ function updateWorldDayDisplay(worldDay) {
     const day = Math.floor(worldDay);
     const frac = worldDay - day;
     let period;
-    if (frac < 0.25) period = "\u00B7\u6E05\u6668";       // ·清晨 (0:00-6:00)
+    if (frac < 0.25) period = "\u00B7\u6DF1\u591C";        // ·深夜 (0:00-6:00)
     else if (frac < 0.5) period = "\u00B7\u4E0A\u5348";    // ·上午 (6:00-12:00)
     else if (frac < 0.75) period = "\u00B7\u4E0B\u5348";   // ·下午 (12:00-18:00)
-    else period = "\u00B7\u591C\u665A";                     // ·夜晚 (18:00-24:00)
+    else if (frac < 0.875) period = "\u00B7\u591C\u665A";   // ·夜晚 (18:00-21:00)
+    else period = "\u00B7\u6DF1\u591C";                     // ·深夜 (21:00-24:00)
     el.textContent = `\u2726 \u4E16\u754C\u7B2C ${day} \u5929${period}`;
   } else {
     el.style.display = "none";
