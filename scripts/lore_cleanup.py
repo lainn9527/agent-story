@@ -279,7 +279,7 @@ def _parse_json_array(text: str) -> list[dict]:
     except json.JSONDecodeError:
         pass
 
-    # Fallback: find first JSON array
+    # Fallback: find JSON array (greedy — json.loads validates correctness)
     m = re.search(r"\[[\s\S]*\]", text)
     if m:
         try:
@@ -335,10 +335,17 @@ def split_long_entries(lore: list[dict], delay: float = 3.0, dry_run: bool = Fal
             result = call_oneshot(prompt)
             if result:
                 parsed = _parse_json_array(result)
-                sub_entries.extend(parsed)
-                log.info("    Chunk %d → %d sub-entries", ci, len(parsed))
+                if parsed:
+                    sub_entries.extend(parsed)
+                    log.info("    Chunk %d → %d sub-entries", ci, len(parsed))
+                else:
+                    log.warning("    Chunk %d: LLM returned non-parseable response, aborting split", ci)
+                    sub_entries = []  # discard partial results to avoid data loss
+                    break
             else:
-                log.warning("    Chunk %d: empty LLM response", ci)
+                log.warning("    Chunk %d: empty LLM response, aborting split", ci)
+                sub_entries = []  # discard partial results to avoid data loss
+                break
             if ci < len(chunks):
                 time.sleep(delay)
 
