@@ -12,6 +12,8 @@ import os
 import threading
 from datetime import datetime, timezone
 
+from story_utils import get_character_name
+
 log = logging.getLogger("rpg")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,17 +27,6 @@ MIN_UNCOMPACTED_FOR_TRIGGER = 20  # Need >20 uncompacted msgs to trigger
 RECENT_WINDOW = 20               # Keep last 20 messages as raw context
 
 _FALLBACK_RECAP = "（尚無回顧，完整對話記錄已提供。）"
-
-
-def _get_character_name(story_id: str, branch_id: str) -> str:
-    """Read player character name from branch character_state.json."""
-    path = os.path.join(STORIES_DIR, story_id, "branches", branch_id, "character_state.json")
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return state.get("name", "玩家")
-    except (FileNotFoundError, json.JSONDecodeError):
-        return "玩家"
 
 _COMPACT_PROMPT = """\
 你是故事摘要助手。以下是文字 RPG 遊戲的對話片段。請用繁體中文寫一份 500-800 字的敘事回顧：
@@ -64,6 +55,7 @@ _META_COMPACT_PROMPT = """\
 2. 核心角色發展弧線
 3. 仍在進行中的懸念和伏筆
 
+重要：玩家角色名為「{character_name}」。請一律使用「{character_name}」稱呼玩家角色，不要用其他名字替代。
 可以省略已解決的小事件和重複的細節。
 
 ---
@@ -218,7 +210,7 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
              len(msgs_to_compact), compacted_through + 1, compact_end - 1,
              story_id, branch_id)
 
-    character_name = _get_character_name(story_id, branch_id)
+    character_name = get_character_name(story_id, branch_id)
 
     existing_recap = ""
     if recap.get("recap_text"):
@@ -240,7 +232,7 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
     # Check if meta-compaction needed (recap too long)
     if len(new_recap_text) > RECAP_CHAR_CAP:
         log.info("    compaction: recap too long (%d chars), meta-compacting", len(new_recap_text))
-        meta_prompt = _META_COMPACT_PROMPT.format(recap=new_recap_text)
+        meta_prompt = _META_COMPACT_PROMPT.format(character_name=character_name, recap=new_recap_text)
         meta_result = call_oneshot(meta_prompt)
         if meta_result and meta_result.strip():
             new_recap_text = meta_result.strip()

@@ -8,6 +8,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from story_utils import get_character_name
+
 log = logging.getLogger("auto_play")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,17 +17,6 @@ STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
 SUMMARY_INTERVAL = 5        # every N turns
 MIN_COOLDOWN_SECONDS = 30   # minimum gap between summary calls
-
-
-def _get_character_name(story_id: str, branch_id: str) -> str:
-    """Read player character name from branch character_state.json."""
-    path = os.path.join(STORIES_DIR, story_id, "branches", branch_id, "character_state.json")
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return state.get("name", "玩家")
-    except (FileNotFoundError, json.JSONDecodeError):
-        return "玩家"
 
 # Track last run time per (story_id, branch_id) to enforce cooldown
 _last_run: dict[tuple[str, str], float] = {}
@@ -104,15 +95,15 @@ def generate_summary_async(
 
             messages_text = "\n\n".join(msg_lines)
 
-            character_name = _get_character_name(story_id, branch_id)
+            character_name = get_character_name(story_id, branch_id)
 
             prompt = (
                 "你是主神空間 RPG 的摘要生成器。根據以下遊戲記錄，生成一段精華摘要。\n\n"
-                f"## 玩家角色\n{character_name}（記錄中標記為【玩家】的發言者）\n"
-                f"重要：摘要中請一律使用「{character_name}」稱呼玩家角色，不要用其他名字替代。\n\n"
                 f"## 回合範圍\nTurn {turn_start} ~ {turn_end}\n\n"
                 f"## 當前階段\n{phase}\n\n"
                 f"## 遊戲記錄\n{messages_text}\n\n"
+                f"## 重要規則\n"
+                f"記錄中【玩家】的角色名為「{character_name}」。摘要中請一律使用「{character_name}」稱呼玩家角色，不要用其他名字替代。\n\n"
                 "請用繁體中文，嚴格按照以下 JSON 格式回覆（不要加其他文字）：\n"
                 '{"summary": "2-3句精華摘要，描述這段期間的主要進展", '
                 '"key_events": ["事件1", "事件2", ...]}\n'
