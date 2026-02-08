@@ -2727,8 +2727,10 @@ def api_lore_entry_update():
             new_topic = body.get("new_topic", topic).strip()
             new_category = body.get("category", e.get("category", "其他")).strip()
             new_content = body.get("content", e.get("content", "")).strip()
-            # If renaming, delete old index entry
+            # If renaming, check for collision with existing topic
             if new_topic != topic:
+                if any(x.get("topic") == new_topic for x in lore):
+                    return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
                 delete_lore_entry(story_id, topic)
             lore[i] = {"category": new_category, "topic": new_topic, "content": new_content}
             _save_json(_story_lore_path(story_id), lore)
@@ -2788,12 +2790,21 @@ def api_lore_chat_stream():
             lore_text_parts.append(e.get("content", ""))
             lore_text_parts.append("")
 
+    cat_list = ", ".join(dict.fromkeys(e.get("category", "其他") for e in lore)) if lore else "其他"
     lore_system = f"""你是世界設定管理助手，協助維護 RPG 世界的設定知識庫。
 
 角色：討論/新增/修改/刪除設定，確保一致性，用繁體中文回覆。
+重要：變更會即時同步到遊戲中，影響 GM 的下一次回覆。
 
+現有分類：{cat_list}
 現有設定（{len(lore)} 條）：
 {chr(10).join(lore_text_parts)}
+
+設定格式規範：
+- 設定內容可包含 [tag: 標籤1/標籤2] 用於搜尋分類（例：[tag: 體系/戰鬥]）
+- 設定內容可包含 [source: 來源] 標記參考資料
+- 設定會透過關鍵字搜尋注入 GM 上下文，請使用明確的術語和關鍵字以提升檢索效果
+- 新增設定時請使用上方現有分類，避免建立新分類
 
 提案格式（當建議變更時使用）：
 <!--LORE_PROPOSE {{"action":"add|edit|delete", "category":"...", "topic":"...", "content":"..."}} LORE_PROPOSE-->
@@ -2805,8 +2816,8 @@ def api_lore_chat_stream():
 - 可在一次回覆中輸出多個提案標籤
 - 提案標籤必須放在回覆最末尾"""
 
-    # Extract prior messages and last user message
-    prior = [{"role": m["role"], "content": m["content"]} for m in messages[:-1]]
+    # Extract prior messages and last user message (safe access)
+    prior = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages[:-1]]
     last_user_msg = messages[-1].get("content", "")
 
     def generate():

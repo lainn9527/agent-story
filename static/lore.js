@@ -10,10 +10,12 @@
   // ------------------------------------------------------------------
   let allEntries = [];
   let categories = [];
+  let collapsedCats = new Set(); // preserve collapsed state across re-renders
   let selectedTopic = null;
   let chatMessages = []; // {role, content} history for LLM
   let isStreaming = false;
   let editingEntry = null; // null = create, {topic, ...} = edit
+  let streamAbortController = null;
 
   // ------------------------------------------------------------------
   // DOM refs
@@ -122,7 +124,6 @@
 
     // Preserve category order from API
     const orderedCats = categories.filter((c) => groups.has(c));
-    // Add any new cats not in categories
     for (const c of groups.keys()) {
       if (!orderedCats.includes(c)) orderedCats.push(c);
     }
@@ -130,7 +131,8 @@
     let html = "";
     for (const cat of orderedCats) {
       const entries = groups.get(cat);
-      html += `<div class="lore-category">`;
+      const collapsed = collapsedCats.has(cat) ? " collapsed" : "";
+      html += `<div class="lore-category${collapsed}">`;
       html += `<div class="lore-cat-header" data-cat="${escapeHtml(cat)}">`;
       html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
       html += `${escapeHtml(cat)}`;
@@ -157,7 +159,10 @@
     // Bind click handlers
     $loreList.querySelectorAll(".lore-cat-header").forEach((el) => {
       el.addEventListener("click", () => {
+        const cat = el.dataset.cat;
         el.parentElement.classList.toggle("collapsed");
+        if (collapsedCats.has(cat)) collapsedCats.delete(cat);
+        else collapsedCats.add(cat);
       });
     });
 
@@ -227,7 +232,6 @@
     }
 
     if (editingEntry) {
-      // Update
       const updates = { category, content };
       if (topic !== editingEntry.topic) updates.new_topic = topic;
       const res = await updateEntry(editingEntry.topic, updates);
@@ -236,7 +240,6 @@
         return;
       }
     } else {
-      // Create
       const res = await createEntry({ category, topic, content });
       if (!res.ok) {
         alert(res.error || "新增失敗");
@@ -319,7 +322,13 @@
     html += `</div>`;
 
     if (proposal.content && action !== "delete") {
-      html += `<div class="proposal-content">${escapeHtml(truncate(proposal.content, 200))}</div>`;
+      const full = escapeHtml(proposal.content);
+      const short = escapeHtml(truncate(proposal.content, 200));
+      const needsExpand = proposal.content.length > 200;
+      html += `<div class="proposal-content">${needsExpand ? short : full}</div>`;
+      if (needsExpand) {
+        html += `<button class="proposal-expand-btn">展開全文</button>`;
+      }
     }
 
     html += `<div class="proposal-actions">`;
@@ -329,12 +338,43 @@
 
     card.innerHTML = html;
 
+    // Expand/collapse full content
+    const expandBtn = card.querySelector(".proposal-expand-btn");
+    if (expandBtn) {
+      let expanded = false;
+      const contentDiv = card.querySelector(".proposal-content");
+      const full = escapeHtml(proposal.content);
+      const short = escapeHtml(truncate(proposal.content, 200));
+      expandBtn.addEventListener("click", () => {
+        expanded = !expanded;
+        contentDiv.innerHTML = expanded ? full : short;
+        expandBtn.textContent = expanded ? "收起" : "展開全文";
+      });
+    }
+
+    // Accept with confirmation for delete, error recovery
     card.querySelector(".btn-accept").addEventListener("click", async () => {
-      card.classList.add("applied");
-      card.querySelector(".proposal-actions").innerHTML =
-        '<span style="color:#7fdb96;font-size:0.8rem;">已採用</span>';
-      await applyProposals([proposal]);
-      await refreshLoreList();
+      if (action === "delete") {
+        if (!confirm(`確定要刪除「${proposal.topic}」？`)) return;
+      }
+      const actionsDiv = card.querySelector(".proposal-actions");
+      actionsDiv.innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem;">套用中...</span>';
+      try {
+        const res = await applyProposals([proposal]);
+        if (res.ok) {
+          card.classList.add("applied");
+          actionsDiv.innerHTML = '<span style="color:#7fdb96;font-size:0.8rem;">已採用</span>';
+          await refreshLoreList();
+        } else {
+          actionsDiv.innerHTML =
+            '<span style="color:#db7f7f;font-size:0.8rem;">套用失敗</span> ' +
+            '<button class="btn-accept" style="margin-left:8px;">重試</button>';
+        }
+      } catch {
+        actionsDiv.innerHTML =
+          '<span style="color:#db7f7f;font-size:0.8rem;">連線錯誤</span> ' +
+          '<button class="btn-accept" style="margin-left:8px;">重試</button>';
+      }
     });
 
     card.querySelector(".btn-reject").addEventListener("click", () => {
@@ -346,18 +386,28 @@
     return card;
   }
 
+  function finishStreaming() {
+    isStreaming = false;
+    streamAbortController = null;
+    $chatSendBtn.disabled = false;
+  }
+
   async function sendChat() {
     const text = $chatInput.value.trim();
     if (!text || isStreaming) return;
 
-    // Add user message
+    // Trim chat history to last 40 messages to avoid unbounded growth
+    if (chatMessages.length > 40) {
+      chatMessages = chatMessages.slice(-40);
+    }
+
     chatMessages.push({ role: "user", content: text });
     appendChatMessage("user", text);
     $chatInput.value = "";
     isStreaming = true;
     $chatSendBtn.disabled = true;
+    streamAbortController = new AbortController();
 
-    // Create placeholder for assistant message
     const { div: msgDiv, body: msgBody } = appendChatMessage("assistant", "");
     msgBody.innerHTML = '<span class="streaming-cursor"></span>';
 
@@ -369,7 +419,16 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: chatMessages }),
+        signal: streamAbortController.signal,
       });
+
+      if (!response.ok) {
+        fullText = `[伺服器錯誤: ${response.status}]`;
+        msgBody.textContent = fullText;
+        chatMessages.push({ role: "assistant", content: fullText });
+        finishStreaming();
+        return;
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -381,7 +440,7 @@
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop(); // keep incomplete line
+        buffer = lines.pop();
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
@@ -395,7 +454,6 @@
           if (event.type === "text") {
             fullText += event.chunk;
             msgBody.textContent = fullText;
-            // Re-add cursor
             const cursor = document.createElement("span");
             cursor.className = "streaming-cursor";
             msgBody.appendChild(cursor);
@@ -409,13 +467,16 @@
         }
       }
     } catch (err) {
-      fullText += `\n[連線錯誤: ${err.message}]`;
+      if (err.name === "AbortError") {
+        fullText += "\n[已中斷]";
+      } else {
+        fullText += `\n[連線錯誤: ${err.message}]`;
+      }
     }
 
     // Finalize message
     msgBody.textContent = fullText;
 
-    // Add proposal cards if any
     if (proposals.length > 0) {
       const cardsDiv = document.createElement("div");
       cardsDiv.className = "proposal-cards";
@@ -426,8 +487,7 @@
     }
 
     chatMessages.push({ role: "assistant", content: fullText });
-    isStreaming = false;
-    $chatSendBtn.disabled = false;
+    finishStreaming();
     $chatMessages.scrollTop = $chatMessages.scrollHeight;
   }
 
@@ -495,6 +555,13 @@
     $modalDelete.addEventListener("click", deleteFromModal);
     $modal.addEventListener("click", (ev) => {
       if (ev.target === $modal) closeModal();
+    });
+
+    // Escape key closes modal
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && !$modal.classList.contains("hidden")) {
+        closeModal();
+      }
     });
 
     // Chat send
