@@ -2762,7 +2762,10 @@ def api_lore_entry_update():
                 if any(x.get("topic") == new_topic for x in lore):
                     return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
                 delete_lore_entry(story_id, topic)
-            lore[i] = {"category": new_category, "topic": new_topic, "content": new_content}
+            updated = {"category": new_category, "topic": new_topic, "content": new_content}
+            if e.get("source"):
+                updated["source"] = e["source"]
+            lore[i] = updated
             _save_json(_story_lore_path(story_id), lore)
             upsert_lore_entry(story_id, lore[i])
             return jsonify({"ok": True, "entry": lore[i]})
