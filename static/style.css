@@ -1029,6 +1029,9 @@ body {
   background: #a07a0a;
 }
 
+#confirm-modal {
+  z-index: 600;
+}
 .confirm-modal-box {
   max-width: 380px;
   text-align: center;

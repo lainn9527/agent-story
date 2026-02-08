@@ -2729,6 +2729,16 @@ document.addEventListener("keydown", (e) => {
     e.stopImmediatePropagation();
     closeSummaryModal();
   }
+  // Cmd+B (Mac) / Ctrl+B (Win) — toggle branch tree modal
+  if ((e.metaKey || e.ctrlKey) && e.key === "b") {
+    e.preventDefault();
+    const modal = document.getElementById("branch-tree-modal");
+    if (modal.classList.contains("hidden")) {
+      openBranchTreeModal();
+    } else {
+      closeBranchTreeModal();
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
