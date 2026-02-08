@@ -1706,6 +1706,9 @@ body {
     padding: 4px 10px;
     font-size: 0.85rem;
   }
+  .sw-delete {
+    opacity: 0.5;
+  }
 
   /* Action buttons */
   .msg-action-btn {
