@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 
 log = logging.getLogger("rpg")
 
@@ -20,14 +21,14 @@ CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
 
 _config_cache: dict | None = None
 _config_mtime: float = 0
-_provider_override: str | None = None
+_provider_override = threading.local()
 
 
 def set_provider(provider: str | None):
-    """Override the provider for this process (useful for auto-play instances)."""
-    global _provider_override
-    _provider_override = provider
-    log.info("llm_bridge: provider override set to %s", provider)
+    """Override the provider for this thread (safe for multi-agent)."""
+    _provider_override.value = provider
+    log.info("llm_bridge: provider override set to %s (thread %s)",
+             provider, threading.current_thread().name)
 
 
 def _get_config() -> dict:
@@ -46,8 +47,9 @@ def _get_config() -> dict:
 
 
 def get_provider() -> str:
-    if _provider_override:
-        return _provider_override
+    override = getattr(_provider_override, 'value', None)
+    if override:
+        return override
     return _get_config().get("provider", "claude_cli")
 
 

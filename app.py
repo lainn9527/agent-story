@@ -96,6 +96,19 @@ DEFAULT_CHARACTER_SCHEMA = {
 # Helpers — generic
 # ---------------------------------------------------------------------------
 
+# Per-branch lock for character state read-modify-write (prevents race in _normalize_state_async)
+_char_state_locks: dict[str, threading.Lock] = {}
+_char_state_locks_lock = threading.Lock()
+
+
+def _get_char_state_lock(story_id: str, branch_id: str) -> threading.Lock:
+    key = f"{story_id}/{branch_id}"
+    with _char_state_locks_lock:
+        if key not in _char_state_locks:
+            _char_state_locks[key] = threading.Lock()
+        return _char_state_locks[key]
+
+
 def _ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -153,7 +166,11 @@ def _story_summary_path(story_id: str) -> str:
 
 
 def _branch_dir(story_id: str, branch_id: str) -> str:
-    d = os.path.join(_story_dir(story_id), "branches", branch_id)
+    return os.path.join(_story_dir(story_id), "branches", branch_id)
+
+
+def _ensure_branch_dir(story_id: str, branch_id: str) -> str:
+    d = _branch_dir(story_id, branch_id)
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -246,7 +263,6 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
         state = _load_json(default_path, {})
     if not state:
         state = copy.deepcopy(DEFAULT_CHARACTER_STATE)
-    _save_json(path, state)
     return state
 
 
@@ -609,7 +625,14 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
 
 
 def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schema: dict):
-    """Core logic: apply a STATE update dict to character state. No normalization."""
+    """Core logic: apply a STATE update dict to character state. No normalization.
+    Thread-safe via per-branch lock."""
+    with _get_char_state_lock(story_id, branch_id):
+        _apply_state_update_inner_locked(story_id, branch_id, update, schema)
+
+
+def _apply_state_update_inner_locked(story_id: str, branch_id: str, update: dict, schema: dict):
+    """Actual state update logic — must be called under _get_char_state_lock."""
     state = _load_character_state(story_id, branch_id)
 
     # Process list fields from schema
@@ -852,14 +875,6 @@ def _migrate_to_timeline_tree(story_id: str):
 
     now = datetime.now(timezone.utc).isoformat()
 
-    session_id_path = os.path.join(DATA_DIR, "session_id.txt")
-    session_id = None
-    if os.path.exists(session_id_path):
-        with open(session_id_path, "r") as f:
-            sid = f.read().strip()
-            if sid:
-                session_id = sid
-
     tree = {
         "active_branch_id": "main",
         "branches": {
@@ -869,8 +884,6 @@ def _migrate_to_timeline_tree(story_id: str):
                 "parent_branch_id": None,
                 "branch_point_index": None,
                 "created_at": now,
-                "session_id": session_id,
-                "character_state_file": "character_state_main.json",
             }
         },
     }
@@ -1556,9 +1569,10 @@ def api_branches_create():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
 
-    # Inherit world_day from parent
+    # Inherit world_day and recap from parent
     from world_timer import copy_world_day
     copy_world_day(story_id, parent_branch_id, branch_id)
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -1568,8 +1582,6 @@ def api_branches_create():
         "parent_branch_id": parent_branch_id,
         "branch_point_index": branch_point_index,
         "created_at": now,
-        "session_id": None,
-        "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
@@ -1608,7 +1620,6 @@ def api_branches_blank():
         "parent_branch_id": "main",
         "branch_point_index": -1,  # magic value: inherit nothing
         "created_at": now,
-        "session_id": None,
         "blank": True,
     }
     tree["active_branch_id"] = branch_id
@@ -1727,8 +1738,6 @@ def api_branches_edit():
         "parent_branch_id": parent_branch_id,
         "branch_point_index": branch_point_index,
         "created_at": now,
-        "session_id": None,
-        "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
@@ -1841,8 +1850,6 @@ def api_branches_edit_stream():
         "parent_branch_id": parent_branch_id,
         "branch_point_index": branch_point_index,
         "created_at": now,
-        "session_id": None,
-        "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
@@ -1961,8 +1968,6 @@ def api_branches_regenerate():
         "parent_branch_id": parent_branch_id,
         "branch_point_index": branch_point_index,
         "created_at": now,
-        "session_id": None,
-        "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
@@ -2066,8 +2071,6 @@ def api_branches_regenerate_stream():
         "parent_branch_id": parent_branch_id,
         "branch_point_index": branch_point_index,
         "created_at": now,
-        "session_id": None,
-        "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
@@ -2166,8 +2169,6 @@ def api_branches_promote():
 
     _save_json(_story_messages_path(story_id, "main"), new_messages)
 
-    branches["main"]["session_id"] = branches[branch_id].get("session_id")
-
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
     if os.path.exists(src_char):
@@ -2178,6 +2179,11 @@ def api_branches_promote():
     dst_npcs = _story_npcs_path(story_id, "main")
     if os.path.exists(src_npcs):
         shutil.copy2(src_npcs, dst_npcs)
+
+    # Copy world_day and recap from promoted branch to main
+    from world_timer import copy_world_day
+    copy_world_day(story_id, branch_id, "main")
+    copy_recap_to_branch(story_id, branch_id, "main")
 
     branches_to_remove = set(ancestor_chain)
     for bid, b in list(branches.items()):
@@ -2229,6 +2235,11 @@ def api_branches_merge():
         return jsonify({"ok": False, "error": "branch has no parent"}), 400
     if parent_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
+    parent = branches[parent_id]
+    if parent.get("deleted"):
+        return jsonify({"ok": False, "error": "cannot merge into a deleted branch"}), 400
+    if parent.get("merged"):
+        return jsonify({"ok": False, "error": "cannot merge into a merged branch"}), 400
 
     # 1. Merge child's delta messages into parent
     # Keep parent's messages up to branch point, then append child's messages
@@ -2256,8 +2267,10 @@ def api_branches_merge():
     if os.path.exists(src_npcs):
         shutil.copy2(src_npcs, dst_npcs)
 
-    # 4. Copy session_id so Claude CLI continues from child's context
-    branches[parent_id]["session_id"] = child.get("session_id")
+    # 4. Copy world_day and recap from child to parent
+    from world_timer import copy_world_day
+    copy_world_day(story_id, branch_id, parent_id)
+    copy_recap_to_branch(story_id, branch_id, parent_id)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():
@@ -2392,8 +2405,6 @@ def api_stories_create():
                 "parent_branch_id": None,
                 "branch_point_index": None,
                 "created_at": now,
-                "session_id": None,
-                "character_state_file": "character_state_main.json",
             }
         },
     }

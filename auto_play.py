@@ -782,7 +782,7 @@ def auto_play(config: AutoPlayConfig):
         state = load_run_state(story_id, branch_id)
         if state is None:
             log.error("No saved state found for branch %s", branch_id)
-            sys.exit(1)
+            return
         # Clear stale death flag (detection logic may have changed)
         state.death_detected = False
         log.info("Resuming from turn %d on branch %s", state.turn, branch_id)
@@ -880,7 +880,7 @@ def auto_play(config: AutoPlayConfig):
                 existing = _load_summaries(story_id, branch_id)
                 last_turn = existing[-1]["turn_end"] + 1 if existing else 0
                 full_tl = get_full_timeline(story_id, branch_id)
-                summary_msgs = full_tl[last_turn * 2:][-20:]  # cap 20 msgs
+                summary_msgs = full_tl[max(0, len(full_tl) - 20):]  # last 20 msgs
                 generate_summary_async(
                     story_id, branch_id, last_turn, state.turn,
                     state.phase, summary_msgs, state.to_dict(),

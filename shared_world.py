@@ -13,10 +13,23 @@ Provides:
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 
 log = logging.getLogger("rpg")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Per-branch lock for snapshot read-modify-write
+_snapshot_locks: dict[str, threading.Lock] = {}
+_snapshot_locks_lock = threading.Lock()
+
+
+def _get_snapshot_lock(story_id: str, branch_id: str) -> threading.Lock:
+    key = f"{story_id}/{branch_id}"
+    with _snapshot_locks_lock:
+        if key not in _snapshot_locks:
+            _snapshot_locks[key] = threading.Lock()
+        return _snapshot_locks[key]
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +72,8 @@ def save_agent_snapshot(
     completed_missions: list | None = None,
     summary: str = "",
 ):
-    """Append a snapshot to agent_snapshots.json."""
+    """Append a snapshot to agent_snapshots.json (thread-safe)."""
     from world_timer import get_world_day
-
-    path = _snapshots_path(story_id, branch_id)
-    snapshots = _load_json(path, [])
 
     snapshot = {
         "world_day": get_world_day(story_id, branch_id),
@@ -74,8 +84,13 @@ def save_agent_snapshot(
         "completed_missions": completed_missions or char_state.get("completed_missions", []),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    snapshots.append(snapshot)
-    _save_json(path, snapshots)
+
+    with _get_snapshot_lock(story_id, branch_id):
+        path = _snapshots_path(story_id, branch_id)
+        snapshots = _load_json(path, [])
+        snapshots.append(snapshot)
+        _save_json(path, snapshots)
+
     log.info("    snapshot saved: branch=%s turn=%d world_day=%.1f",
              branch_id, turn, snapshot["world_day"])
 

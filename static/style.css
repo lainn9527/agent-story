@@ -1554,4 +1554,8 @@ body {
   .message {
     max-width: 95%;
   }
+
+  #input-area {
+    padding: 8px 12px;
+  }
 }

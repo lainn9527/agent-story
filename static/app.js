@@ -522,7 +522,7 @@ function renderStoryList() {
       del.title = "刪除故事";
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!confirm(`確定要刪除故事「${story.name}」？所有分支和對話都會被刪除！`)) return;
+        if (!(await showConfirm(`確定要刪除故事「${story.name}」？所有分支和對話都會被刪除！`))) return;
         const res = await API.deleteStory(story.id);
         if (res.ok) {
           await loadStories();
@@ -845,6 +845,10 @@ function buildBranchTree() {
 }
 
 async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePreserve } = {}) {
+  // Clean up stale pollers from previous branch
+  stopLivePolling();
+  _clearImagePollers();
+
   const container = document.getElementById("messages");
   let savedScrollTop = 0;
   let isAtBottom = false;
@@ -1033,11 +1037,12 @@ async function submitEdit(msg, newText) {
   $sendBtn.disabled = true;
 
   // Truncate subsequent messages in DOM
-  while (msgEl.nextSibling) {
-    msgEl.nextSibling.remove();
+  if (msgEl) {
+    while (msgEl.nextSibling) {
+      msgEl.nextSibling.remove();
+    }
+    showPlaceholderSwitcher(msgEl, msg.index);
   }
-
-  showPlaceholderSwitcher(msgEl, msg.index);
 
   if (activeStreamController) {
     activeStreamController.abort();
@@ -1072,7 +1077,7 @@ async function submitEdit(msg, newText) {
           streamingEl.appendChild(ct);
           $messages.appendChild(streamingEl);
           // Initial scroll to message start for editing
-          msgEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (msgEl) msgEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         const ct = streamingEl.querySelector(".content");
         ct.innerHTML = markdownToHtml(stripHiddenTags(streamedText));
@@ -1081,6 +1086,7 @@ async function submitEdit(msg, newText) {
       async (data) => {
         if (streamingEl) streamingEl.remove();
         $loading.style.display = "none";
+        $sendBtn.disabled = false;
         if (data.branch) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
@@ -1091,6 +1097,7 @@ async function submitEdit(msg, newText) {
       (errMsg) => {
         if (streamingEl) streamingEl.remove();
         $loading.style.display = "none";
+        $sendBtn.disabled = false;
         if (errMsg !== "AbortError") {
           alert(errMsg || "編輯失敗");
         }
@@ -1099,13 +1106,12 @@ async function submitEdit(msg, newText) {
       activeStreamController.signal
     );
   } catch (err) {
-    if (err.name === 'AbortError') return;
     if (streamingEl) streamingEl.remove();
     $loading.style.display = "none";
+    $sendBtn.disabled = false;
+    if (err.name === 'AbortError') return;
     alert("網路錯誤：" + err.message);
   }
-
-  $sendBtn.disabled = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1152,6 +1158,7 @@ async function regenerateGmMessage(msg, msgEl) {
       },
       // onDone — switch to new branch
       async (data) => {
+        $sendBtn.disabled = false;
         if (data.branch) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
@@ -1160,6 +1167,7 @@ async function regenerateGmMessage(msg, msgEl) {
       },
       // onError
       (errMsg) => {
+        $sendBtn.disabled = false;
         if (errMsg !== "AbortError") {
           if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
           if (actionBtn) actionBtn.style.display = "";
@@ -1170,13 +1178,12 @@ async function regenerateGmMessage(msg, msgEl) {
       activeStreamController.signal
     );
   } catch (err) {
-    if (err.name === 'AbortError') return;
+    $sendBtn.disabled = false;
     if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
     if (actionBtn) actionBtn.style.display = "";
+    if (err.name === 'AbortError') return;
     alert("網路錯誤：" + err.message);
   }
-
-  $sendBtn.disabled = false;
 }
 
 function showPlaceholderSwitcher(msgEl, index) {
@@ -1776,6 +1783,13 @@ function renderSummaryDashboard(summaries) {
 // Image polling
 // ---------------------------------------------------------------------------
 const _imagePollers = {};
+
+function _clearImagePollers() {
+  for (const [key, timer] of Object.entries(_imagePollers)) {
+    clearTimeout(timer);
+    delete _imagePollers[key];
+  }
+}
 
 function startImagePolling(storyId, filename, imgEl) {
   if (_imagePollers[filename]) return;
@@ -2425,7 +2439,7 @@ $promoteBtn.addEventListener("click", async () => {
   if (currentBranchId === "main") return;
   const branch = branches[currentBranchId];
   const name = branch ? branch.name : currentBranchId;
-  if (!confirm(`確定要將分支「${name}」的內容設為主時間線嗎？`)) return;
+  if (!(await showConfirm(`確定要將分支「${name}」的內容設為主時間線嗎？`))) return;
 
   $promoteBtn.disabled = true;
   try {
