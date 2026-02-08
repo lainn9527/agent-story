@@ -482,6 +482,9 @@ def _save_lore_entry(story_id: str, entry: dict):
             # Preserve category if not provided in new entry
             if "category" not in entry and "category" in existing:
                 entry["category"] = existing["category"]
+            # Preserve source provenance if not provided in new entry
+            if "source" not in entry and "source" in existing:
+                entry["source"] = existing["source"]
             lore[i] = entry
             _save_json(_story_lore_path(story_id), lore)
             upsert_lore_entry(story_id, entry)
@@ -693,6 +696,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             for entry in data.get("lore", []):
                 topic = entry.get("topic", "").strip()
                 if topic and topic not in existing_topics:
+                    entry["source"] = {
+                        "branch_id": branch_id,
+                        "msg_index": msg_index,
+                        "excerpt": gm_text[:100],
+                        "timestamp": datetime.now().isoformat(),
+                    }
                     _save_lore_entry(story_id, entry)
                     existing_topics.add(topic)
                     saved_counts["lore"] += 1
@@ -1188,6 +1197,12 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
 
     gm_response, lore_entries = _extract_lore_tag(gm_response)
     for lore_entry in lore_entries:
+        lore_entry["source"] = {
+            "branch_id": branch_id,
+            "msg_index": msg_index,
+            "excerpt": gm_response[:100],
+            "timestamp": datetime.now().isoformat(),
+        }
         _save_lore_entry(story_id, lore_entry)
 
     gm_response, npc_updates = _extract_npc_tag(gm_response)

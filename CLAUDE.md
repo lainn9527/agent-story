@@ -26,6 +26,7 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 | `event_db.py` | SQLite event tracing engine (CJK bigram search) |
 | `image_gen.py` | Pollinations.ai async image generation |
 | `npc_evolution.py` | Background NPC evolution via Claude CLI |
+| `world_timer.py` | Per-branch world day/time tracking, TIME tag parsing |
 | `auto_play.py` | AI self-play: GM + Player AI loop on dedicated `auto_` branch |
 | `static/app.js` | Frontend: drawer UI, NPC/events/images, schema-driven panels |
 | `static/style.css` | Dark theme CSS (mobile: novel reader style with serif fonts) |
@@ -49,6 +50,8 @@ data/
     events.db                           # SQLite event tracking
     npc_activities_<branch_id>.json     # Background NPC activity logs
     auto_play_state.json                # Auto-play progress (auto_ branches only)
+    branches/<branch_id>/
+      world_day.json                    # Per-branch world day/time {day, hour}
     images/                             # Generated scene images
   auto_play_characters/                 # Character JSON files for auto-play
 ```
@@ -85,6 +88,7 @@ GM responses can contain hidden tags that the backend extracts and processes. Al
 | `<!--NPC {...} NPC-->` | `_NPC_RE` | NPC profiles with Big5 personality → `npcs.json` |
 | `<!--EVENT {...} EVENT-->` | `_EVENT_RE` | Event tracking (伏筆/轉折/戰鬥/etc.) → `events.db` |
 | `<!--IMG prompt: ... IMG-->` | `_IMG_RE` | Scene illustration → async Pollinations.ai download |
+| `<!--TIME days:N TIME-->` / `<!--TIME hours:N TIME-->` | `_TIME_RE` | Advance world day/time → `world_day.json` |
 
 ## Context Injection (Backend → GM)
 Each user message is augmented via `_build_augmented_message()` before sending to Claude:
@@ -141,10 +145,23 @@ Standalone script where two AI instances play the game autonomously — a GM and
 - `AUTO` badge on auto branches in drawer; `● LIVE` pulsing indicator in header during playback
 - Input disabled while viewing live auto-play; re-enabled when `live_status === "finished"`
 
+## World Timer
+- `world_timer.py` — per-branch world day/time tracking stored in `branches/<bid>/world_day.json`
+- Format: `{"day": 1, "hour": 0}` — day (integer), hour (0-23)
+- GM outputs `<!--TIME days:N TIME-->` or `<!--TIME hours:N TIME-->` to advance time
+- `process_time_tags()` called in `_process_gm_response()` — parses tags, advances time, strips tags from output
+- `copy_world_day()` called on all branch creation routes (inherits parent's world day)
+- Thread-safe: per-branch `threading.Lock` for `advance_world_day()`
+- Dungeon helpers: `advance_dungeon_enter()` (+3 days), `advance_dungeon_exit()` (+1 day)
+- Frontend: `updateWorldDayDisplay()` shows `✦ 世界第 N 天·時段` in header
+- 5 time periods: 深夜(0-6h), 清晨(6-9h), 上午(9-12h), 下午(12-18h), 夜晚(18-24h)
+- API: `world_day` field returned in `/api/messages` and `/api/status` responses
+
 ## System Prompt Placeholders
 The `system_prompt.txt` template uses these placeholders:
 - `{character_state}` — Current character state JSON
 - `{story_summary}` — Story summary text
+- `{narrative_recap}` — Rolling narrative recap from conversation compaction
 - `{world_lore}` — Lore TOC (compact, not full content)
 - `{npc_profiles}` — Formatted NPC profiles
 
@@ -217,3 +234,34 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - JS: vanilla, no framework, no build step
 - CSS: dark theme, CSS variables for theming
 - Prefer editing existing files over creating new ones
+
+## Pending Feature PRs (Multi-Agent Shared Universe)
+The multi-agent system is being implemented across 4 PRs. PR #14 (World Timer) is merged. The remaining 3 PRs are open and reviewed:
+
+| PR | Branch | Status | Depends On |
+|----|--------|--------|------------|
+| #14 | ~~feature/world-timer~~ | **Merged** | — |
+| #15 | `feature/multi-agent-backend` | Open (reviewed) | PR #14 |
+| #16 | `feature/auto-play-agent` | Open (reviewed) | PR #15 |
+| #17 | `feature/agent-ui` | Open (reviewed) | PR #15 |
+
+**PR #15: Agent Manager + Shared World Backend** (~700 lines)
+- New files: `agent_manager.py`, `shared_world.py`, `prompts.py`
+- Agent lifecycle (create/start/pause/stop/delete), per-story `agents.json`
+- Snapshot-based cross-agent awareness (`agent_snapshots.json`)
+- LLM character generation: `POST /api/agents/generate-character`
+- API routes: `/api/agents`, `/api/agents/<id>/<action>`, `/api/leaderboard`
+
+**PR #16: Auto-Play Agent Integration** (~200 lines)
+- `auto_play.py` modifications for agent-managed runs
+- Cooperative stop via `agents.json` status check
+- World timer integration (dungeon enter/exit advances day)
+- Snapshot saving on phase changes and every 20 turns
+
+**PR #17: Agent Frontend UI + LLM Character Builder** (~500 lines)
+- Agent panel in drawer with status badges and controls
+- Agent creation modal with LLM character generation flow
+- Leaderboard panel, auto-polling when agents running
+- XSS-safe rendering with `escapeHtml()`
+
+PR #16 and #17 are independent of each other (both depend on #15 only). Merge order: #15 → (#16, #17 in any order).

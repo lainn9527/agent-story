@@ -152,6 +152,17 @@
     return result;
   }
 
+  function formatSourceLine(source) {
+    if (!source) return "";
+    const branch = source.branch_id || "?";
+    const idx = source.msg_index != null ? `#${source.msg_index}` : "";
+    const date = source.timestamp ? source.timestamp.slice(0, 10) : "";
+    const parts = [`分支 ${branch}`];
+    if (idx) parts.push(`訊息 ${idx}`);
+    if (date) parts.push(date);
+    return parts.join(" · ");
+  }
+
   function renderEntryHtml(e, displayName) {
     const label = displayName || e.topic;
     const sel = e.topic === selectedTopic ? " selected" : "";
@@ -160,7 +171,11 @@
     html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
     html += `</div>`;
     const previewText = sel ? e.content || "" : truncate(e.content, 120);
-    html += `<div class="lore-entry-preview">${escapeHtml(previewText)}</div>`;
+    html += `<div class="lore-entry-preview">${escapeHtml(previewText)}`;
+    if (e.source) {
+      html += `<div class="lore-entry-source">來源：${escapeHtml(formatSourceLine(e.source))}</div>`;
+    }
+    html += `</div>`;
     return html;
   }
 
@@ -289,12 +304,32 @@
 
   function openModal(entry) {
     editingEntry = entry || null;
+    // Remove any previous source info block
+    const oldSource = document.getElementById("modal-source-info");
+    if (oldSource) oldSource.remove();
+
     if (entry) {
       $modalTitle.textContent = "編輯設定";
       $modalDelete.style.display = "";
       populateCategoryDropdown(entry.category);
       $modalTopic.value = entry.topic;
       $modalContent.value = entry.content || "";
+
+      // Show read-only source provenance
+      if (entry.source) {
+        const srcDiv = document.createElement("div");
+        srcDiv.id = "modal-source-info";
+        srcDiv.className = "modal-source-info";
+        let srcHtml = `<label>來源</label>`;
+        srcHtml += `<div class="modal-source-detail">`;
+        srcHtml += `<span>${escapeHtml(formatSourceLine(entry.source))}</span>`;
+        if (entry.source.excerpt) {
+          srcHtml += `<div class="modal-source-excerpt">「${escapeHtml(entry.source.excerpt)}」</div>`;
+        }
+        srcHtml += `</div>`;
+        srcDiv.innerHTML = srcHtml;
+        $modalContent.parentElement.appendChild(srcDiv);
+      }
     } else {
       $modalTitle.textContent = "新增設定";
       $modalDelete.style.display = "none";
