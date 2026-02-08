@@ -603,106 +603,106 @@ function renderBranchList() {
 }
 
 function createBranchItem(branch, depth, hasChildren, isExpanded) {
-    const item = document.createElement("div");
-    item.className = "drawer-item" + (branch.id === currentBranchId ? " active" : "");
-    if (depth > 0) item.style.paddingLeft = (12 + depth * 16) + "px";
+  const item = document.createElement("div");
+  item.className = "drawer-item" + (branch.id === currentBranchId ? " active" : "");
+  if (depth > 0) item.style.paddingLeft = (12 + depth * 16) + "px";
 
-    // Toggle arrow for depth-0 items with children
-    if (depth === 0 && hasChildren) {
-      const arrow = document.createElement("span");
-      arrow.className = "branch-toggle-arrow" + (isExpanded ? " expanded" : "");
-      arrow.textContent = "\u25B6";
-      arrow.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleBranchGroup(branch.id, arrow);
-      });
-      item.appendChild(arrow);
-    }
+  // Toggle arrow for depth-0 items with children
+  if (depth === 0 && hasChildren) {
+    const arrow = document.createElement("span");
+    arrow.className = "branch-toggle-arrow" + (isExpanded ? " expanded" : "");
+    arrow.textContent = "\u25B6";
+    arrow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleBranchGroup(branch.id, arrow);
+    });
+    item.appendChild(arrow);
+  }
 
-    const label = document.createElement("span");
-    label.className = "drawer-item-label";
-    label.textContent = branch.name;
-    item.appendChild(label);
+  const label = document.createElement("span");
+  label.className = "drawer-item-label";
+  label.textContent = branch.name;
+  item.appendChild(label);
 
-    if (branch.id.startsWith("auto_")) {
-      const badge = document.createElement("span");
-      badge.className = "auto-branch-badge";
-      badge.textContent = "AUTO";
-      item.appendChild(badge);
-    }
+  if (branch.id.startsWith("auto_")) {
+    const badge = document.createElement("span");
+    badge.className = "auto-branch-badge";
+    badge.textContent = "AUTO";
+    item.appendChild(badge);
+  }
 
-    // Rename & Delete buttons (not for main)
-    if (branch.id !== "main") {
-      const ren = document.createElement("span");
-      ren.className = "drawer-item-rename";
-      ren.textContent = "\u270E";
-      ren.title = "重新命名";
-      ren.addEventListener("click", (e) => {
-        e.stopPropagation();
-        startRenamingBranch(item, branch);
-      });
-      item.appendChild(ren);
+  // Rename & Delete buttons (not for main)
+  if (branch.id !== "main") {
+    const ren = document.createElement("span");
+    ren.className = "drawer-item-rename";
+    ren.textContent = "\u270E";
+    ren.title = "重新命名";
+    ren.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startRenamingBranch(item, branch);
+    });
+    item.appendChild(ren);
 
-      const del = document.createElement("span");
-      del.className = "drawer-item-delete";
-      del.textContent = "\u2715";
-      del.title = "刪除分支";
-      del.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const descCount = countDescendants(branch.id);
-        let msg = `確定要刪除分支「${branch.name}」？`;
-        if (descCount > 0) {
-          msg += `\n（包含 ${descCount} 個子分支也會一併刪除）`;
+    const del = document.createElement("span");
+    del.className = "drawer-item-delete";
+    del.textContent = "\u2715";
+    del.title = "刪除分支";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const descCount = countDescendants(branch.id);
+      let msg = `確定要刪除分支「${branch.name}」？`;
+      if (descCount > 0) {
+        msg += `\n（包含 ${descCount} 個子分支也會一併刪除）`;
+      }
+      if (!(await showConfirm(msg))) return;
+      const res = await API.deleteBranch(branch.id);
+      if (res.ok) {
+        await loadBranches();
+        if (currentBranchId === branch.id || !branches[currentBranchId]) {
+          await switchToBranch("main");
         }
-        if (!(await showConfirm(msg))) return;
-        const res = await API.deleteBranch(branch.id);
-        if (res.ok) {
-          await loadBranches();
-          if (currentBranchId === branch.id || !branches[currentBranchId]) {
-            await switchToBranch("main");
-          }
-          renderBranchList();
-        } else {
-          alert(res.error || "刪除失敗");
-        }
-      });
-      item.appendChild(del);
-
-      const merge = document.createElement("span");
-      merge.className = "drawer-item-merge";
-      merge.textContent = "\u2934";
-      merge.title = "合併到上層分支";
-      merge.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const parentBranch = branches[branch.parent_branch_id];
-        const parentName = parentBranch ? parentBranch.name : branch.parent_branch_id;
-        if (!(await showConfirm(`確定要將分支「${branch.name}」合併到上層分支「${parentName}」嗎？`))) return;
-        const res = await API.mergeBranch(branch.id);
-        if (res.ok) {
-          await loadBranches();
-          await switchToBranch(res.parent_branch_id);
-          renderBranchList();
-        } else {
-          alert(res.error || "合併失敗");
-        }
-      });
-      item.appendChild(merge);
-    }
-
-    // Show branch ID on all branches
-    const idTag = document.createElement("div");
-    idTag.className = "branch-id-tag";
-    idTag.textContent = branch.id;
-    item.appendChild(idTag);
-
-    item.addEventListener("click", () => {
-      if (branch.id !== currentBranchId) {
-        switchToBranch(branch.id);
-        closeDrawer();
+        renderBranchList();
+      } else {
+        alert(res.error || "刪除失敗");
       }
     });
+    item.appendChild(del);
 
-    return item;
+    const merge = document.createElement("span");
+    merge.className = "drawer-item-merge";
+    merge.textContent = "\u2934";
+    merge.title = "合併到上層分支";
+    merge.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const parentBranch = branches[branch.parent_branch_id];
+      const parentName = parentBranch ? parentBranch.name : branch.parent_branch_id;
+      if (!(await showConfirm(`確定要將分支「${branch.name}」合併到上層分支「${parentName}」嗎？`))) return;
+      const res = await API.mergeBranch(branch.id);
+      if (res.ok) {
+        await loadBranches();
+        await switchToBranch(res.parent_branch_id);
+        renderBranchList();
+      } else {
+        alert(res.error || "合併失敗");
+      }
+    });
+    item.appendChild(merge);
+  }
+
+  // Show branch ID on all branches
+  const idTag = document.createElement("div");
+  idTag.className = "branch-id-tag";
+  idTag.textContent = branch.id;
+  item.appendChild(idTag);
+
+  item.addEventListener("click", () => {
+    if (branch.id !== currentBranchId) {
+      switchToBranch(branch.id);
+      closeDrawer();
+    }
+  });
+
+  return item;
 }
 
 function toggleBranchGroup(rootId, arrowEl) {
@@ -824,6 +824,12 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
     isAtBottom = (container.scrollTop + container.clientHeight >= container.scrollHeight - 50);
   }
 
+  // Add fade-out transition for smooth variant switching
+  if (preserveScroll || forcePreserve) {
+    container.style.transition = 'opacity 0.15s ease-out';
+    container.style.opacity = '0.4';
+  }
+
   await API.switchBranch(branchId);
   currentBranchId = branchId;
   $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
@@ -866,6 +872,12 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
     requestAnimationFrame(() => {
       container.scrollTop = savedScrollTop;
       $messages.style.minHeight = "";
+      // Fade back in
+      container.style.opacity = '1';
+      // Remove transition after animation completes
+      setTimeout(() => {
+        container.style.transition = '';
+      }, 150);
     });
     return;
   }
@@ -874,11 +886,23 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
     if (isAtBottom) {
       scrollToBottom();
       $messages.style.minHeight = "";
+      // Fade back in
+      requestAnimationFrame(() => {
+        container.style.opacity = '1';
+        setTimeout(() => {
+          container.style.transition = '';
+        }, 150);
+      });
     } else {
       container.scrollTop = savedScrollTop;
       requestAnimationFrame(() => {
         container.scrollTop = savedScrollTop;
         $messages.style.minHeight = "";
+        // Fade back in
+        container.style.opacity = '1';
+        setTimeout(() => {
+          container.style.transition = '';
+        }, 150);
       });
     }
     return;
@@ -1935,6 +1959,20 @@ async function sendMessage() {
   $messages.appendChild(gmEl);
   scrollToBottom();
 
+  // Track scroll intent during streaming
+  const container = document.getElementById("messages");
+  const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+  let userScrolledDuringStream = false;
+
+  const scrollHandler = () => {
+    // If user scrolls during streaming, mark it
+    const currentlyAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+    if (!currentlyAtBottom) {
+      userScrolledDuringStream = true;
+    }
+  };
+  container.addEventListener('scroll', scrollHandler);
+
   let streamedText = "";
 
   try {
@@ -1945,10 +1983,15 @@ async function sendMessage() {
       (chunk) => {
         streamedText += chunk;
         contentEl.innerHTML = markdownToHtml(stripHiddenTags(streamedText));
-        smartScrollToBottom();
+        // Only auto-scroll if user was at bottom initially and hasn't scrolled away
+        if (wasAtBottom && !userScrolledDuringStream) {
+          smartScrollToBottom();
+        }
       },
       // onDone
       async (data) => {
+        container.removeEventListener('scroll', scrollHandler);
+
         const gmMsg = data.gm_msg;
         gmMsg.inherited = false;
         gmMsg.owner_branch_id = currentBranchId;
@@ -1973,18 +2016,24 @@ async function sendMessage() {
         });
         gmEl.appendChild(actionBtn);
 
-        smartScrollToBottom();
+        // Only auto-scroll at the end if user was following along
+        if (wasAtBottom && !userScrolledDuringStream) {
+          smartScrollToBottom();
+        }
+
         renderCharacterStatus(await API.status(currentBranchId));
         loadNpcs();
         loadEvents();
       },
       // onError
       (msg) => {
+        container.removeEventListener('scroll', scrollHandler);
         gmEl.remove();
         appendSystemError(msg || "未知錯誤");
       }
     );
   } catch (err) {
+    container.removeEventListener('scroll', scrollHandler);
     gmEl.remove();
     appendSystemError("網路錯誤：" + err.message);
   }
