@@ -12,6 +12,8 @@ import os
 import threading
 from datetime import datetime, timezone
 
+from story_utils import get_character_name
+
 log = logging.getLogger("rpg")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +36,7 @@ _COMPACT_PROMPT = """\
 3. 情感轉折與角色發展
 4. 尚未解決的懸念
 
+重要：玩家角色名為「{character_name}」。摘要中請使用第三人稱「{character_name}」稱呼玩家角色，不要用其他名字替代，也不要使用第一人稱「我」。
 注意：角色屬性、道具、NPC 資料、世界設定已由其他系統追蹤，不需列出。
 專注於「發生了什麼事」和「故事走向如何」。
 
@@ -52,6 +55,7 @@ _META_COMPACT_PROMPT = """\
 2. 核心角色發展弧線
 3. 仍在進行中的懸念和伏筆
 
+重要：玩家角色名為「{character_name}」。請一律使用「{character_name}」稱呼玩家角色，不要用其他名字替代。
 可以省略已解決的小事件和重複的細節。
 
 ---
@@ -206,11 +210,14 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
              len(msgs_to_compact), compacted_through + 1, compact_end - 1,
              story_id, branch_id)
 
+    character_name = get_character_name(story_id, branch_id)
+
     existing_recap = ""
     if recap.get("recap_text"):
         existing_recap = f"以下是先前的敘事回顧（請在此基礎上延續）：\n\n{recap['recap_text']}"
 
     prompt = _COMPACT_PROMPT.format(
+        character_name=character_name,
         existing_recap=existing_recap,
         messages=_format_messages(msgs_to_compact),
     )
@@ -225,7 +232,7 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
     # Check if meta-compaction needed (recap too long)
     if len(new_recap_text) > RECAP_CHAR_CAP:
         log.info("    compaction: recap too long (%d chars), meta-compacting", len(new_recap_text))
-        meta_prompt = _META_COMPACT_PROMPT.format(recap=new_recap_text)
+        meta_prompt = _META_COMPACT_PROMPT.format(character_name=character_name, recap=new_recap_text)
         meta_result = call_oneshot(meta_prompt)
         if meta_result and meta_result.strip():
             new_recap_text = meta_result.strip()
