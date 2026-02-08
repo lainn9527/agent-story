@@ -2842,12 +2842,12 @@ def api_agents_stop(agent_id):
 
 @app.route("/api/leaderboard")
 def api_leaderboard():
-    """Get the shared world leaderboard."""
-    from shared_world import get_leaderboard
+    """Get the shared world leaderboard (always fresh)."""
+    from shared_world import rebuild_shared_world
 
     story_id = _active_story_id()
-    lb = get_leaderboard(story_id)
-    return jsonify({"ok": True, "leaderboard": lb})
+    world = rebuild_shared_world(story_id)
+    return jsonify({"ok": True, "leaderboard": world.get("leaderboard", [])})
 
 
 # ---------------------------------------------------------------------------
