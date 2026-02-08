@@ -50,6 +50,7 @@ from lore_organizer import (
     get_lore_lock, try_classify_topic, build_prefix_registry, invalidate_prefix_cache,
     should_organize, organize_lore_async,
 )
+from gm_cheats import is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats
 
 # ---------------------------------------------------------------------------
 # Config
@@ -1551,10 +1552,12 @@ def _build_augmented_message(
     if activities:
         parts.append(activities)
 
-    # Dice roll
+    # Dice roll (skip for /gm commands — not in-game actions)
     dice_result = None
-    if character_state:
-        dice_result = roll_fate(character_state)
+    if character_state and not is_gm_command(user_text):
+        story_dir = _story_dir(story_id)
+        cheat_mod = get_dice_modifier(story_dir, branch_id)
+        dice_result = roll_fate(character_state, cheat_modifier=cheat_mod)
         parts.append(format_dice_context(dice_result))
 
     if parts:
@@ -1693,6 +1696,7 @@ def api_messages():
         "sibling_groups": sibling_groups,
         "branch_id": branch_id,
         "world_day": get_world_day(story_id, branch_id),
+        "dice_modifier": get_dice_modifier(_story_dir(story_id), branch_id),
     }
 
     if branch_id.startswith("auto_"):
@@ -1763,6 +1767,12 @@ def api_send():
     _save_json(delta_path, delta_msgs)
     full_timeline.append(player_msg)
     log.info("  save_user_msg: %.0fms", (time.time() - t0) * 1000)
+
+    # 1b. Process /gm dice command (金手指) — apply before dice roll
+    story_dir = _story_dir(story_id)
+    dice_cmd_result = apply_dice_command(story_dir, branch_id, user_text) if is_gm_command(user_text) else None
+    if dice_cmd_result:
+        log.info("  /gm dice: %s → %s", dice_cmd_result["old"], dice_cmd_result["new"])
 
     # 2. Build system prompt (with narrative recap)
     t0 = time.time()
@@ -1872,6 +1882,12 @@ def api_send_stream():
     _save_json(delta_path, delta_msgs)
     full_timeline.append(player_msg)
 
+    # 1b. Process /gm dice command (金手指)
+    story_dir = _story_dir(story_id)
+    dice_cmd_result = apply_dice_command(story_dir, branch_id, user_text) if is_gm_command(user_text) else None
+    if dice_cmd_result:
+        log.info("  /gm dice: %s → %s", dice_cmd_result["old"], dice_cmd_result["new"])
+
     # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
@@ -1962,6 +1978,9 @@ def api_status():
     branch_id = request.args.get("branch_id", "main")
     state = dict(_load_character_state(story_id, branch_id))
     state["world_day"] = get_world_day(story_id, branch_id)
+    dm = get_dice_modifier(_story_dir(story_id), branch_id)
+    if dm:
+        state["dice_modifier"] = dm
     return jsonify(state)
 
 
@@ -2014,6 +2033,7 @@ def api_branches_create():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
+    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2165,6 +2185,7 @@ def api_branches_edit():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
+    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2288,6 +2309,7 @@ def api_branches_edit_stream():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
+    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2429,6 +2451,7 @@ def api_branches_regenerate():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
+    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2544,6 +2567,7 @@ def api_branches_regenerate_stream():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
+    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
@@ -2669,6 +2693,7 @@ def api_branches_promote():
     # Copy recap and world_day from promoted branch to main
     copy_recap_to_branch(story_id, branch_id, "main", -1)
     copy_world_day(story_id, branch_id, "main")
+    copy_cheats(_story_dir(story_id), branch_id, "main")
 
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
@@ -2762,6 +2787,7 @@ def api_branches_merge():
     # 4. Copy recap and world_day from child to parent
     copy_recap_to_branch(story_id, branch_id, parent_id, -1)
     copy_world_day(story_id, branch_id, parent_id)
+    copy_cheats(_story_dir(story_id), branch_id, parent_id)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():

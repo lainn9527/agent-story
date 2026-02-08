@@ -68,8 +68,12 @@ _OUTCOMES = {
 }
 
 
-def roll_fate(state: dict) -> dict:
+def roll_fate(state: dict, cheat_modifier: int = 0) -> dict:
     """Roll a d100 fate die with attribute modifiers.
+
+    Args:
+        state: Character state dict for attribute-based modifiers.
+        cheat_modifier: Extra modifier from /gm dice command (金手指).
 
     Returns a dict with all dice info for storage and display.
     """
@@ -77,7 +81,7 @@ def roll_fate(state: dict) -> dict:
     attr_bonus = (p_mod + s_mod) // 2 + g_mod
 
     raw = random.randint(1, 100)
-    effective = raw + attr_bonus
+    effective = raw + attr_bonus + cheat_modifier
 
     # Determine outcome
     if raw >= 96:
@@ -93,7 +97,7 @@ def roll_fate(state: dict) -> dict:
     else:
         outcome = "嚴重失敗"
 
-    return {
+    result = {
         "raw": raw,
         "attr_bonus": attr_bonus,
         "physique_mod": p_mod,
@@ -102,6 +106,9 @@ def roll_fate(state: dict) -> dict:
         "effective": effective,
         "outcome": outcome,
     }
+    if cheat_modifier:
+        result["cheat_modifier"] = cheat_modifier
+    return result
 
 
 def format_dice_context(result: dict) -> str:
