@@ -88,6 +88,7 @@ def call_claude_gm_stream(
     system_prompt: str,
     recent_messages: list[dict],
     session_id: str | None = None,
+    tools: list[dict] | None = None,
 ):
     """Unified streaming GM call. Yields ("text"|"done"|"error", payload)."""
     cfg = _get_config()
@@ -99,7 +100,7 @@ def call_claude_gm_stream(
         yield from call_gemini_gm_stream(
             user_message, system_prompt, recent_messages,
             gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
-            session_id=session_id,
+            session_id=session_id, tools=tools,
         )
         return
 

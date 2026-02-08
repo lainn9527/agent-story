@@ -2875,7 +2875,7 @@ def api_lore_chat_stream():
 - delete 操作不需要 content 欄位
 - 可在一次回覆中輸出多個提案標籤
 - 提案標籤必須放在回覆最末尾
-- 用戶訊息可能附帶 [網路搜尋參考資料]，請善用這些資料來補充設定內容，但需根據世界觀調整，不要照抄"""
+- 你可以使用 Google 搜尋工具查找外部資料（動漫、小說、遊戲設定等），善用搜尋結果來補充設定內容，但需根據世界觀調整，不要照抄"""
 
     # Extract prior messages and last user message (safe access)
     prior = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages[:-1]]
@@ -2883,16 +2883,9 @@ def api_lore_chat_stream():
 
     def generate():
         try:
-            # Web-grounded search for external references (inside generator so SSE is already open)
-            from llm_bridge import web_search
-            search_result = web_search(last_user_msg)
-            if search_result:
-                augmented_msg = f"{last_user_msg}\n\n[網路搜尋參考資料]\n{search_result}"
-            else:
-                augmented_msg = last_user_msg
-
             for event_type, payload in call_claude_gm_stream(
-                augmented_msg, lore_system, prior, session_id=None
+                last_user_msg, lore_system, prior, session_id=None,
+                tools=[{"googleSearch": {}}],
             ):
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})

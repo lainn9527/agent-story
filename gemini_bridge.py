@@ -66,7 +66,8 @@ def _build_contents(recent_messages: list[dict], user_message: str) -> list[dict
 
 
 def _make_request_body(system_prompt: str, contents: list[dict],
-                       temperature: float = 1.0, max_tokens: int = 65536) -> dict:
+                       temperature: float = 1.0, max_tokens: int = 65536,
+                       tools: list[dict] | None = None) -> dict:
     body: dict = {
         "contents": contents,
         "generationConfig": {
@@ -82,6 +83,8 @@ def _make_request_body(system_prompt: str, contents: list[dict],
     }
     if system_prompt:
         body["system_instruction"] = {"parts": [{"text": system_prompt}]}
+    if tools:
+        body["tools"] = tools
     return body
 
 
@@ -216,6 +219,7 @@ def call_gemini_gm_stream(
     gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
     session_id: str | None = None,
+    tools: list[dict] | None = None,
 ):
     """Stream a GM response from Gemini API.
 
@@ -225,10 +229,10 @@ def call_gemini_gm_stream(
       ("error", msg)                      — on failure
     """
     contents = _build_contents(recent_messages, user_message)
-    body = _make_request_body(system_prompt, contents)
+    body = _make_request_body(system_prompt, contents, tools=tools)
     payload = json.dumps(body).encode("utf-8")
 
-    log.info("    gemini_bridge_stream: calling API model=%s contents_len=%d", model, len(contents))
+    log.info("    gemini_bridge_stream: calling API model=%s contents_len=%d tools=%s", model, len(contents), bool(tools))
     t0 = time.time()
 
     # Try each available key until one connects successfully
