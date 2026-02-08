@@ -163,6 +163,13 @@
     return parts.join(" · ");
   }
 
+  function buildSourceUrl(source) {
+    if (!source || !source.branch_id) return null;
+    let url = `/?branch=${encodeURIComponent(source.branch_id)}`;
+    if (source.msg_index != null) url += `&msg=${source.msg_index}`;
+    return url;
+  }
+
   function renderEntryHtml(e, displayName) {
     const label = displayName || e.topic;
     const sel = e.topic === selectedTopic ? " selected" : "";
@@ -173,7 +180,13 @@
     const previewText = sel ? e.content || "" : truncate(e.content, 120);
     html += `<div class="lore-entry-preview">${escapeHtml(previewText)}`;
     if (e.source) {
-      html += `<div class="lore-entry-source">來源：${escapeHtml(formatSourceLine(e.source))}</div>`;
+      const srcUrl = buildSourceUrl(e.source);
+      const srcText = escapeHtml(formatSourceLine(e.source));
+      if (srcUrl) {
+        html += `<div class="lore-entry-source"><a href="${escapeHtml(srcUrl)}" target="_blank" title="跳轉到原始對話">來源：${srcText}</a></div>`;
+      } else {
+        html += `<div class="lore-entry-source">來源：${srcText}</div>`;
+      }
     }
     html += `</div>`;
     return html;
@@ -320,9 +333,14 @@
         const srcDiv = document.createElement("div");
         srcDiv.id = "modal-source-info";
         srcDiv.className = "modal-source-info";
+        const srcUrl = buildSourceUrl(entry.source);
         let srcHtml = `<label>來源</label>`;
         srcHtml += `<div class="modal-source-detail">`;
-        srcHtml += `<span>${escapeHtml(formatSourceLine(entry.source))}</span>`;
+        if (srcUrl) {
+          srcHtml += `<a href="${escapeHtml(srcUrl)}" target="_blank" class="modal-source-link" title="跳轉到原始對話">${escapeHtml(formatSourceLine(entry.source))} ↗</a>`;
+        } else {
+          srcHtml += `<span>${escapeHtml(formatSourceLine(entry.source))}</span>`;
+        }
         if (entry.source.excerpt) {
           srcHtml += `<div class="modal-source-excerpt">「${escapeHtml(entry.source.excerpt)}」</div>`;
         }
