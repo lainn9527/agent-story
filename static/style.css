@@ -1638,3 +1638,170 @@ body {
   .header-sub { display: none; }
   #world-day-display { font-size: 0.75rem; }
 }
+
+/* ---------- Agent Panel ---------- */
+.agent-empty {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  padding: 8px 0;
+}
+
+.agent-card {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.agent-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.agent-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.agent-status {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.agent-status-created { color: var(--text-dim); background: rgba(155, 150, 137, 0.15); }
+.agent-status-running { color: #4caf50; background: rgba(76, 175, 80, 0.12); }
+.agent-status-paused { color: #ff9800; background: rgba(255, 152, 0, 0.12); }
+.agent-status-stopped { color: var(--text-dim); background: rgba(155, 150, 137, 0.1); }
+.agent-status-error { color: #f44336; background: rgba(244, 67, 54, 0.12); }
+
+.agent-card-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.agent-ctrl-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.agent-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.agent-start-btn:hover { color: #4caf50; border-color: #4caf50; }
+.agent-pause-btn:hover { color: #ff9800; border-color: #ff9800; }
+.agent-stop-btn:hover { color: #f44336; border-color: #f44336; }
+.agent-delete-btn:hover { color: #f44336; border-color: #f44336; }
+
+/* ---------- Leaderboard ---------- */
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  padding: 4px 0;
+}
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--bg-dark);
+}
+
+.rank-1 { background: var(--gold); }
+.rank-2 { background: #c0c0c0; }
+.rank-3 { background: #cd7f32; }
+
+.rank-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.lb-name { flex: 1; }
+.lb-points { color: var(--gold); font-weight: 600; }
+
+/* ---------- Agent Creation Modal ---------- */
+.agent-modal-content {
+  max-width: 520px;
+}
+
+.agent-preview-card {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.preview-field {
+  margin-bottom: 8px;
+}
+
+.preview-field label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.preview-field input,
+.preview-field textarea {
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.agent-gen-error {
+  color: #f44336;
+  font-size: 0.85rem;
+  padding: 8px;
+}
+
+.agent-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
