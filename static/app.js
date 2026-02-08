@@ -288,9 +288,10 @@ function startLivePolling(branchId) {
 
       updateLiveIndicator(true, data.auto_play_state);
 
-      // Refresh summaries if drawer is open and new summaries available
+      // Refresh summaries if drawer is open or modal is open and new summaries available
       if (data.summary_count != null && data.summary_count > _lastSummaryCount) {
-        if (!$drawer.classList.contains("closed")) {
+        const summaryModalVisible = !document.getElementById("summary-modal").classList.contains("hidden");
+        if (!$drawer.classList.contains("closed") || summaryModalVisible) {
           loadSummaries();
         }
       }
@@ -510,6 +511,7 @@ function renderStoryList() {
 }
 
 async function switchToStory(storyId) {
+  closeSummaryModal();
   stopLivePolling();
   try {
     const result = await API.switchStory(storyId);
@@ -804,6 +806,7 @@ function buildBranchTree() {
 }
 
 async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePreserve } = {}) {
+  closeSummaryModal();
   const container = document.getElementById("messages");
   let savedScrollTop = 0;
   let isAtBottom = false;
@@ -1651,6 +1654,10 @@ async function loadSummaries() {
     const summaries = result.summaries || [];
     _lastSummaryCount = summaries.length;
     renderSummaryDashboard(summaries);
+    // If modal is open, refresh timeline too
+    if (!document.getElementById("summary-modal").classList.contains("hidden")) {
+      if (summaries.length) renderSummaryTimeline(summaries);
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -1682,46 +1689,66 @@ function renderSummaryDashboard(summaries) {
     `<div class="summary-metric"><span class="summary-metric-value summary-phase-badge ${currentPhase === "dungeon" ? "dungeon" : "hub"}">${currentPhase === "dungeon" ? "副本中" : "主神空間"}</span><span class="summary-metric-label">階段</span></div>`;
   metricsEl.appendChild(bar);
 
-  // Summary cards (newest first)
-  const reversed = [...summaries].reverse();
-  for (const s of reversed) {
-    const card = document.createElement("div");
-    card.className = "summary-card";
+  // Button to open timeline modal
+  const btn = document.createElement("button");
+  btn.className = "summary-open-modal-btn";
+  btn.textContent = `查看時間軸（${summaries.length} 段摘要）`;
+  btn.onclick = () => openSummaryModal(summaries);
+  timelineEl.appendChild(btn);
+}
 
-    const header = document.createElement("div");
-    header.className = "summary-card-header";
+// ---------------------------------------------------------------------------
+// Summary Timeline Modal
+// ---------------------------------------------------------------------------
+function openSummaryModal(summaries) {
+  const modal = document.getElementById("summary-modal");
+  modal.classList.remove("hidden");
+  renderSummaryTimeline(summaries);
+}
 
-    const turnRange = document.createElement("span");
-    turnRange.className = "summary-turn-range";
-    turnRange.textContent = `Turn ${s.turn_start}-${s.turn_end}`;
+function closeSummaryModal() {
+  document.getElementById("summary-modal").classList.add("hidden");
+}
 
-    const phaseBadge = document.createElement("span");
-    phaseBadge.className = `summary-phase-badge ${s.phase === "dungeon" ? "dungeon" : "hub"}`;
-    phaseBadge.textContent = s.phase === "dungeon" ? "副本" : "主神空間";
+function renderSummaryTimeline(summaries) {
+  const metricsEl = document.getElementById("summary-modal-metrics");
+  const bodyEl = document.getElementById("summary-modal-timeline");
+  bodyEl.innerHTML = "";
+  if (!summaries.length) { metricsEl.innerHTML = ""; return; }
 
-    header.appendChild(turnRange);
-    header.appendChild(phaseBadge);
-    card.appendChild(header);
+  // Metrics
+  const latest = summaries[summaries.length - 1];
+  metricsEl.innerHTML = `
+    <span class="stm-metric"><b>${(latest.turn_end || 0) + 1}</b> 回合</span>
+    <span class="stm-metric-sep">\u00B7</span>
+    <span class="stm-metric"><b>${latest.dungeon_count || 0}</b> 副本</span>
+    <span class="stm-metric-sep">\u00B7</span>
+    <span class="stm-metric stm-phase-${latest.phase === 'dungeon' ? 'dungeon' : 'hub'}">${latest.phase === 'dungeon' ? '副本中' : '主神空間'}</span>`;
 
-    const summaryText = document.createElement("div");
-    summaryText.className = "summary-text";
-    summaryText.textContent = s.summary;
-    card.appendChild(summaryText);
+  // Vertical timeline (chronological, oldest first)
+  const timeline = document.createElement("div");
+  timeline.className = "stm-timeline";
 
-    if (s.key_events && s.key_events.length) {
-      const tags = document.createElement("div");
-      tags.className = "summary-events";
-      for (const ev of s.key_events) {
-        const tag = document.createElement("span");
-        tag.className = "summary-event-tag";
-        tag.textContent = ev;
-        tags.appendChild(tag);
-      }
-      card.appendChild(tags);
-    }
+  for (let i = 0; i < summaries.length; i++) {
+    const s = summaries[i];
+    const node = document.createElement("div");
+    node.className = `stm-node ${s.phase === "dungeon" ? "dungeon" : "hub"}`;
 
-    timelineEl.appendChild(card);
+    node.innerHTML = `
+      <div class="stm-dot"></div>
+      <div class="stm-card">
+        <div class="stm-card-header">
+          <span class="stm-turn">Turn ${s.turn_start}\u2013${s.turn_end}</span>
+          <span class="summary-phase-badge ${s.phase === 'dungeon' ? 'dungeon' : 'hub'}">${s.phase === 'dungeon' ? '副本' : '主神空間'}</span>
+        </div>
+        <div class="stm-summary">${escapeHtml(s.summary)}</div>
+        ${s.key_events?.length ? `<div class="stm-events">${s.key_events.map(e => `<span class="summary-event-tag">${escapeHtml(e)}</span>`).join('')}</div>` : ''}
+      </div>`;
+
+    timeline.appendChild(node);
   }
+
+  bodyEl.appendChild(timeline);
 }
 
 // ---------------------------------------------------------------------------
@@ -2105,6 +2132,7 @@ $newBlankBranchBtn.addEventListener("click", async () => {
 // Promote branch button
 $promoteBtn.addEventListener("click", async () => {
   if (currentBranchId === "main") return;
+  closeSummaryModal();
   const branch = branches[currentBranchId];
   const name = branch ? branch.name : currentBranchId;
   if (!confirm(`確定要將分支「${name}」的內容設為主時間線嗎？`)) return;
@@ -2141,6 +2169,18 @@ document.getElementById("ns-create").addEventListener("click", createNewStory);
 // Close modal on overlay click
 $storyModal.addEventListener("click", (e) => {
   if (e.target === $storyModal) closeNewStoryModal();
+});
+
+// Summary timeline modal
+document.getElementById("summary-modal-close").onclick = closeSummaryModal;
+document.getElementById("summary-modal").addEventListener("click", (e) => {
+  if (e.target.id === "summary-modal") closeSummaryModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("summary-modal").classList.contains("hidden")) {
+    e.stopImmediatePropagation();
+    closeSummaryModal();
+  }
 });
 
 // ---------------------------------------------------------------------------
