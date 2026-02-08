@@ -37,6 +37,9 @@ from compaction import (
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
 )
 from world_timer import process_time_tags, get_world_day, copy_world_day
+import agent_manager
+from shared_world import get_agents_context, get_leaderboard
+from prompts import CHARACTER_GEN_SYSTEM_PROMPT
 
 # ---------------------------------------------------------------------------
 # Config
@@ -280,6 +283,24 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
+    # Build other agents text for system prompt
+    try:
+        agents_data = agent_manager.load_agents(story_id)
+        if agents_data.get("agents"):
+            lb = get_leaderboard(story_id, get_world_day(story_id, branch_id))
+            if lb:
+                agent_lines = ["其他輪迴者（排行榜）："]
+                for i, e in enumerate(lb[:3], 1):
+                    agent_lines.append(f"  {i}. {e['name']} — {e['reward_points']}點")
+                other_agents_text = "\n".join(agent_lines)
+            else:
+                other_agents_text = "（目前無其他輪迴者資料）"
+        else:
+            other_agents_text = "（目前無其他輪迴者資料）"
+    except Exception:
+        log.debug("Failed to build agent context for system prompt", exc_info=True)
+        other_agents_text = "（目前無其他輪迴者資料）"
+
     if os.path.exists(prompt_path):
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
@@ -290,7 +311,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             npc_profiles=npc_text,
             team_rules=team_rules,
             narrative_recap=narrative_recap,
-            other_agents="（目前無其他輪迴者資料）",
+            other_agents=other_agents_text,
         )
     # Fallback to prompts.py template
     return build_system_prompt(state_text, summary)
@@ -1301,6 +1322,14 @@ def _build_augmented_message(
     if activities:
         parts.append(activities)
 
+    # Cross-agent awareness (human player branches only)
+    try:
+        agents_ctx = get_agents_context(story_id, branch_id, user_text)
+        if agents_ctx:
+            parts.append(agents_ctx)
+    except Exception:
+        log.debug("Failed to build agents context", exc_info=True)
+
     # Dice roll
     dice_result = None
     if character_state:
@@ -1677,11 +1706,13 @@ def api_status():
 
 @app.route("/api/branches")
 def api_branches():
-    """Return all branches (excluding soft-deleted ones)."""
+    """Return all branches (excluding soft-deleted, merged, and agent branches)."""
     story_id = _active_story_id()
     tree = _load_tree(story_id)
+    # Collect agent branch IDs to exclude them from the UI branch list
+    agent_branch_ids = {a["branch_id"] for a in agent_manager.load_agents(story_id).get("agents", {}).values()}
     visible = {bid: b for bid, b in tree.get("branches", {}).items()
-               if not b.get("deleted") and not b.get("merged")}
+               if not b.get("deleted") and not b.get("merged") and bid not in agent_branch_ids}
     return jsonify({
         "active_branch_id": tree.get("active_branch_id", "main"),
         "branches": visible,
@@ -2893,6 +2924,95 @@ def api_config_set():
 
     log.info("api_config_set: updated — provider=%s", cfg.get("provider"))
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Agent API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents")
+def api_agents_list():
+    """Return all agents for the active story."""
+    story_id = _active_story_id()
+    return jsonify({"agents": agent_manager.list_agents(story_id)})
+
+
+@app.route("/api/agents", methods=["POST"])
+def api_agents_create():
+    """Create a new agent."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    name = body.get("name", "").strip()
+    character_config = body.get("character_config", {})
+    auto_play_config = body.get("auto_play_config")
+
+    if not name:
+        return jsonify({"ok": False, "error": "agent name required"}), 400
+    if not character_config.get("character_state"):
+        return jsonify({"ok": False, "error": "character_state required"}), 400
+
+    agent = agent_manager.create_agent(
+        story_id, name, character_config,
+        auto_play_config=auto_play_config,
+    )
+    return jsonify({"ok": True, "agent": agent})
+
+
+@app.route("/api/agents/<agent_id>/<action>", methods=["POST"])
+def api_agents_action(agent_id, action):
+    """Start, pause, or stop an agent."""
+    story_id = _active_story_id()
+    if action == "start":
+        ok = agent_manager.start_agent(story_id, agent_id)
+    elif action == "pause":
+        ok = agent_manager.pause_agent(story_id, agent_id)
+    elif action == "stop":
+        ok = agent_manager.stop_agent(story_id, agent_id)
+    else:
+        return jsonify({"ok": False, "error": f"unknown action: {action}"}), 400
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/agents/<agent_id>", methods=["DELETE"])
+def api_agents_delete(agent_id):
+    """Delete an agent (branch data is kept)."""
+    story_id = _active_story_id()
+    ok = agent_manager.delete_agent(story_id, agent_id)
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/leaderboard")
+def api_leaderboard():
+    """Return agent leaderboard."""
+    story_id = _active_story_id()
+    return jsonify({"leaderboard": get_leaderboard(story_id)})
+
+
+@app.route("/api/agents/generate-character", methods=["POST"])
+def api_agents_generate_character():
+    """Use LLM to generate a deep character profile from a text description."""
+    from llm_bridge import call_oneshot
+
+    body = request.get_json(force=True)
+    prompt = body.get("prompt", "").strip()
+    if not prompt:
+        return jsonify({"ok": False, "error": "prompt required"}), 400
+
+    try:
+        raw = call_oneshot(prompt, system_prompt=CHARACTER_GEN_SYSTEM_PROMPT)
+        # Try to parse as JSON
+        raw = raw.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = re.sub(r"^```\w*\n?", "", raw)
+            raw = re.sub(r"\n?```$", "", raw)
+        character = json.loads(raw)
+        return jsonify({"ok": True, "character": character})
+    except json.JSONDecodeError:
+        return jsonify({"ok": False, "error": "LLM returned invalid JSON", "raw": raw}), 500
+    except Exception as e:
+        log.exception("Character generation failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------

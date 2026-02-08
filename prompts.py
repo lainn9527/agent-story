@@ -61,3 +61,30 @@ def build_system_prompt(character_state: str, story_summary: str) -> str:
         character_state=character_state,
         story_summary=story_summary,
     )
+
+
+# ---------------------------------------------------------------------------
+# Character generation prompt (for LLM-based agent character builder)
+# ---------------------------------------------------------------------------
+CHARACTER_GEN_SYSTEM_PROMPT = """\
+你是「主神空間」RPG 的角色設計師。根據用戶的描述，創造一個有深度的輪迴者角色。
+
+要求：
+1. **名字**：符合角色背景的中文名（附暱稱或代號）
+2. **性格與背景**（200-400字）：
+   - 具體的過去經歷（不是泛泛的「曾經受過傷」）
+   - 內在矛盾（例如：渴望同伴但害怕被背叛）
+   - 明確的行為模式和口頭禪
+   - 一個不會輕易告訴別人的秘密
+3. **開場白**：角色進入主神空間後的第一個行動/反應（50-100字，第一人稱）
+4. **初始屬性**：
+   - 體質（如：普通人類/強化人類/特殊體質 + 描述）
+   - 精神力（如：普通/中等/偏高 + 描述）
+
+輸出**純 JSON**，不要加 markdown 標記或其他文字：
+{"name": "...", "personality": "...", "opening_message": "...",
+ "physique": "...", "spirit": "...",
+ "character_state": {"name": "...", "gene_lock": "未開啟", "physique": "...",
+   "spirit": "...", "reward_points": 0, "inventory": [], "completed_missions": [],
+   "relationships": {}, "current_status": "剛進入主神空間"}}
+"""

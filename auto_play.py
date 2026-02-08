@@ -105,6 +105,7 @@ class AutoPlayConfig:
     provider: str | None = None   # Override LLM provider ("gemini" / "claude_cli")
     max_errors: int = 10          # Max consecutive errors before stopping
     web_search: bool = True       # Enable web search enrichment for lore/dungeons
+    agent_id: str | None = None   # Agent ID for cooperative stop via agent_manager
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +237,7 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
 
-    branch_id = f"auto_{uuid.uuid4().hex[:8]}"
+    branch_id = config.branch_id or f"auto_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
     if config.blank:
