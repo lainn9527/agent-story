@@ -368,8 +368,8 @@ body {
 
 .branch-group-children {
   overflow: hidden;
-  transition: max-height 0.25s ease, opacity 0.2s ease;
-  max-height: 500px;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+  max-height: 5000px;
   opacity: 1;
 }
 
