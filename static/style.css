@@ -85,6 +85,18 @@ body {
   color: var(--text-dim);
 }
 
+#world-day-display {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--gold);
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+
+#world-day-display:empty {
+  display: none;
+}
+
 #live-indicator {
   display: inline-flex;
   align-items: center;

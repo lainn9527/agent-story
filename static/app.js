@@ -264,6 +264,25 @@ function isAutoBranch(branchId) {
   return branchId && branchId.startsWith("auto_");
 }
 
+function updateWorldDayDisplay(worldDay) {
+  const el = document.getElementById("world-day-display");
+  if (!el) return;
+  if (worldDay == null || worldDay <= 0) { el.textContent = ""; return; }
+
+  const day = Math.floor(worldDay) + 1;
+  const hourFraction = worldDay - Math.floor(worldDay);
+  const hour = hourFraction * 24;
+
+  let period;
+  if (hour < 6) period = "深夜";
+  else if (hour < 9) period = "清晨";
+  else if (hour < 12) period = "上午";
+  else if (hour < 18) period = "下午";
+  else period = "夜晚";
+
+  el.textContent = `✦ 世界第 ${day} 天 · ${period}`;
+}
+
 function startLivePolling(branchId) {
   stopLivePolling();
   _livePollingBranchId = branchId;
@@ -296,6 +315,7 @@ function startLivePolling(branchId) {
       }
 
       updateLiveIndicator(true, data.auto_play_state);
+      updateWorldDayDisplay(data.world_day);
 
       // Refresh summaries if drawer is open or modal is open and new summaries available
       if (data.summary_count != null && data.summary_count > _lastSummaryCount) {
@@ -907,6 +927,7 @@ async function loadMessages(branchId, { tail } = {}) {
   forkPoints = msgResult.fork_points || {};
   siblingGroups = msgResult.sibling_groups || {};
   renderMessages(allMessages);
+  updateWorldDayDisplay(msgResult.world_day);
 }
 
 // ---------------------------------------------------------------------------
