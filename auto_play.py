@@ -120,6 +120,7 @@ class RunState:
     consecutive_errors: int = 0
     started_at: str = ""
     last_turn_at: str = ""
+    status: str = "running"  # "running" or "finished"
 
     def to_dict(self) -> dict:
         return {
@@ -131,6 +132,7 @@ class RunState:
             "consecutive_errors": self.consecutive_errors,
             "started_at": self.started_at,
             "last_turn_at": self.last_turn_at,
+            "status": self.status,
         }
 
     @classmethod
@@ -859,6 +861,11 @@ def auto_play(config: AutoPlayConfig):
             backoff = config.turn_delay * (2 ** min(state.consecutive_errors, 6))
             log.info("Waiting %.1fs before next attempt (consecutive errors: %d)", backoff, state.consecutive_errors)
             time.sleep(backoff)
+
+    # Mark run as finished so frontend stops polling
+    state.status = "finished"
+    state.last_turn_at = datetime.now(timezone.utc).isoformat()
+    save_run_state(story_id, branch_id, state)
 
     print_summary(state, story_id, branch_id)
 

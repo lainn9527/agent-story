@@ -37,9 +37,10 @@ function showConfirm(msg) {
 const API = {
   init: () => fetch("/api/init", { method: "POST" }).then(r => r.json()),
 
-  messages: (branchId = "main", offset = 0, limit = 99999, afterIndex = null) => {
+  messages: (branchId = "main", offset = 0, limit = 99999, afterIndex = null, tail = null) => {
     let url = `/api/messages?branch_id=${branchId}&offset=${offset}&limit=${limit}`;
     if (afterIndex != null) url += `&after_index=${afterIndex}`;
+    if (tail != null) url += `&tail=${tail}`;
     return fetch(url).then(r => r.json());
   },
 
@@ -265,9 +266,11 @@ function startLivePolling(branchId) {
   const poll = async () => {
     if (_livePollingBranchId !== branchId) return;
     try {
-      const lastIndex = allMessages.length > 0
-        ? Math.max(...allMessages.map(m => m.index ?? 0))
-        : -1;
+      let lastIndex = -1;
+      for (const m of allMessages) {
+        const idx = m.index ?? 0;
+        if (idx > lastIndex) lastIndex = idx;
+      }
       const data = await API.messages(branchId, 0, 99999, lastIndex);
       if (_livePollingBranchId !== branchId) return;
 
@@ -322,8 +325,8 @@ function updateLiveIndicator(isLive, autoState) {
   }
   let text = "\u25CF LIVE";
   if (autoState) {
-    if (autoState.current_turn != null) text += ` \u2014 Turn ${autoState.current_turn}`;
-    if (autoState.current_phase) text += ` (${autoState.current_phase})`;
+    if (autoState.turn != null) text += ` \u2014 Turn ${autoState.turn}`;
+    if (autoState.phase) text += ` (${autoState.phase})`;
   }
   el.textContent = text;
 }
@@ -395,7 +398,11 @@ async function init() {
 
     // 4. Load messages for active branch
     updateInitStatus("載入對話紀錄…");
-    await loadMessages(currentBranchId);
+    if (isAutoBranch(currentBranchId)) {
+      await loadMessages(currentBranchId, { tail: 100 });
+    } else {
+      await loadMessages(currentBranchId);
+    }
 
     // 5. Load character status
     updateInitStatus("載入角色狀態…");
@@ -408,6 +415,16 @@ async function init() {
 
     removeInitOverlay();
     scrollToBottom();
+
+    // Show "load earlier" button for auto branches with truncated messages
+    if (isAutoBranch(currentBranchId) && allMessages.length < totalMessages) {
+      $loadBtn.style.display = "";
+      $loadBtn.onclick = async () => {
+        $loadBtn.style.display = "none";
+        await loadMessages(currentBranchId);
+        scrollToBottom();
+      };
+    }
 
     // Start live polling if current branch is auto-play
     if (isAutoBranch(currentBranchId)) {
@@ -791,11 +808,27 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
     $messages.style.minHeight = $messages.scrollHeight + "px";
   }
 
-  await loadMessages(branchId);
+  if (isAutoBranch(branchId)) {
+    await loadMessages(branchId, { tail: 100 });
+  } else {
+    await loadMessages(branchId);
+  }
   const status = await API.status(branchId);
   renderCharacterStatus(status);
   loadNpcs();
   loadEvents();
+
+  // Show/hide "load earlier" button for auto branches with truncated messages
+  if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
+    $loadBtn.style.display = "";
+    $loadBtn.onclick = async () => {
+      $loadBtn.style.display = "none";
+      await loadMessages(branchId);
+      scrollToBottom();
+    };
+  } else {
+    $loadBtn.style.display = "none";
+  }
 
   if (isAutoBranch(branchId)) {
     startLivePolling(branchId);
@@ -839,8 +872,10 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
   scrollToBottom();
 }
 
-async function loadMessages(branchId) {
-  const msgResult = await API.messages(branchId, 0, 99999);
+async function loadMessages(branchId, { tail } = {}) {
+  const msgResult = tail
+    ? await API.messages(branchId, 0, 99999, null, tail)
+    : await API.messages(branchId, 0, 99999);
   totalMessages = msgResult.total;
   allMessages = msgResult.messages;
   originalCount = msgResult.original_count || originalCount;

@@ -1253,7 +1253,10 @@ def api_messages():
 
     total = len(timeline)
     after_index = request.args.get("after_index", None, type=int)
-    if after_index is not None:
+    tail = request.args.get("tail", None, type=int)
+    if tail is not None:
+        page = timeline[max(0, len(timeline) - tail):]
+    elif after_index is not None:
         page = [m for m in timeline if m.get("index", 0) > after_index]
     else:
         page = timeline[offset: offset + limit]
@@ -1275,7 +1278,7 @@ def api_messages():
         auto_state = _load_json(state_path, None)
         if not isinstance(auto_state, dict):
             result["live_status"] = "unknown"
-        elif auto_state.get("death_detected") or auto_state.get("consecutive_errors", 0) >= 3:
+        elif auto_state.get("status") == "finished" or auto_state.get("death_detected") or auto_state.get("consecutive_errors", 0) >= 3:
             result["live_status"] = "finished"
         else:
             result["live_status"] = "running"
