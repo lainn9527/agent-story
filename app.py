@@ -584,7 +584,7 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
     t.start()
 
 
-def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: int):
+def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: int, skip_state: bool = False):
     """Background: use LLM to extract structured tags (lore/event/npc/state) from GM response."""
     if len(gm_text) < 200:
         return
@@ -666,7 +666,15 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 lines = [l for l in lines if not l.startswith("```")]
                 result = "\n".join(lines)
 
-            data = json.loads(result)
+            try:
+                data = json.loads(result)
+            except json.JSONDecodeError:
+                # Fallback: extract first JSON object from response
+                m = re.search(r'\{.*\}', result, re.DOTALL)
+                if not m:
+                    log.info("    extract_tags: no JSON found in response, skipping")
+                    return
+                data = json.loads(m.group())
             if not isinstance(data, dict):
                 return
 
@@ -695,9 +703,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     _save_npc(story_id, npc, branch_id)
                     saved_counts["npcs"] += 1
 
-            # State — apply update
+            # State — apply update (skip if regex already handled STATE tag)
             state_update = data.get("state", {})
-            if state_update and isinstance(state_update, dict):
+            if state_update and isinstance(state_update, dict) and not skip_state:
                 _apply_state_update(story_id, branch_id, state_update)
                 saved_counts["state"] = True
 
@@ -1226,7 +1234,9 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         image_info = {"filename": filename, "ready": False}
 
     # Async post-processing: extract structured data via separate LLM call
-    _extract_tags_async(story_id, branch_id, gm_response, msg_index)
+    # Skip state extraction if regex already found STATE tags (avoid delta double-apply)
+    _extract_tags_async(story_id, branch_id, gm_response, msg_index,
+                        skip_state=bool(state_updates))
 
     # Build snapshots for branch forking accuracy
     snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
@@ -1525,8 +1535,8 @@ def api_send():
     # 8. Trigger compaction if due
     recap = load_recap(story_id, branch_id)
     if should_compact(recap, len(full_timeline) + 1):
-        full_timeline.append(gm_msg)
-        compact_async(story_id, branch_id, full_timeline)
+        tl = list(full_timeline) + [gm_msg]
+        compact_async(story_id, branch_id, tl)
 
     log.info("/api/send DONE   total=%.1fs", time.time() - t_start)
     return jsonify({"ok": True, "player": player_msg, "gm": gm_msg})
