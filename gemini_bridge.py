@@ -107,8 +107,19 @@ def _extract_text(response_data: dict) -> str:
 # Key fallback wrapper (non-streaming)
 # ---------------------------------------------------------------------------
 
+def _is_key_error(http_code: int, body_text: str) -> bool:
+    """Check if an HTTP error indicates a bad/expired API key (should try next)."""
+    if http_code == 429:
+        return True
+    if http_code == 400 and "API key" in body_text:
+        return True
+    if http_code in (401, 403):
+        return True
+    return False
+
+
 def _with_key_fallback(gemini_cfg: dict, fn):
-    """Try fn(api_key) with each available key. On 429, mark and try next.
+    """Try fn(api_key) with each available key. On key errors, mark and try next.
 
     fn should raise urllib.error.HTTPError on failure or return the result.
     """
@@ -122,18 +133,19 @@ def _with_key_fallback(gemini_cfg: dict, fn):
         try:
             return fn(api_key), None
         except urllib.error.HTTPError as e:
-            if e.code == 429:
+            body_text = e.read().decode("utf-8", errors="replace")[:300]
+            if _is_key_error(e.code, body_text):
                 mark_rate_limited(api_key)
-                last_err = f"API key ...{api_key[-6:]} rate limited (429)"
-                log.info("    gemini_bridge: 429 on key ...%s, trying next", api_key[-6:])
+                last_err = f"API key ...{api_key[-6:]} failed (HTTP {e.code})"
+                log.info("    gemini_bridge: HTTP %d on key ...%s, trying next — %s",
+                         e.code, api_key[-6:], body_text[:100])
                 continue
-            # Non-429 error — don't retry
-            body_text = e.read().decode("utf-8", errors="replace")[:200]
+            # Non-key error — don't retry
             return None, f"Gemini API HTTP {e.code}：{body_text}"
         except Exception as e:
             return None, f"Gemini API 錯誤：{e}"
 
-    return None, f"【系統錯誤】所有 key 都被 rate limit：{last_err}"
+    return None, f"【系統錯誤】所有 API key 都失敗：{last_err}"
 
 
 # ---------------------------------------------------------------------------
@@ -233,11 +245,11 @@ def call_gemini_gm_stream(
             resp = urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx)
             break  # connected OK
         except urllib.error.HTTPError as e:
-            if e.code == 429:
+            body_text = e.read().decode("utf-8", errors="replace")[:300]
+            if _is_key_error(e.code, body_text):
                 mark_rate_limited(api_key)
-                log.info("    gemini_bridge_stream: 429 on key ...%s, trying next", api_key[-6:])
+                log.info("    gemini_bridge_stream: HTTP %d on key ...%s, trying next", e.code, api_key[-6:])
                 continue
-            body_text = e.read().decode("utf-8", errors="replace")[:200]
             log.info("    gemini_bridge_stream: HTTP %d — %s", e.code, body_text)
             yield ("error", f"Gemini API HTTP {e.code}：{body_text}")
             return
@@ -247,7 +259,7 @@ def call_gemini_gm_stream(
             return
 
     if resp is None:
-        yield ("error", "所有 Gemini API key 都被 rate limit (429)")
+        yield ("error", "所有 Gemini API key 都失敗")
         return
 
     accumulated = ""

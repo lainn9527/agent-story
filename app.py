@@ -804,68 +804,6 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     # Background: normalize non-standard fields and re-apply
     _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
 
-    # Process list fields from schema
-    for list_def in schema.get("lists", []):
-        key = list_def["key"]
-        list_type = list_def.get("type", "list")
-
-        if list_type == "map":
-            # Map merge (e.g. relationships)
-            if key in update:
-                existing = state.get(key, {})
-                existing.update(update[key])
-                state[key] = existing
-        else:
-            # List add
-            add_key = list_def.get("state_add_key")
-            if add_key and add_key in update:
-                lst = state.get(key, [])
-                for item in update[add_key]:
-                    if item not in lst:
-                        lst.append(item)
-                state[key] = lst
-
-            # List remove (match by name prefix before " — ")
-            remove_key = list_def.get("state_remove_key")
-            if remove_key and remove_key in update:
-                lst = state.get(key, [])
-                for rm_item in update[remove_key]:
-                    rm_name = rm_item.split(" — ")[0].strip()
-                    lst = [x for x in lst if x.split(" — ")[0].strip() != rm_name]
-                state[key] = lst
-
-    # If GM sets reward_points directly instead of using delta, accept it
-    if "reward_points" in update and "reward_points_delta" not in update:
-        val = update["reward_points"]
-        if isinstance(val, (int, float)):
-            state["reward_points"] = int(val)
-
-    # reward_points_delta (special convention)
-    if "reward_points_delta" in update:
-        state["reward_points"] = state.get("reward_points", 0) + update["reward_points_delta"]
-
-    # Direct overwrite fields from schema
-    for key in schema.get("direct_overwrite_keys", []):
-        if key in update:
-            state[key] = update[key]
-
-    # Save any extra keys not handled above (GM can freely add new fields)
-    handled_keys = set()
-    handled_keys.add("reward_points_delta")
-    for list_def in schema.get("lists", []):
-        handled_keys.add(list_def["key"])
-        if list_def.get("state_add_key"):
-            handled_keys.add(list_def["state_add_key"])
-        if list_def.get("state_remove_key"):
-            handled_keys.add(list_def["state_remove_key"])
-    for key in schema.get("direct_overwrite_keys", []):
-        handled_keys.add(key)
-    for key, val in update.items():
-        if key not in handled_keys and isinstance(val, (str, int, float, bool)):
-            state[key] = val
-
-    _save_json(_story_character_state_path(story_id, branch_id), state)
-
 
 # ---------------------------------------------------------------------------
 # Helpers — Timeline Tree (story-scoped)
