@@ -1907,9 +1907,14 @@ def api_branches_edit():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    gm_response, _ = call_claude_gm(
-        augmented_edit, system_prompt, recent, session_id=None
-    )
+    try:
+        gm_response, _ = call_claude_gm(
+            augmented_edit, system_prompt, recent, session_id=None
+        )
+    except Exception as e:
+        log.info("/api/branches/edit EXCEPTION %s", e)
+        _cleanup_branch(story_id, branch_id)
+        return jsonify({"ok": False, "error": str(e)}), 500
     log.info("  claude_call: %.1fs", time.time() - t0)
 
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
@@ -2141,9 +2146,14 @@ def api_branches_regenerate():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    gm_response, _ = call_claude_gm(
-        augmented_regen, system_prompt, recent, session_id=None
-    )
+    try:
+        gm_response, _ = call_claude_gm(
+            augmented_regen, system_prompt, recent, session_id=None
+        )
+    except Exception as e:
+        log.info("/api/branches/regenerate EXCEPTION %s", e)
+        _cleanup_branch(story_id, branch_id)
+        return jsonify({"ok": False, "error": str(e)}), 500
     log.info("  claude_call: %.1fs", time.time() - t0)
 
     gm_msg_index = branch_point_index + 1

@@ -1772,19 +1772,28 @@ function renderMessages(messages) {
         delBtn.title = "刪除此版本";
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (!(await showConfirm("刪除此版本？"))) return;
           const branchToDelete = currentVariant.branch_id;
-          const res = await API.deleteBranch(branchToDelete);
-          if (res.ok) {
-            const adjIdx = group.current_variant >= 2 ? group.current_variant - 2 : 0;
-            const adjacent = group.variants[adjIdx];
-            await loadBranches();
-            if (adjacent && adjacent.branch_id !== branchToDelete) {
-              await switchToBranch(adjacent.branch_id, { preserveScroll: true });
+          const descCount = countDescendants(branchToDelete);
+          let msg = "刪除此版本？";
+          if (descCount > 0) msg += `\n（含 ${descCount} 個子分支也會一併刪除）`;
+          if (!(await showConfirm(msg))) return;
+          try {
+            const res = await API.deleteBranch(branchToDelete);
+            if (res.ok) {
+              const adjIdx = group.current_variant >= 2 ? group.current_variant - 2 : 0;
+              const adjacent = group.variants[adjIdx];
+              await loadBranches();
+              if (adjacent && adjacent.branch_id !== branchToDelete) {
+                await switchToBranch(adjacent.branch_id, { preserveScroll: true });
+              } else {
+                await switchToBranch("main");
+              }
+              renderBranchList();
             } else {
-              await switchToBranch("main");
+              alert(res.error || "刪除失敗");
             }
-            renderBranchList();
+          } catch (err) {
+            alert("網路錯誤：" + err.message);
           }
         });
         switcher.appendChild(delBtn);
