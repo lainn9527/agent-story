@@ -491,7 +491,10 @@ def _find_similar_topic(new_topic: str, existing_topics: set[str], threshold: fl
         ex_bgs = _bigrams(existing)
         if not ex_bgs:
             continue
-        sim = len(new_bgs & ex_bgs) / len(new_bgs | ex_bgs)
+        overlap = new_bgs & ex_bgs
+        if len(overlap) < 2:
+            continue  # require ≥2 shared bigrams to avoid short-topic false positives
+        sim = len(overlap) / len(new_bgs | ex_bgs)
         if sim > best_sim:
             best_sim = sim
             best_topic = existing
