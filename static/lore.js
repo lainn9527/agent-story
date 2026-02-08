@@ -199,8 +199,8 @@
     const sel = selectedTopics.has(e.topic) ? " selected" : "";
     const checked = checkedTopics.has(e.topic) ? " checked" : "";
     let html = `<div class="lore-entry${sel}" data-topic="${escapeHtml(e.topic)}">`;
-    html += `<input type="checkbox" class="lore-entry-check" data-topic="${escapeHtml(e.topic)}" aria-label="選取 ${escapeHtml(label)}"${checked}>`;
     html += `<span class="lore-entry-topic">${escapeHtml(label)}</span>`;
+    html += `<input type="checkbox" class="lore-entry-check" data-topic="${escapeHtml(e.topic)}" aria-label="選取 ${escapeHtml(label)}"${checked}>`;
     html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
     html += `</div>`;
     const previewText = sel ? e.content || "" : truncate(e.content, 120);

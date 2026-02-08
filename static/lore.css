@@ -238,14 +238,19 @@ body.lore-page {
 .batch-bar .btn-danger { padding: 4px 12px; font-size: 0.8rem; }
 .batch-bar .btn-secondary { padding: 4px 12px; font-size: 0.8rem; }
 
-/* Entry checkbox */
+/* Entry checkbox — next to edit pencil, subdued to match dark bg */
 .lore-entry-check {
-  width: 15px;
-  height: 15px;
-  margin-right: 6px;
+  width: 14px;
+  height: 14px;
+  margin: 0 2px 0 4px;
   cursor: pointer;
   accent-color: var(--accent);
   flex-shrink: 0;
+  opacity: 0.35;
+}
+.lore-entry:hover .lore-entry-check,
+.lore-entry-check:checked {
+  opacity: 1;
 }
 
 .lore-entry {
