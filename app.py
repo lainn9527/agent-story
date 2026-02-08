@@ -1482,11 +1482,16 @@ def api_messages():
         result["auto_play_state"] = auto_state
         result["summary_count"] = len(get_summaries(story_id, branch_id))
 
-    # Detect incomplete branch (edit/regen interrupted before GM response saved)
+    # Detect incomplete branch (edit interrupted before GM response saved).
+    # Only triggers when delta has a user message but no GM response — this
+    # distinguishes crashed edits from manually-created or regen branches.
     branch_meta = tree.get("branches", {}).get(branch_id, {})
     if (branch_id != "main"
             and not branch_id.startswith("auto_")
             and not branch_meta.get("blank")
+            and not branch_meta.get("deleted")
+            and not branch_meta.get("merged")
+            and any(m.get("role") == "user" for m in branch_delta)
             and not any(m.get("role") == "gm" for m in branch_delta)):
         parent_id = branch_meta.get("parent_branch_id", "main")
         parent_meta = tree.get("branches", {}).get(parent_id, {})
@@ -3288,8 +3293,11 @@ def _cleanup_incomplete_branches():
             # Check messages.json in the branch directory (avoid _branch_dir which calls makedirs)
             msgs_path = os.path.join(STORIES_DIR, story_dir_name, "branches", bid, "messages.json")
             msgs = _load_json(msgs_path, [])
+            has_user = any(m.get("role") == "user" for m in msgs)
             has_gm = any(m.get("role") == "gm" for m in msgs)
-            if not has_gm:
+            # Only delete branches with a user message but no GM response (crashed edit).
+            # Empty deltas (crashed regen or manual create) are left alone — can't distinguish.
+            if has_user and not has_gm:
                 to_delete.append(bid)
 
         for bid in to_delete:

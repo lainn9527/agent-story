@@ -368,7 +368,7 @@ function stopLivePolling() {
   updateLiveIndicator(false, null);
 }
 
-function startIncompletePolling(branchId, parentBranchId) {
+function startIncompletePolling(branchId) {
   stopIncompletePolling();
   _incompletePollBranchId = branchId;
   const startTime = Date.now();
@@ -392,13 +392,18 @@ function startIncompletePolling(branchId, parentBranchId) {
         return;
       }
 
-      // Timeout after 60s — update banner
+      // Timeout after 60s — update banner but keep input disabled
       if (Date.now() - startTime > 60000) {
         const banner = document.getElementById("incomplete-banner");
         if (banner) {
-          banner.querySelector(".incomplete-banner-text").textContent = "回應可能已中斷。";
+          banner.querySelector(".incomplete-banner-text").textContent = "回應可能已中斷，建議回到上一分支重新操作。";
         }
-        stopIncompletePolling();
+        // Stop timer only, keep input disabled (user should use the banner button)
+        if (_incompletePollTimer) {
+          clearTimeout(_incompletePollTimer);
+          _incompletePollTimer = null;
+        }
+        _incompletePollBranchId = null;
         return;
       }
     } catch (e) { /* ignore, retry next cycle */ }
@@ -653,6 +658,8 @@ function renderStoryList() {
 async function switchToStory(storyId) {
   closeSummaryModal();
   stopLivePolling();
+  stopIncompletePolling();
+  removeIncompleteBanner();
   try {
     const result = await API.switchStory(storyId);
     if (!result.ok) {
@@ -1424,7 +1431,7 @@ async function loadMessages(branchId, { tail } = {}) {
   // Handle incomplete branch (edit/regen interrupted before GM response)
   if (msgResult.incomplete) {
     showIncompleteBanner(msgResult.incomplete);
-    startIncompletePolling(branchId, msgResult.incomplete.parent_branch_id);
+    startIncompletePolling(branchId);
   } else {
     removeIncompleteBanner();
     stopIncompletePolling();
