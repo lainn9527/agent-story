@@ -102,6 +102,17 @@ body {
   white-space: nowrap;
 }
 
+#world-day-display {
+  font-size: 0.82rem;
+  color: var(--gold);
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+
+#world-day-display:empty {
+  display: none;
+}
+
 #live-indicator {
   display: inline-flex;
   align-items: center;

@@ -36,6 +36,7 @@ from compaction import (
     load_recap, save_recap, get_recap_text, should_compact, compact_async,
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
 )
+from world_timer import process_time_tags, get_world_day, copy_world_day
 
 # ---------------------------------------------------------------------------
 # Config
@@ -1171,6 +1172,9 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         filename = generate_image_async(story_id, img_prompt, msg_index)
         image_info = {"filename": filename, "ready": False}
 
+    # Extract TIME tags and advance world_day
+    gm_response = process_time_tags(gm_response, story_id, branch_id)
+
     # Async post-processing: extract structured data via separate LLM call
     # Skip state extraction if regex already found STATE tags (avoid delta double-apply)
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
@@ -1364,6 +1368,7 @@ def api_messages():
         "fork_points": fork_points,
         "sibling_groups": sibling_groups,
         "branch_id": branch_id,
+        "world_day": get_world_day(story_id, branch_id),
     }
 
     if branch_id.startswith("auto_"):
@@ -1599,7 +1604,9 @@ def api_status():
     """Return character state for a branch."""
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
-    return jsonify(_load_character_state(story_id, branch_id))
+    state = _load_character_state(story_id, branch_id)
+    state["world_day"] = get_world_day(story_id, branch_id)
+    return jsonify(state)
 
 
 # ---------------------------------------------------------------------------
@@ -1648,6 +1655,7 @@ def api_branches_create():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -1796,6 +1804,7 @@ def api_branches_edit():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -1909,6 +1918,7 @@ def api_branches_edit_stream():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2036,6 +2046,7 @@ def api_branches_regenerate():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2141,6 +2152,7 @@ def api_branches_regenerate_stream():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    copy_world_day(story_id, parent_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
@@ -2250,8 +2262,9 @@ def api_branches_promote():
 
     _save_json(_story_messages_path(story_id, "main"), new_messages)
 
-    # Copy recap from promoted branch to main
+    # Copy recap and world_day from promoted branch to main
     copy_recap_to_branch(story_id, branch_id, "main", -1)
+    copy_world_day(story_id, branch_id, "main")
 
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
@@ -2340,8 +2353,9 @@ def api_branches_merge():
     if os.path.exists(src_npcs):
         shutil.copy2(src_npcs, dst_npcs)
 
-    # 4. Copy recap from child to parent
+    # 4. Copy recap and world_day from child to parent
     copy_recap_to_branch(story_id, branch_id, parent_id, -1)
+    copy_world_day(story_id, branch_id, parent_id)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():
