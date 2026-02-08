@@ -2881,16 +2881,16 @@ def api_lore_chat_stream():
     prior = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages[:-1]]
     last_user_msg = messages[-1].get("content", "")
 
-    # Web-grounded search for external references
-    from llm_bridge import web_search
-    search_result = web_search(last_user_msg)
-    if search_result:
-        augmented_msg = f"{last_user_msg}\n\n[網路搜尋參考資料]\n{search_result}"
-    else:
-        augmented_msg = last_user_msg
-
     def generate():
         try:
+            # Web-grounded search for external references (inside generator so SSE is already open)
+            from llm_bridge import web_search
+            search_result = web_search(last_user_msg)
+            if search_result:
+                augmented_msg = f"{last_user_msg}\n\n[網路搜尋參考資料]\n{search_result}"
+            else:
+                augmented_msg = last_user_msg
+
             for event_type, payload in call_claude_gm_stream(
                 augmented_msg, lore_system, prior, session_id=None
             ):
