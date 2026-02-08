@@ -26,6 +26,17 @@ RECENT_WINDOW = 20               # Keep last 20 messages as raw context
 
 _FALLBACK_RECAP = "（尚無回顧，完整對話記錄已提供。）"
 
+
+def _get_character_name(story_id: str, branch_id: str) -> str:
+    """Read player character name from branch character_state.json."""
+    path = os.path.join(STORIES_DIR, story_id, "branches", branch_id, "character_state.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        return state.get("name", "玩家")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return "玩家"
+
 _COMPACT_PROMPT = """\
 你是故事摘要助手。以下是文字 RPG 遊戲的對話片段。請用繁體中文寫一份 500-800 字的敘事回顧：
 
@@ -34,6 +45,7 @@ _COMPACT_PROMPT = """\
 3. 情感轉折與角色發展
 4. 尚未解決的懸念
 
+重要：玩家角色名為「{character_name}」。摘要中請使用第三人稱「{character_name}」稱呼玩家角色，不要用其他名字替代，也不要使用第一人稱「我」。
 注意：角色屬性、道具、NPC 資料、世界設定已由其他系統追蹤，不需列出。
 專注於「發生了什麼事」和「故事走向如何」。
 
@@ -206,11 +218,14 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
              len(msgs_to_compact), compacted_through + 1, compact_end - 1,
              story_id, branch_id)
 
+    character_name = _get_character_name(story_id, branch_id)
+
     existing_recap = ""
     if recap.get("recap_text"):
         existing_recap = f"以下是先前的敘事回顧（請在此基礎上延續）：\n\n{recap['recap_text']}"
 
     prompt = _COMPACT_PROMPT.format(
+        character_name=character_name,
         existing_recap=existing_recap,
         messages=_format_messages(msgs_to_compact),
     )
