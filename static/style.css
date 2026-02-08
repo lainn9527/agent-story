@@ -138,6 +138,20 @@ body {
   color: #ff6b6b;
   margin-left: 6px;
 }
+.auto-play-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.auto-play-section-header:hover {
+  color: var(--text);
+}
 
 /* ---------- Drawer Overlay ---------- */
 #drawer-overlay {
