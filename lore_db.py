@@ -271,6 +271,15 @@ def get_toc(story_id: str) -> str:
     return "\n".join(lines).strip()
 
 
+def delete_entry(story_id: str, topic: str):
+    """Delete a lore entry from the search index by topic."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    conn.execute("DELETE FROM lore WHERE topic = ?", (topic,))
+    conn.commit()
+    conn.close()
+
+
 def search_relevant_lore(story_id: str, user_message: str, limit: int = 5) -> str:
     """Search for lore relevant to a user message. Returns formatted text for injection."""
     # Just use the main search function which handles CJK bigram extraction

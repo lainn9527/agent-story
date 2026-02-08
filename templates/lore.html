@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>世界設定知識庫</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/lore.css">
+</head>
+<body class="lore-page">
+  <!-- Header -->
+  <header id="lore-header">
+    <a href="/" class="header-back" title="返回遊戲">&#x2190; 返回遊戲</a>
+    <div class="header-title">
+      <span class="header-icon">&#x2726;</span>
+      世界設定知識庫
+    </div>
+    <div id="story-name" class="header-sub"></div>
+  </header>
+
+  <!-- Mobile tabs -->
+  <div id="mobile-tabs">
+    <button class="mobile-tab active" data-panel="list">設定列表</button>
+    <button class="mobile-tab" data-panel="chat">AI 對話</button>
+  </div>
+
+  <!-- Main two-panel layout -->
+  <div id="lore-container">
+    <!-- Left panel: Lore list -->
+    <div id="lore-list-panel" class="panel">
+      <div class="panel-toolbar">
+        <input type="text" id="lore-search" placeholder="搜尋設定..." />
+        <button id="lore-add-btn" title="新增設定">+ 新增</button>
+      </div>
+      <div id="lore-list" class="panel-body">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- Right panel: Chat -->
+    <div id="lore-chat-panel" class="panel">
+      <div id="chat-messages" class="panel-body">
+        <div class="chat-msg assistant">
+          <div class="chat-msg-content">歡迎使用世界設定管理助手。你可以：
+• 詢問現有設定的細節或矛盾
+• 請我幫你新增、修改或刪除設定
+• 討論設定間的一致性
+
+有什麼我能幫忙的嗎？</div>
+        </div>
+      </div>
+      <div id="chat-input-area">
+        <textarea id="chat-input" placeholder="輸入訊息..." rows="2"></textarea>
+        <button id="chat-send-btn" title="送出">送出</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">編輯設定</h3>
+        <button id="modal-close" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>分類</label>
+        <select id="modal-category"></select>
+        <label>主題</label>
+        <input type="text" id="modal-topic" />
+        <label>內容</label>
+        <textarea id="modal-content" rows="12"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button id="modal-delete" class="btn-danger" style="display:none;">刪除</button>
+        <div class="modal-footer-right">
+          <button id="modal-cancel" class="btn-secondary">取消</button>
+          <button id="modal-save" class="btn-primary">儲存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/lore.js"></script>
+</body>
+</html>
