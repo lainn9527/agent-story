@@ -850,6 +850,24 @@ def get_full_timeline(story_id: str, branch_id: str) -> list[dict]:
     return timeline
 
 
+def _resolve_sibling_parent(branches: dict, parent_branch_id: str, branch_point_index: int) -> str:
+    """Walk up ancestor chain for sibling detection.
+
+    If branch_point_index <= parent's own branch_point_index, the new branch
+    should be a sibling (share grandparent), not a child.
+    Prevents linear chains from repeated edit/regen at branch origin.
+    """
+    current = parent_branch_id
+    while current in branches and current != "main":
+        branch = branches[current]
+        parent_bp = branch.get("branch_point_index")
+        if parent_bp is not None and branch_point_index <= parent_bp:
+            current = branch.get("parent_branch_id", "main") or "main"
+        else:
+            break
+    return current
+
+
 def _get_fork_points(story_id: str, branch_id: str) -> dict:
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
@@ -1642,6 +1660,7 @@ def api_branches_create():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
 
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
@@ -1786,6 +1805,7 @@ def api_branches_edit():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
 
@@ -1898,6 +1918,7 @@ def api_branches_edit_stream():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return Response(_sse_event({"type": "error", "message": "parent branch not found"}),
                         mimetype="text/event-stream")
@@ -2021,6 +2042,7 @@ def api_branches_regenerate():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
 
@@ -2125,6 +2147,7 @@ def api_branches_regenerate_stream():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return Response(_sse_event({"type": "error", "message": "parent branch not found"}),
                         mimetype="text/event-stream")
