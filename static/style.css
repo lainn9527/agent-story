@@ -113,6 +113,19 @@ body {
   display: none;
 }
 
+.header-lore-link {
+  margin-left: auto;
+  text-decoration: none;
+  font-size: 1.2rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0.7;
+}
+.header-lore-link:hover {
+  opacity: 1;
+  background: var(--bg-user);
+}
+
 #live-indicator {
   display: inline-flex;
   align-items: center;

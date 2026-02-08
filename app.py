@@ -26,7 +26,7 @@ log = logging.getLogger("rpg")
 from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary
 from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
 from image_gen import generate_image_async, get_image_status, get_image_path
-from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc
+from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry
 from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
 from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
@@ -2668,6 +2668,217 @@ def api_lore_rebuild():
     story_id = _active_story_id()
     rebuild_lore_index(story_id)
     return jsonify({"ok": True, "message": "lore index rebuilt"})
+
+
+# ---------------------------------------------------------------------------
+# Lore Console page + CRUD + LLM chat
+# ---------------------------------------------------------------------------
+
+@app.route("/lore")
+def lore_page():
+    """Render the Lore Console page."""
+    return render_template("lore.html")
+
+
+@app.route("/api/lore/all")
+def api_lore_all():
+    """Return all lore entries grouped by category."""
+    story_id = _active_story_id()
+    lore = _load_lore(story_id)
+    # Collect categories in order of first appearance
+    categories = list(dict.fromkeys(e.get("category", "其他") for e in lore))
+    return jsonify({"ok": True, "entries": lore, "categories": categories})
+
+
+@app.route("/api/lore/entry", methods=["POST"])
+def api_lore_entry_create():
+    """Create a new lore entry."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    topic = body.get("topic", "").strip()
+    category = body.get("category", "其他").strip()
+    content = body.get("content", "").strip()
+    if not topic:
+        return jsonify({"ok": False, "error": "topic required"}), 400
+    # Check for duplicate topic
+    lore = _load_lore(story_id)
+    for e in lore:
+        if e.get("topic") == topic:
+            return jsonify({"ok": False, "error": f"topic '{topic}' already exists"}), 409
+    entry = {"category": category, "topic": topic, "content": content}
+    _save_lore_entry(story_id, entry)
+    return jsonify({"ok": True, "entry": entry})
+
+
+@app.route("/api/lore/entry", methods=["PUT"])
+def api_lore_entry_update():
+    """Update an existing lore entry. Supports rename via new_topic."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    topic = body.get("topic", "").strip()
+    if not topic:
+        return jsonify({"ok": False, "error": "topic required"}), 400
+
+    lore = _load_lore(story_id)
+    found = False
+    for i, e in enumerate(lore):
+        if e.get("topic") == topic:
+            found = True
+            new_topic = body.get("new_topic", topic).strip()
+            new_category = body.get("category", e.get("category", "其他")).strip()
+            new_content = body.get("content", e.get("content", "")).strip()
+            # If renaming, delete old index entry
+            if new_topic != topic:
+                delete_lore_entry(story_id, topic)
+            lore[i] = {"category": new_category, "topic": new_topic, "content": new_content}
+            _save_json(_story_lore_path(story_id), lore)
+            upsert_lore_entry(story_id, lore[i])
+            return jsonify({"ok": True, "entry": lore[i]})
+    if not found:
+        return jsonify({"ok": False, "error": "entry not found"}), 404
+
+
+@app.route("/api/lore/entry", methods=["DELETE"])
+def api_lore_entry_delete():
+    """Delete a lore entry by topic."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    topic = body.get("topic", "").strip()
+    if not topic:
+        return jsonify({"ok": False, "error": "topic required"}), 400
+
+    lore = _load_lore(story_id)
+    new_lore = [e for e in lore if e.get("topic") != topic]
+    if len(new_lore) == len(lore):
+        return jsonify({"ok": False, "error": "entry not found"}), 404
+    _save_json(_story_lore_path(story_id), new_lore)
+    delete_lore_entry(story_id, topic)
+    return jsonify({"ok": True})
+
+
+_LORE_PROPOSE_RE = re.compile(
+    r"<!--LORE_PROPOSE\s*(.*?)\s*LORE_PROPOSE-->", re.DOTALL
+)
+
+
+@app.route("/api/lore/chat/stream", methods=["POST"])
+def api_lore_chat_stream():
+    """SSE streaming chat for lore discussion. Parses LORE_PROPOSE tags."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    messages = body.get("messages", [])
+    if not messages:
+        return Response(_sse_event({"type": "error", "message": "no messages"}),
+                        mimetype="text/event-stream")
+
+    # Build system prompt with all lore
+    lore = _load_lore(story_id)
+    lore_text_parts = []
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for e in lore:
+        cat = e.get("category", "其他")
+        if cat not in groups:
+            groups[cat] = []
+        groups[cat].append(e)
+    for cat, entries in groups.items():
+        lore_text_parts.append(f"### 【{cat}】")
+        for e in entries:
+            lore_text_parts.append(f"#### {e['topic']}")
+            lore_text_parts.append(e.get("content", ""))
+            lore_text_parts.append("")
+
+    lore_system = f"""你是世界設定管理助手，協助維護 RPG 世界的設定知識庫。
+
+角色：討論/新增/修改/刪除設定，確保一致性，用繁體中文回覆。
+
+現有設定（{len(lore)} 條）：
+{chr(10).join(lore_text_parts)}
+
+提案格式（當建議變更時使用）：
+<!--LORE_PROPOSE {{"action":"add|edit|delete", "category":"...", "topic":"...", "content":"..."}} LORE_PROPOSE-->
+
+規則：
+- 先討論再提案，確認用戶意圖後再輸出提案標籤
+- content 欄位是完整的設定文字（不是差異）
+- delete 操作不需要 content 欄位
+- 可在一次回覆中輸出多個提案標籤
+- 提案標籤必須放在回覆最末尾"""
+
+    # Extract prior messages and last user message
+    prior = [{"role": m["role"], "content": m["content"]} for m in messages[:-1]]
+    last_user_msg = messages[-1].get("content", "")
+
+    def generate():
+        try:
+            for event_type, payload in call_claude_gm_stream(
+                last_user_msg, lore_system, prior, session_id=None
+            ):
+                if event_type == "text":
+                    yield _sse_event({"type": "text", "chunk": payload})
+                elif event_type == "error":
+                    yield _sse_event({"type": "error", "message": payload})
+                    return
+                elif event_type == "done":
+                    full_response = payload.get("response", "")
+                    # Parse LORE_PROPOSE tags
+                    proposals = []
+                    for m in _LORE_PROPOSE_RE.finditer(full_response):
+                        try:
+                            p = json.loads(m.group(1))
+                            proposals.append(p)
+                        except json.JSONDecodeError:
+                            pass
+                    # Strip tags from display text
+                    display_text = _LORE_PROPOSE_RE.sub("", full_response).strip()
+                    yield _sse_event({
+                        "type": "done",
+                        "response": display_text,
+                        "proposals": proposals,
+                    })
+        except Exception as e:
+            log.info("/api/lore/chat/stream EXCEPTION %s", e)
+            yield _sse_event({"type": "error", "message": str(e)})
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+
+
+@app.route("/api/lore/apply", methods=["POST"])
+def api_lore_apply():
+    """Batch-apply accepted lore proposals."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    proposals = body.get("proposals", [])
+    applied = []
+    for p in proposals:
+        action = p.get("action", "").lower()
+        topic = p.get("topic", "").strip()
+        if not topic:
+            continue
+        if action == "add":
+            entry = {
+                "category": p.get("category", "其他"),
+                "topic": topic,
+                "content": p.get("content", ""),
+            }
+            _save_lore_entry(story_id, entry)
+            applied.append({"action": "add", "topic": topic})
+        elif action == "edit":
+            entry = {
+                "category": p.get("category", "其他"),
+                "topic": topic,
+                "content": p.get("content", ""),
+            }
+            _save_lore_entry(story_id, entry)
+            applied.append({"action": "edit", "topic": topic})
+        elif action == "delete":
+            lore = _load_lore(story_id)
+            new_lore = [e for e in lore if e.get("topic") != topic]
+            if len(new_lore) < len(lore):
+                _save_json(_story_lore_path(story_id), new_lore)
+                delete_lore_entry(story_id, topic)
+                applied.append({"action": "delete", "topic": topic})
+    return jsonify({"ok": True, "applied": applied})
 
 
 # ---------------------------------------------------------------------------
