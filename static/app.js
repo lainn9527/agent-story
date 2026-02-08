@@ -1476,6 +1476,7 @@ async function submitEdit(msg, newText) {
         if (streamingEl) streamingEl.remove();
         $loading.style.display = "none";
         if (errMsg !== "AbortError") {
+          loadBranches().then(() => renderBranchList());
           alert(errMsg || "編輯失敗");
         }
         activeStreamController = null;
@@ -1550,6 +1551,7 @@ async function regenerateGmMessage(msg, msgEl) {
         if (errMsg !== "AbortError") {
           if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
           if (actionBtn) actionBtn.style.display = "";
+          loadBranches().then(() => renderBranchList());
           alert(errMsg || "重新生成失敗");
         }
         activeStreamController = null;
@@ -1760,6 +1762,34 @@ function renderMessages(messages) {
       switcher.appendChild(leftBtn);
       switcher.appendChild(label);
       switcher.appendChild(rightBtn);
+
+      // Delete current variant button (only when >=2 variants and not main)
+      const currentVariant = group.variants[group.current_variant - 1];
+      if (currentVariant && currentVariant.branch_id !== "main" && group.total >= 2) {
+        const delBtn = document.createElement("button");
+        delBtn.className = "sw-delete";
+        delBtn.textContent = "\u2715";
+        delBtn.title = "刪除此版本";
+        delBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!(await showConfirm("刪除此版本？"))) return;
+          const branchToDelete = currentVariant.branch_id;
+          const res = await API.deleteBranch(branchToDelete);
+          if (res.ok) {
+            const adjIdx = group.current_variant >= 2 ? group.current_variant - 2 : 0;
+            const adjacent = group.variants[adjIdx];
+            await loadBranches();
+            if (adjacent && adjacent.branch_id !== branchToDelete) {
+              await switchToBranch(adjacent.branch_id, { preserveScroll: true });
+            } else {
+              await switchToBranch("main");
+            }
+            renderBranchList();
+          }
+        });
+        switcher.appendChild(delBtn);
+      }
+
       el.appendChild(switcher);
     }
 
