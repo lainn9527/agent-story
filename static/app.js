@@ -268,16 +268,10 @@ function updateBranchIndicator() {
   if (!$branchIndicator) return;
 
   const branch = branches[currentBranchId];
-  let name;
-  if (currentBranchId === "main") {
-    name = "main";
-  } else if (branch && branch.name) {
-    name = branch.name;
-  } else {
-    name = currentBranchId;
-  }
-  $branchIndicator.textContent = name;
-  $branchIndicator.title = name;
+  const displayId = currentBranchId === "main" ? "main" : currentBranchId;
+  const tooltip = branch && branch.name ? `${displayId} — ${branch.name}` : displayId;
+  $branchIndicator.textContent = displayId;
+  $branchIndicator.title = tooltip;
 }
 
 function updateWorldDayDisplay(worldDay) {
@@ -612,13 +606,25 @@ function renderBranchList() {
     }
   }
 
+  // Separate normal and auto-play groups
+  const normalGroups = [];
+  const autoGroups = [];
+  for (const group of groups) {
+    if (group.root.branch.id.startsWith("auto_")) {
+      autoGroups.push(group);
+    } else {
+      normalGroups.push(group);
+    }
+  }
+
   // Find which root group owns the current branch
   function rootOwnsCurrentBranch(group) {
     if (group.root.branch.id === currentBranchId) return true;
     return group.children.some(c => c.branch.id === currentBranchId);
   }
 
-  for (const group of groups) {
+  // Render normal groups
+  for (const group of normalGroups) {
     const hasChildren = group.children.length > 0;
     const isExpanded = rootOwnsCurrentBranch(group);
 
@@ -638,6 +644,39 @@ function renderBranchList() {
       }
       $branchList.appendChild(childrenContainer);
     }
+  }
+
+  // Render auto-play section (collapsed into single group)
+  if (autoGroups.length > 0) {
+    const autoCurrentInside = autoGroups.some(g => rootOwnsCurrentBranch(g));
+
+    const header = document.createElement("div");
+    header.className = "auto-play-section-header";
+
+    const arrow = document.createElement("span");
+    arrow.className = "branch-toggle-arrow" + (autoCurrentInside ? " expanded" : "");
+    arrow.textContent = "\u25B6";
+    header.appendChild(arrow);
+
+    const headerLabel = document.createElement("span");
+    headerLabel.textContent = "Auto-Play (" + autoGroups.length + ")";
+    header.appendChild(headerLabel);
+
+    const container = document.createElement("div");
+    container.className = "branch-group-children" + (autoCurrentInside ? "" : " collapsed");
+
+    header.addEventListener("click", () => {
+      container.classList.toggle("collapsed");
+      arrow.classList.toggle("expanded");
+    });
+
+    for (const group of autoGroups) {
+      const item = createBranchItem(group.root.branch, 0, false, false);
+      container.appendChild(item);
+    }
+
+    $branchList.appendChild(header);
+    $branchList.appendChild(container);
   }
 }
 

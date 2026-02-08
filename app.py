@@ -1276,7 +1276,17 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    import hashlib
+    # Cache-busting: hash of static file mtimes
+    try:
+        mtimes = ""
+        for fn in ("app.js", "style.css"):
+            p = os.path.join(app.static_folder, fn)
+            mtimes += str(int(os.path.getmtime(p)))
+        cache_v = hashlib.md5(mtimes.encode()).hexdigest()[:8]
+    except OSError:
+        cache_v = "1"
+    return render_template("index.html", v=cache_v)
 
 
 @app.route("/api/init", methods=["POST"])
