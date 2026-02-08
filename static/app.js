@@ -172,6 +172,15 @@ const API = {
   // Auto-play Summaries
   autoPlaySummaries: (branchId) =>
     fetch(`/api/auto-play/summaries?branch_id=${branchId || "main"}`).then(r => r.json()),
+
+  // LLM Config
+  getConfig: () => fetch("/api/config").then(r => r.json()),
+  setConfig: (data) =>
+    fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -377,6 +386,7 @@ function openDrawer() {
   loadNpcs();
   loadEvents();
   loadSummaries();
+  loadConfigPanel();
 }
 
 function closeDrawer() {
@@ -679,13 +689,11 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
       item.appendChild(merge);
     }
 
-    // Show branch ID on the active branch
-    if (branch.id === currentBranchId) {
-      const idTag = document.createElement("div");
-      idTag.className = "branch-id-tag";
-      idTag.textContent = branch.id;
-      item.appendChild(idTag);
-    }
+    // Show branch ID on all branches
+    const idTag = document.createElement("div");
+    idTag.className = "branch-id-tag";
+    idTag.textContent = branch.id;
+    item.appendChild(idTag);
 
     item.addEventListener("click", () => {
       if (branch.id !== currentBranchId) {
@@ -1634,6 +1642,75 @@ function renderEventsPanel(events) {
     item.appendChild(title);
     item.appendChild(desc);
     panel.appendChild(item);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Config Panel (provider / model switcher)
+// ---------------------------------------------------------------------------
+
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
+const CLAUDE_MODELS = ["claude-sonnet-4-5-20250929", "claude-opus-4-6", "claude-haiku-4-5-20251001"];
+const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
+
+async function loadConfigPanel() {
+  const provSel = document.getElementById("provider-select");
+  const modelSel = document.getElementById("model-select");
+  if (!provSel || !modelSel) return;
+
+  try {
+    const cfg = await API.getConfig();
+    if (!cfg.ok) return;
+
+    // Populate provider dropdown
+    provSel.innerHTML = "";
+    for (const [val, label] of Object.entries(PROVIDER_LABELS)) {
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = label;
+      if (val === cfg.provider) opt.selected = true;
+      provSel.appendChild(opt);
+    }
+
+    // Populate model dropdown based on current provider
+    function updateModelDropdown(provider, currentModel) {
+      modelSel.innerHTML = "";
+      const models = provider === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        if (m === currentModel) opt.selected = true;
+        modelSel.appendChild(opt);
+      }
+    }
+
+    const currentModel = cfg.provider === "gemini"
+      ? cfg.gemini.model
+      : cfg.claude_cli.model;
+    updateModelDropdown(cfg.provider, currentModel);
+
+    // On provider change
+    provSel.onchange = async () => {
+      const newProv = provSel.value;
+      const models = newProv === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+      updateModelDropdown(newProv, models[0]);
+      const update = { provider: newProv };
+      if (newProv === "gemini") update.gemini = { model: models[0] };
+      else update.claude_cli = { model: models[0] };
+      await API.setConfig(update);
+    };
+
+    // On model change
+    modelSel.onchange = async () => {
+      const prov = provSel.value;
+      const update = {};
+      if (prov === "gemini") update.gemini = { model: modelSel.value };
+      else update.claude_cli = { model: modelSel.value };
+      await API.setConfig(update);
+    };
+  } catch (e) {
+    console.error("loadConfigPanel error:", e);
   }
 }
 

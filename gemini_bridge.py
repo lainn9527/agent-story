@@ -8,6 +8,8 @@ import time
 import urllib.error
 import urllib.request
 
+from gemini_key_manager import get_available_keys, mark_rate_limited
+
 log = logging.getLogger("rpg")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -102,6 +104,39 @@ def _extract_text(response_data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Key fallback wrapper (non-streaming)
+# ---------------------------------------------------------------------------
+
+def _with_key_fallback(gemini_cfg: dict, fn):
+    """Try fn(api_key) with each available key. On 429, mark and try next.
+
+    fn should raise urllib.error.HTTPError on failure or return the result.
+    """
+    keys = get_available_keys(gemini_cfg)
+    if not keys:
+        return None, "所有 Gemini API key 都在冷卻中，請稍後再試"
+
+    last_err = None
+    for key_info in keys:
+        api_key = key_info["key"]
+        try:
+            return fn(api_key), None
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                mark_rate_limited(api_key)
+                last_err = f"API key ...{api_key[-6:]} rate limited (429)"
+                log.info("    gemini_bridge: 429 on key ...%s, trying next", api_key[-6:])
+                continue
+            # Non-429 error — don't retry
+            body_text = e.read().decode("utf-8", errors="replace")[:200]
+            return None, f"Gemini API HTTP {e.code}：{body_text}"
+        except Exception as e:
+            return None, f"Gemini API 錯誤：{e}"
+
+    return None, f"【系統錯誤】所有 key 都被 rate limit：{last_err}"
+
+
+# ---------------------------------------------------------------------------
 # GM call — non-streaming
 # ---------------------------------------------------------------------------
 
@@ -109,7 +144,7 @@ def call_gemini_gm(
     user_message: str,
     system_prompt: str,
     recent_messages: list[dict],
-    api_key: str,
+    gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
     session_id: str | None = None,
 ) -> tuple[str, str | None]:
@@ -118,42 +153,37 @@ def call_gemini_gm(
     Returns (gm_response_text, None).
     session_id is accepted for interface compatibility but ignored.
     """
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={api_key}"
-    )
-
     contents = _build_contents(recent_messages, user_message)
     body = _make_request_body(system_prompt, contents)
     payload = json.dumps(body).encode("utf-8")
 
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-
     log.info("    gemini_bridge: calling API model=%s contents_len=%d", model, len(contents))
     t0 = time.time()
 
-    try:
+    def _do(api_key):
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+            f":generateContent?key={api_key}"
+        )
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        elapsed = time.time() - t0
+            return json.loads(resp.read().decode("utf-8"))
 
-        text = _extract_text(result).strip()
-        log.info("    gemini_bridge: OK in %.1fs response_len=%d", elapsed, len(text))
+    result, err = _with_key_fallback(gemini_cfg, _do)
 
-        if not text:
-            return "【系統錯誤】Gemini 回傳空白回應", None
-        return text, None
+    if err:
+        return f"【系統錯誤】{err}", None
 
-    except urllib.error.HTTPError as e:
-        body_text = e.read().decode("utf-8", errors="replace")[:200]
-        log.info("    gemini_bridge: HTTP %d — %s", e.code, body_text)
-        return f"【系統錯誤】Gemini API HTTP {e.code}：{body_text}", None
-    except Exception as e:
-        log.info("    gemini_bridge: EXCEPTION %s", e)
-        return f"【系統錯誤】Gemini API 錯誤：{e}", None
+    elapsed = time.time() - t0
+    text = _extract_text(result).strip()
+    log.info("    gemini_bridge: OK in %.1fs response_len=%d", elapsed, len(text))
+
+    if not text:
+        return "【系統錯誤】Gemini 回傳空白回應", None
+    return text, None
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +194,7 @@ def call_gemini_gm_stream(
     user_message: str,
     system_prompt: str,
     recent_messages: list[dict],
-    api_key: str,
+    gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
     session_id: str | None = None,
 ):
@@ -175,37 +205,52 @@ def call_gemini_gm_stream(
       ("done", {response, session_id})    — final result
       ("error", msg)                      — on failure
     """
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":streamGenerateContent?alt=sse&key={api_key}"
-    )
-
     contents = _build_contents(recent_messages, user_message)
     body = _make_request_body(system_prompt, contents)
     payload = json.dumps(body).encode("utf-8")
 
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-
     log.info("    gemini_bridge_stream: calling API model=%s contents_len=%d", model, len(contents))
     t0 = time.time()
 
+    # Try each available key until one connects successfully
+    keys = get_available_keys(gemini_cfg)
+    if not keys:
+        yield ("error", "所有 Gemini API key 都在冷卻中，請稍後再試")
+        return
+
+    resp = None
+    for key_info in keys:
+        api_key = key_info["key"]
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+            f":streamGenerateContent?alt=sse&key={api_key}"
+        )
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            resp = urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx)
+            break  # connected OK
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                mark_rate_limited(api_key)
+                log.info("    gemini_bridge_stream: 429 on key ...%s, trying next", api_key[-6:])
+                continue
+            body_text = e.read().decode("utf-8", errors="replace")[:200]
+            log.info("    gemini_bridge_stream: HTTP %d — %s", e.code, body_text)
+            yield ("error", f"Gemini API HTTP {e.code}：{body_text}")
+            return
+        except Exception as e:
+            log.info("    gemini_bridge_stream: EXCEPTION on connect — %s", e)
+            yield ("error", f"Gemini API 連線失敗：{e}")
+            return
+
+    if resp is None:
+        yield ("error", "所有 Gemini API key 都被 rate limit (429)")
+        return
+
     accumulated = ""
-
-    try:
-        resp = urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx)
-    except urllib.error.HTTPError as e:
-        body_text = e.read().decode("utf-8", errors="replace")[:200]
-        log.info("    gemini_bridge_stream: HTTP %d — %s", e.code, body_text)
-        yield ("error", f"Gemini API HTTP {e.code}：{body_text}")
-        return
-    except Exception as e:
-        log.info("    gemini_bridge_stream: EXCEPTION on connect — %s", e)
-        yield ("error", f"Gemini API 連線失敗：{e}")
-        return
-
     try:
         while True:
             raw_line = resp.readline()
@@ -261,16 +306,11 @@ def call_gemini_gm_stream(
 
 def call_gemini_grounded_search(
     query: str,
-    api_key: str,
+    gemini_cfg: dict,
     model: str = "gemini-2.5-flash",
 ) -> str:
     """Search the web via Gemini's Google Search grounding. Returns grounded response text."""
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={api_key}"
-    )
-
-    body = {
+    search_body = {
         "contents": [{"role": "user", "parts": [{"text": query}]}],
         "tools": [{"googleSearch": {}}],
         "generationConfig": {
@@ -278,51 +318,59 @@ def call_gemini_grounded_search(
             "maxOutputTokens": 2048,
         },
     }
-    payload = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-    )
+    payload = json.dumps(search_body).encode("utf-8")
 
-    try:
+    def _do(api_key):
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+            f":generateContent?key={api_key}"
+        )
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=60, context=_ssl_ctx) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        text = _extract_text(result).strip()
-        log.info("    gemini_grounded_search: OK query_len=%d response_len=%d", len(query), len(text))
-        return text
-    except Exception as e:
-        log.info("    gemini_grounded_search: EXCEPTION %s", e)
+            return json.loads(resp.read().decode("utf-8"))
+
+    result, err = _with_key_fallback(gemini_cfg, _do)
+    if err:
+        log.info("    gemini_grounded_search: %s", err)
         return ""
+
+    text = _extract_text(result).strip()
+    log.info("    gemini_grounded_search: OK query_len=%d response_len=%d", len(query), len(text))
+    return text
 
 
 def call_gemini_oneshot(
     prompt: str,
-    api_key: str,
+    gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
     system_prompt: str | None = None,
 ) -> str:
     """Simple one-shot Gemini call. Returns response text or empty string."""
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={api_key}"
-    )
-
     contents = [{"role": "user", "parts": [{"text": prompt}]}]
     body = _make_request_body(system_prompt or "", contents, temperature=0.8)
     payload = json.dumps(body).encode("utf-8")
 
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-
-    try:
+    def _do(api_key):
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+            f":generateContent?key={api_key}"
+        )
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        return _extract_text(result).strip()
-    except Exception as e:
-        log.info("    gemini_oneshot: EXCEPTION %s", e)
+            return json.loads(resp.read().decode("utf-8"))
+
+    result, err = _with_key_fallback(gemini_cfg, _do)
+    if err:
+        log.info("    gemini_oneshot: %s", err)
         return ""
+
+    return _extract_text(result).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +380,7 @@ def call_gemini_oneshot(
 def generate_story_summary_gemini(
     conversation_text: str,
     summary_path: str | None,
-    api_key: str,
+    gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
 ) -> str:
     """Generate a story summary via Gemini. Caches result to file."""
@@ -358,7 +406,7 @@ def generate_story_summary_gemini(
         f"{conversation_text}"
     )
 
-    text = call_gemini_oneshot(prompt, api_key=api_key, model=model)
+    text = call_gemini_oneshot(prompt, gemini_cfg=gemini_cfg, model=model)
     if text:
         os.makedirs(os.path.dirname(summary_path), exist_ok=True)
         with open(summary_path, "w", encoding="utf-8") as f:

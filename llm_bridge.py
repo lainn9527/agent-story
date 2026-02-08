@@ -70,7 +70,7 @@ def call_claude_gm(
         g = cfg.get("gemini", {})
         return call_gemini_gm(
             user_message, system_prompt, recent_messages,
-            api_key=g["api_key"], model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
             session_id=session_id,
         )
 
@@ -98,7 +98,7 @@ def call_claude_gm_stream(
         g = cfg.get("gemini", {})
         yield from call_gemini_gm_stream(
             user_message, system_prompt, recent_messages,
-            api_key=g["api_key"], model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
             session_id=session_id,
         )
         return
@@ -122,7 +122,7 @@ def generate_story_summary(conversation_text: str, summary_path: str | None = No
         g = cfg.get("gemini", {})
         return generate_story_summary_gemini(
             conversation_text, summary_path,
-            api_key=g["api_key"], model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
         )
 
     from claude_bridge import generate_story_summary as _summary
@@ -143,7 +143,7 @@ def call_oneshot(prompt: str, system_prompt: str | None = None) -> str:
         g = cfg.get("gemini", {})
         return call_gemini_oneshot(
             prompt,
-            api_key=g["api_key"], model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
             system_prompt=system_prompt,
         )
 
@@ -176,11 +176,12 @@ def web_search(query: str) -> str:
     """
     cfg = _get_config()
     g = cfg.get("gemini", {})
-    api_key = g.get("api_key")
-    if not api_key:
-        log.info("llm_bridge: web_search skipped — no Gemini API key")
+    # Check if any keys are configured
+    from gemini_key_manager import load_keys
+    if not load_keys(g):
+        log.info("llm_bridge: web_search skipped — no Gemini API keys configured")
         return ""
     from gemini_bridge import call_gemini_grounded_search
     return call_gemini_grounded_search(
-        query, api_key=api_key, model=g.get("model", "gemini-2.5-flash"),
+        query, gemini_cfg=g, model=g.get("model", "gemini-2.5-flash"),
     )

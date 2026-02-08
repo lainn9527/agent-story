@@ -476,7 +476,7 @@ body {
   padding: 14px 18px 32px;
   border-radius: var(--radius);
   line-height: 1.7;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   word-break: break-word;
   transition: opacity 0.2s;
 }
@@ -649,7 +649,7 @@ body {
   border-radius: var(--radius);
   background: var(--input-bg);
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-family: inherit;
   resize: vertical;
   outline: none;
@@ -826,7 +826,7 @@ body {
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-family: inherit;
   outline: none;
   transition: border-color 0.2s;
@@ -1486,14 +1486,64 @@ body {
   border-color: var(--gold);
 }
 
+/* ---------- Config Panel ---------- */
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 0.84rem;
+}
+
+.config-field label {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.config-field select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-main);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239b9689' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+.config-field select:hover {
+  border-color: var(--gold);
+}
+
+.config-field select:focus {
+  border-color: var(--gold);
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 768px) {
   #messages {
-    padding: 12px;
+    padding: 12px 16px;
+  }
+
+  #input-area {
+    padding: 12px 16px;
   }
 
   .message {
     max-width: 95%;
+  }
+
+  .message.gm {
+    padding-left: 4px;
+    padding-right: 4px;
   }
 
   .summary-modal-header {
