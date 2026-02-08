@@ -11,6 +11,7 @@
   let allEntries = [];
   let categories = [];
   let collapsedCats = new Set(); // preserve collapsed state across re-renders
+  let allCollapsed = true; // default: everything collapsed
   let selectedTopic = null;
   let chatMessages = []; // {role, content} history for LLM
   let isStreaming = false;
@@ -103,6 +104,66 @@
   // ------------------------------------------------------------------
   // Lore list rendering
   // ------------------------------------------------------------------
+
+  /** Parse topic prefix: "生化危機：浣熊市" → {prefix:"生化危機", suffix:"浣熊市"} */
+  function parseTopicPrefix(topic) {
+    for (const d of [" — ", "：", ":"]) {
+      const idx = topic.indexOf(d);
+      if (idx > 0) {
+        return { prefix: topic.slice(0, idx).trim(), suffix: topic.slice(idx + d.length).trim() };
+      }
+    }
+    return { prefix: null, suffix: topic };
+  }
+
+  /** Build sub-groups for a category's entries. Returns [{type:"entry",e}|{type:"subgroup",prefix,entries}] */
+  function buildSubGroups(entries) {
+    // Count prefix occurrences
+    const prefixCount = new Map();
+    for (const e of entries) {
+      const { prefix } = parseTopicPrefix(e.topic);
+      if (prefix) prefixCount.set(prefix, (prefixCount.get(prefix) || 0) + 1);
+    }
+
+    // Build ordered list: sub-groups (2+ entries with same prefix) and standalone entries
+    const result = [];
+    const usedPrefixes = new Set();
+
+    for (const e of entries) {
+      const { prefix } = parseTopicPrefix(e.topic);
+      if (prefix && prefixCount.get(prefix) >= 2) {
+        if (!usedPrefixes.has(prefix)) {
+          usedPrefixes.add(prefix);
+          const grouped = entries.filter((x) => parseTopicPrefix(x.topic).prefix === prefix);
+          grouped.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
+          result.push({ type: "subgroup", prefix, entries: grouped });
+        }
+      } else {
+        result.push({ type: "entry", e });
+      }
+    }
+    // Sort: sub-groups first, then standalone entries; alpha within each group
+    result.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "subgroup" ? -1 : 1;
+      const nameA = a.type === "subgroup" ? a.prefix : a.e.topic;
+      const nameB = b.type === "subgroup" ? b.prefix : b.e.topic;
+      return nameA.localeCompare(nameB, "zh-Hant");
+    });
+    return result;
+  }
+
+  function renderEntryHtml(e, displayName) {
+    const label = displayName || e.topic;
+    const sel = e.topic === selectedTopic ? " selected" : "";
+    let html = `<div class="lore-entry${sel}" data-topic="${escapeHtml(e.topic)}">`;
+    html += `<span class="lore-entry-topic">${escapeHtml(label)}</span>`;
+    html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
+    html += `</div>`;
+    const previewText = sel ? e.content || "" : truncate(e.content, 120);
+    html += `<div class="lore-entry-preview">${escapeHtml(previewText)}</div>`;
+    return html;
+  }
+
   function renderLoreList(filter) {
     const q = (filter || "").toLowerCase();
     const filtered = q
@@ -122,16 +183,15 @@
       groups.get(cat).push(e);
     }
 
-    // Preserve category order from API
-    const orderedCats = categories.filter((c) => groups.has(c));
-    for (const c of groups.keys()) {
-      if (!orderedCats.includes(c)) orderedCats.push(c);
-    }
+    // Sort categories alphabetically
+    const orderedCats = [...groups.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
 
     let html = "";
     for (const cat of orderedCats) {
       const entries = groups.get(cat);
-      const collapsed = collapsedCats.has(cat) ? " collapsed" : "";
+      const isException = collapsedCats.has(cat);
+      const isOpen = allCollapsed ? isException : !isException;
+      const collapsed = isOpen ? "" : " collapsed";
       html += `<div class="lore-category${collapsed}">`;
       html += `<div class="lore-cat-header" data-cat="${escapeHtml(cat)}">`;
       html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
@@ -139,14 +199,32 @@
       html += `<span class="lore-cat-count">(${entries.length})</span>`;
       html += `</div>`;
       html += `<div class="lore-cat-entries">`;
-      for (const e of entries) {
-        const sel = e.topic === selectedTopic ? " selected" : "";
-        html += `<div class="lore-entry${sel}" data-topic="${escapeHtml(e.topic)}">`;
-        html += `<span class="lore-entry-topic">${escapeHtml(e.topic)}</span>`;
-        html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
-        html += `</div>`;
-        html += `<div class="lore-entry-preview">${escapeHtml(truncate(e.content, 300))}</div>`;
+
+      entries.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
+      const items = buildSubGroups(entries);
+      for (const item of items) {
+        if (item.type === "subgroup") {
+          const subKey = cat + "/" + item.prefix;
+          const subException = collapsedCats.has(subKey);
+          const subOpen = allCollapsed ? subException : !subException;
+          const subCollapsed = subOpen ? "" : " collapsed";
+          html += `<div class="lore-subgroup${subCollapsed}">`;
+          html += `<div class="lore-subgroup-header" data-subkey="${escapeHtml(subKey)}">`;
+          html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
+          html += `${escapeHtml(item.prefix)}`;
+          html += `<span class="lore-cat-count">(${item.entries.length})</span>`;
+          html += `</div>`;
+          html += `<div class="lore-subgroup-entries">`;
+          for (const e of item.entries) {
+            const { suffix } = parseTopicPrefix(e.topic);
+            html += renderEntryHtml(e, suffix);
+          }
+          html += `</div></div>`;
+        } else {
+          html += renderEntryHtml(item.e);
+        }
       }
+
       html += `</div></div>`;
     }
 
@@ -156,7 +234,7 @@
 
     $loreList.innerHTML = html;
 
-    // Bind click handlers
+    // Bind click handlers — categories
     $loreList.querySelectorAll(".lore-cat-header").forEach((el) => {
       el.addEventListener("click", () => {
         const cat = el.dataset.cat;
@@ -166,6 +244,17 @@
       });
     });
 
+    // Bind click handlers — sub-groups
+    $loreList.querySelectorAll(".lore-subgroup-header").forEach((el) => {
+      el.addEventListener("click", () => {
+        const key = el.dataset.subkey;
+        el.parentElement.classList.toggle("collapsed");
+        if (collapsedCats.has(key)) collapsedCats.delete(key);
+        else collapsedCats.add(key);
+      });
+    });
+
+    // Bind click handlers — entries
     $loreList.querySelectorAll(".lore-entry").forEach((el) => {
       el.addEventListener("click", (ev) => {
         if (ev.target.closest(".lore-entry-edit")) return;
@@ -547,6 +636,20 @@
 
     // Add button
     $addBtn.addEventListener("click", () => openModal(null));
+
+    // Toggle all expand/collapse
+    const $toggleAllBtn = document.getElementById("lore-toggle-all-btn");
+    function updateToggleBtn() {
+      $toggleAllBtn.textContent = allCollapsed ? "\u25BC" : "\u25B2";
+      $toggleAllBtn.title = allCollapsed ? "全部展開" : "全部收起";
+    }
+    updateToggleBtn();
+    $toggleAllBtn.addEventListener("click", () => {
+      allCollapsed = !allCollapsed;
+      collapsedCats.clear();
+      updateToggleBtn();
+      renderLoreList($searchInput.value);
+    });
 
     // Modal handlers
     $modalSave.addEventListener("click", saveModal);
