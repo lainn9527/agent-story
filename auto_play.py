@@ -65,6 +65,7 @@ from app import (
     RECENT_MESSAGE_COUNT,
     _IMG_RE,
 )
+from compaction import get_recap_text, load_recap, should_compact, compact_async
 from llm_bridge import call_claude_gm, call_oneshot, set_provider, web_search
 from npc_evolution import should_run_evolution, run_npc_evolution_async
 from auto_summary import should_generate_summary, generate_summary_async, _load_summaries
@@ -369,11 +370,12 @@ def execute_turn(
     _save_json(delta_path, delta_msgs)
     full_timeline.append(player_msg)
 
-    # 2. Build system prompt
+    # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
@@ -390,10 +392,9 @@ def execute_turn(
     if web_search_context:
         augmented_text = web_search_context + "\n" + augmented_text
 
-    # 5. Call GM with branch session
-    session_id = branch.get("session_id")
-    gm_response, new_session_id = call_claude_gm(
-        augmented_text, system_prompt, recent, session_id=session_id
+    # 5. Call GM (stateless)
+    gm_response, _ = call_claude_gm(
+        augmented_text, system_prompt, recent, session_id=None
     )
 
     # 5b. If GM returned a system error, rollback player message and raise
@@ -401,12 +402,6 @@ def execute_turn(
         delta_msgs.pop()  # remove the player message we just appended
         _save_json(delta_path, delta_msgs)
         raise GMError(gm_response)
-
-    # 6. Update session_id if changed
-    if new_session_id and new_session_id != session_id:
-        tree = _load_tree(story_id)  # Reload in case of concurrent writes
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
 
     # 7. Strip IMG tags if skip_images
     if skip_images:
@@ -442,6 +437,12 @@ def execute_turn(
         run_npc_evolution_async(
             story_id, branch_id, turn_count, npc_text, recent_text
         )
+
+    # 11. Trigger compaction if due
+    recap = load_recap(story_id, branch_id)
+    if should_compact(recap, len(full_timeline) + 1):
+        full_timeline.append(gm_msg)
+        compact_async(story_id, branch_id, full_timeline)
 
     return gm_response
 

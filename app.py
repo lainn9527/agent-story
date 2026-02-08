@@ -32,6 +32,10 @@ from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
 from parser import parse_conversation, save_parsed
 from prompts import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
+from compaction import (
+    load_recap, save_recap, get_recap_text, should_compact, compact_async,
+    get_context_window, copy_recap_to_branch,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -49,7 +53,7 @@ LEGACY_CHARACTER_STATE_PATH = os.path.join(DATA_DIR, "character_state.json")
 LEGACY_SUMMARY_PATH = os.path.join(DATA_DIR, "story_summary.txt")
 LEGACY_NEW_MESSAGES_PATH = os.path.join(DATA_DIR, "new_messages.json")
 
-RECENT_MESSAGE_COUNT = 10
+RECENT_MESSAGE_COUNT = 20
 
 DEFAULT_CHARACTER_STATE = {
     "name": "Eddy",
@@ -259,13 +263,16 @@ _TEAM_RULES = {
 }
 
 
-def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main") -> str:
+def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main", narrative_recap: str = "") -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
     # Blank branches are fresh starts — no story summary or NPC context from parent
     tree = _load_tree(story_id)
     branch = tree.get("branches", {}).get(branch_id, {})
     if branch.get("blank"):
         summary = ""
+
+    if not narrative_recap:
+        narrative_recap = "（尚無回顧，完整對話記錄已提供。）"
 
     prompt_path = _story_system_prompt_path(story_id)
     lore_text = _build_lore_text(story_id)
@@ -282,6 +289,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             world_lore=lore_text,
             npc_profiles=npc_text,
             team_rules=team_rules,
+            narrative_recap=narrative_recap,
         )
     # Fallback to prompts.py template
     return build_system_prompt(state_text, summary)
@@ -573,6 +581,139 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
             log.info("    state_normalize: failed (%s), skipping", e)
 
     t = threading.Thread(target=_do_normalize, daemon=True)
+    t.start()
+
+
+def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: int):
+    """Background: use LLM to extract structured tags (lore/event/npc/state) from GM response."""
+    if len(gm_text) < 200:
+        return
+
+    def _do_extract():
+        from llm_bridge import call_oneshot
+        from event_db import get_event_titles
+
+        try:
+            # Collect context for dedup
+            toc = get_lore_toc(story_id)
+            lore = _load_lore(story_id)
+            existing_topics = {e.get("topic", "") for e in lore}
+            existing_titles = get_event_titles(story_id, branch_id)
+
+            # Build schema summary for state extraction
+            schema = _load_character_schema(story_id)
+            schema_lines = []
+            for f in schema.get("fields", []):
+                schema_lines.append(f"- {f['key']}（{f.get('label', '')}）: {f.get('type', 'text')}")
+            for l in schema.get("lists", []):
+                ltype = l.get("type", "list")
+                if ltype == "map":
+                    schema_lines.append(f"- {l['key']}（{l.get('label', '')}）: map，用直接覆蓋")
+                else:
+                    add_k = l.get("state_add_key", "")
+                    rm_k = l.get("state_remove_key", "")
+                    schema_lines.append(f"- {l['key']}（{l.get('label', '')}）: list，新增用 {add_k}，移除用 {rm_k}")
+            schema_summary = "\n".join(schema_lines)
+
+            state = _load_character_state(story_id, branch_id)
+            existing_state_keys = ", ".join(sorted(state.keys()))
+
+            titles_str = ", ".join(sorted(existing_titles)) if existing_titles else "（無）"
+
+            prompt = (
+                "你是一個 RPG 結構化資料擷取工具。分析以下 GM 回覆，提取結構化資訊。\n\n"
+                f"## GM 回覆\n{gm_text}\n\n"
+                "## 1. 世界設定（lore）\n"
+                "提取新的世界設定：體系規則、副本背景、場景描述等。不要提取劇情動態或角色行動。\n"
+                f"已有設定（避免重複）：\n{toc}\n"
+                '格式：[{{"category": "分類", "topic": "主題", "content": "完整描述"}}]\n'
+                "可用分類：主神設定與規則/體系/商城/副本世界觀/場景/NPC/故事追蹤\n\n"
+                "## 2. 事件追蹤（events）\n"
+                "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
+                f"已有事件標題（避免重複）：{titles_str}\n"
+                '格式：[{{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}}]\n'
+                "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
+                "可用狀態：planted/triggered/resolved\n\n"
+                "## 3. NPC 資料（npcs）\n"
+                "提取首次登場或有重大變化的 NPC。\n"
+                '格式：[{{"name": "名字", "role": "定位", "appearance": "外觀", '
+                '"personality": {{"openness": N, "conscientiousness": N, "extraversion": N, '
+                '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
+                "## 4. 角色狀態變化（state）\n"
+                f"Schema 告訴你角色有哪些欄位：\n{schema_summary}\n"
+                f"角色目前有這些欄位：{existing_state_keys}\n\n"
+                "規則：\n"
+                "- 列表型欄位用 `_add` / `_remove` 後綴（如 `inventory_add`, `inventory_remove`）\n"
+                "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
+                "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
+                "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
+                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
+                '- 角色死亡時 `current_status` 設為 `"end"`\n'
+                "格式：只填有變化的欄位。\n\n"
+                "## 輸出\n"
+                "JSON 物件，只包含有內容的類型：\n"
+                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}}\n'
+                "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
+            )
+
+            result = call_oneshot(prompt)
+            if not result:
+                return
+            result = result.strip()
+            # Strip markdown code fences if present
+            if result.startswith("```"):
+                lines = result.split("\n")
+                lines = [l for l in lines if not l.startswith("```")]
+                result = "\n".join(lines)
+
+            data = json.loads(result)
+            if not isinstance(data, dict):
+                return
+
+            saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False}
+
+            # Lore — dedup by topic
+            for entry in data.get("lore", []):
+                topic = entry.get("topic", "").strip()
+                if topic and topic not in existing_topics:
+                    _save_lore_entry(story_id, entry)
+                    existing_topics.add(topic)
+                    saved_counts["lore"] += 1
+
+            # Events — dedup by title
+            for event in data.get("events", []):
+                title = event.get("title", "").strip()
+                if title and title not in existing_titles:
+                    event["message_index"] = msg_index
+                    insert_event(story_id, event, branch_id)
+                    existing_titles.add(title)
+                    saved_counts["events"] += 1
+
+            # NPCs — _save_npc has built-in merge by name
+            for npc in data.get("npcs", []):
+                if npc.get("name", "").strip():
+                    _save_npc(story_id, npc, branch_id)
+                    saved_counts["npcs"] += 1
+
+            # State — apply update
+            state_update = data.get("state", {})
+            if state_update and isinstance(state_update, dict):
+                _apply_state_update(story_id, branch_id, state_update)
+                saved_counts["state"] = True
+
+            log.info(
+                "    extract_tags: saved %d lore, %d events, %d npcs, state %s",
+                saved_counts["lore"], saved_counts["events"],
+                saved_counts["npcs"],
+                "updated" if saved_counts["state"] else "no change",
+            )
+
+        except json.JSONDecodeError as e:
+            log.info("    extract_tags: JSON parse failed (%s), skipping", e)
+        except Exception as e:
+            log.info("    extract_tags: failed (%s), skipping", e)
+
+    t = threading.Thread(target=_do_extract, daemon=True)
     t.start()
 
 
@@ -1084,6 +1225,9 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         filename = generate_image_async(story_id, img_prompt, msg_index)
         image_info = {"filename": filename, "ready": False}
 
+    # Async post-processing: extract structured data via separate LLM call
+    _extract_tags_async(story_id, branch_id, gm_response, msg_index)
+
     # Build snapshots for branch forking accuracy
     snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
     if npc_updates:
@@ -1324,12 +1468,13 @@ def api_send():
     full_timeline.append(player_msg)
     log.info("  save_user_msg: %.0fms", (time.time() - t0) * 1000)
 
-    # 2. Build system prompt
+    # 2. Build system prompt (with narrative recap)
     t0 = time.time()
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     # 3. Gather recent context
@@ -1343,27 +1488,20 @@ def api_send():
         _save_json(delta_path, delta_msgs)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
-    # 4. Call Claude with branch session
+    # 4. Call Claude (stateless)
     t0 = time.time()
-    session_id = branch.get("session_id")
-    has_session = bool(session_id)
-    gm_response, new_session_id = call_claude_gm(
-        augmented_text, system_prompt, recent, session_id=session_id
+    gm_response, _ = call_claude_gm(
+        augmented_text, system_prompt, recent, session_id=None
     )
-    log.info("  claude_call: %.1fs (resume=%s)", time.time() - t0, has_session)
+    log.info("  claude_call: %.1fs", time.time() - t0)
 
-    # 5. Update session_id in tree if changed
-    if new_session_id and new_session_id != session_id:
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
-
-    # 6. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
+    # 5. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
     t0 = time.time()
     gm_msg_index = len(full_timeline)
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
     log.info("  parse_tags: %.0fms", (time.time() - t0) * 1000)
 
-    # 7. Save GM response
+    # 6. Save GM response
     t0 = time.time()
     gm_msg = {
         "role": "gm",
@@ -1377,12 +1515,18 @@ def api_send():
     _save_json(delta_path, delta_msgs)
     log.info("  save_gm_msg: %.0fms", (time.time() - t0) * 1000)
 
-    # 8. Trigger NPC evolution if due
+    # 7. Trigger NPC evolution if due
     turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
     if _load_npcs(story_id, branch_id) and should_run_evolution(story_id, branch_id, turn_count):
         npc_text = _build_npc_text(story_id, branch_id)
         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
         run_npc_evolution_async(story_id, branch_id, turn_count, npc_text, recent_text)
+
+    # 8. Trigger compaction if due
+    recap = load_recap(story_id, branch_id)
+    if should_compact(recap, len(full_timeline) + 1):
+        full_timeline.append(gm_msg)
+        compact_async(story_id, branch_id, full_timeline)
 
     log.info("/api/send DONE   total=%.1fs", time.time() - t_start)
     return jsonify({"ok": True, "player": player_msg, "gm": gm_msg})
@@ -1427,11 +1571,12 @@ def api_send_stream():
     _save_json(delta_path, delta_msgs)
     full_timeline.append(player_msg)
 
-    # 2. Build system prompt
+    # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
@@ -1440,8 +1585,6 @@ def api_send_stream():
         player_msg["dice"] = dice_result
         _save_json(delta_path, delta_msgs)
 
-    # 4. Session
-    session_id = branch.get("session_id")
     gm_msg_index = len(full_timeline)
 
     def generate():
@@ -1450,7 +1593,7 @@ def api_send_stream():
             yield _sse_event({"type": "dice", "dice": dice_result})
         try:
             for event_type, payload in call_claude_gm_stream(
-                augmented_text, system_prompt, recent, session_id=session_id
+                augmented_text, system_prompt, recent, session_id=None
             ):
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})
@@ -1459,12 +1602,6 @@ def api_send_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
-                    new_session_id = payload["session_id"]
-
-                    # Update session_id
-                    if new_session_id and new_session_id != session_id:
-                        tree["branches"][branch_id]["session_id"] = new_session_id
-                        _save_tree(story_id, tree)
 
                     # Extract tags
                     gm_response, image_info, snapshots = _process_gm_response(
@@ -1489,6 +1626,12 @@ def api_send_stream():
                         npc_text = _build_npc_text(story_id, branch_id)
                         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
                         run_npc_evolution_async(story_id, branch_id, turn_count, npc_text, recent_text)
+
+                    # Trigger compaction if due
+                    recap = load_recap(story_id, branch_id)
+                    if should_compact(recap, len(full_timeline) + 1):
+                        tl = list(full_timeline) + [gm_msg]
+                        compact_async(story_id, branch_id, tl)
 
                     log.info("/api/send/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
@@ -1556,6 +1699,7 @@ def api_branches_create():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -1703,6 +1847,7 @@ def api_branches_edit():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -1732,7 +1877,8 @@ def api_branches_edit():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -1744,14 +1890,10 @@ def api_branches_edit():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    gm_response, new_session_id = call_claude_gm(
+    gm_response, _ = call_claude_gm(
         augmented_edit, system_prompt, recent, session_id=None
     )
-    log.info("  claude_call: %.1fs (new session)", time.time() - t0)
-
-    if new_session_id:
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
+    log.info("  claude_call: %.1fs", time.time() - t0)
 
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
 
@@ -1812,6 +1954,7 @@ def api_branches_edit_stream():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -1841,7 +1984,8 @@ def api_branches_edit_stream():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state)
     if dice_result:
@@ -1863,11 +2007,6 @@ def api_branches_edit_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
-                    new_session_id = payload["session_id"]
-
-                    if new_session_id:
-                        tree["branches"][branch_id]["session_id"] = new_session_id
-                        _save_tree(story_id, tree)
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -1936,6 +2075,7 @@ def api_branches_regenerate():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -1956,7 +2096,8 @@ def api_branches_regenerate():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -1965,14 +2106,10 @@ def api_branches_regenerate():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    gm_response, new_session_id = call_claude_gm(
+    gm_response, _ = call_claude_gm(
         augmented_regen, system_prompt, recent, session_id=None
     )
-    log.info("  claude_call: %.1fs (new session)", time.time() - t0)
-
-    if new_session_id:
-        tree["branches"][branch_id]["session_id"] = new_session_id
-        _save_tree(story_id, tree)
+    log.info("  claude_call: %.1fs", time.time() - t0)
 
     gm_msg_index = branch_point_index + 1
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
@@ -2037,6 +2174,7 @@ def api_branches_regenerate_stream():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
@@ -2056,7 +2194,8 @@ def api_branches_regenerate_stream():
     state = _load_character_state(story_id, branch_id)
     summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id)
+    recap_text = get_recap_text(story_id, branch_id)
+    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state)
 
@@ -2077,11 +2216,6 @@ def api_branches_regenerate_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
-                    new_session_id = payload["session_id"]
-
-                    if new_session_id:
-                        tree["branches"][branch_id]["session_id"] = new_session_id
-                        _save_tree(story_id, tree)
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -2144,7 +2278,8 @@ def api_branches_promote():
 
     _save_json(_story_messages_path(story_id, "main"), new_messages)
 
-    branches["main"]["session_id"] = branches[branch_id].get("session_id")
+    # Copy recap from promoted branch to main
+    copy_recap_to_branch(story_id, branch_id, "main", -1)
 
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
@@ -2227,8 +2362,8 @@ def api_branches_merge():
     if os.path.exists(src_npcs):
         shutil.copy2(src_npcs, dst_npcs)
 
-    # 4. Copy session_id so Claude CLI continues from child's context
-    branches[parent_id]["session_id"] = child.get("session_id")
+    # 4. Copy recap from child to parent
+    copy_recap_to_branch(story_id, branch_id, parent_id, -1)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():

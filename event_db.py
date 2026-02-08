@@ -176,6 +176,18 @@ def search_relevant_events(story_id: str, user_message: str, branch_id: str, lim
     return "\n".join(lines)
 
 
+def get_event_titles(story_id: str, branch_id: str) -> set[str]:
+    """Return set of existing event titles for dedup."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        "SELECT title FROM events WHERE branch_id = ?", (branch_id,)
+    ).fetchall()
+    titles = {r["title"] for r in rows}
+    conn.close()
+    return titles
+
+
 def get_active_foreshadowing(story_id: str, branch_id: str) -> list[dict]:
     """Get planted events not yet triggered for a branch."""
     conn = _get_conn(story_id)

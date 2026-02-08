@@ -46,35 +46,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 ## 故事摘要（到目前為止）
 {story_summary}
 
-## 角色狀態更新
-每次回覆如果涉及角色狀態變化（道具增減、獎勵點花費/獲得、體質變化、基因鎖進度、任務完成、人際關係變動等），請在回覆**最末尾**附上結構化狀態 tag，格式如下：
-
-<!--STATE
-{{
-  "inventory_add": ["新道具名"],
-  "inventory_remove": ["失去的道具名"],
-  "reward_points_delta": -500,
-  "gene_lock": "第一階（進度 30%）",
-  "physique": "強化人類",
-  "spirit": "中等偏上",
-  "current_status": "主神空間休整中",
-  "completed_missions_add": ["新任務名"],
-  "relationships": {{"小薇": "戀人/深厚信任"}}
-}}
-STATE-->
-
-規則：
-- 所有欄位**皆為選填**，只寫有變化的欄位即可。
-- 沒有任何狀態變化時**不要**附 tag。
-- `inventory_add` / `inventory_remove`：陣列，道具名稱需含數量標記（如「鎮魂符×1」）。
-- `reward_points_delta`：整數，正數=獲得，負數=花費。
-- `completed_missions_add`：陣列，新完成的任務名。
-- `relationships`：物件，只寫有變動的角色，值為新的關係描述。
-- `gene_lock`、`physique`、`spirit`、`current_status`：字串，直接覆蓋舊值。
-- 此 tag 不會顯示給玩家看，純供系統解析用。
-
 ## 重要指示
-- 你是從 Grok GM 手中接過這場遊戲的。玩家角色 Eddy 剛完成《咒怨》任務，帶著 5000 獎勵點即將返回主神空間。
 - 保持故事連續性：角色關係、已獲道具、劇情伏筆都要延續。
 - 戰鬥和危險場景要有張力，但給玩家合理的應對空間。
 - 角色互動要有溫度：NPC 有各自的性格和動機。
