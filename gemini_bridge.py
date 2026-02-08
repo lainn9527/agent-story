@@ -66,7 +66,7 @@ def _build_contents(recent_messages: list[dict], user_message: str) -> list[dict
 
 
 def _make_request_body(system_prompt: str, contents: list[dict],
-                       temperature: float = 1.0, max_tokens: int = 8192) -> dict:
+                       temperature: float = 1.0, max_tokens: int = 65536) -> dict:
     body: dict = {
         "contents": contents,
         "generationConfig": {
@@ -195,6 +195,13 @@ def call_gemini_gm(
 
     if not text:
         return "【系統錯誤】Gemini 回傳空白回應", None
+
+    # Check for MAX_TOKENS truncation
+    candidates = result.get("candidates", [])
+    if candidates and candidates[0].get("finishReason") == "MAX_TOKENS":
+        log.warning("    gemini_bridge: response truncated (MAX_TOKENS)")
+        text += "\n\n【系統提示】回應因長度限制被截斷，請輸入「繼續」讓 GM 接續。"
+
     return text, None
 
 
@@ -263,6 +270,7 @@ def call_gemini_gm_stream(
         return
 
     accumulated = ""
+    truncated = False
     try:
         while True:
             raw_line = resp.readline()
@@ -290,6 +298,14 @@ def call_gemini_gm_stream(
                 accumulated += text
                 yield ("text", text)
 
+            # Check for MAX_TOKENS truncation
+            candidates = event_data.get("candidates", [])
+            if candidates:
+                finish_reason = candidates[0].get("finishReason", "")
+                if finish_reason == "MAX_TOKENS":
+                    log.warning("    gemini_bridge_stream: response truncated (MAX_TOKENS)")
+                    truncated = True
+
         resp.close()
         elapsed = time.time() - t0
         log.info("    gemini_bridge_stream: OK in %.1fs response_len=%d", elapsed, len(accumulated))
@@ -297,6 +313,11 @@ def call_gemini_gm_stream(
         if not accumulated:
             yield ("error", "Gemini 回傳空白回應")
             return
+
+        if truncated:
+            suffix = "\n\n【系統提示】回應因長度限制被截斷，請輸入「繼續」讓 GM 接續。"
+            accumulated += suffix
+            yield ("text", suffix)
 
         yield ("done", {"response": accumulated, "session_id": None})
 
