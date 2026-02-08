@@ -25,46 +25,33 @@ def call_claude_gm(
     recent_messages: list[dict],
     session_id: str | None = None,
 ) -> tuple[str, str | None]:
-    """Send a player message to Claude GM.
+    """Send a player message to Claude GM (stateless).
 
-    Uses --resume to continue an existing session, or starts a new one
-    with full context on first call.
+    Always uses system prompt + recent context (no --resume).
+    session_id param kept for API compat but ignored.
 
-    Returns (gm_response_text, session_id).
+    Returns (gm_response_text, None).
     """
 
-    if session_id:
-        # Continuing an existing session — label the player's action explicitly
-        # so Claude doesn't echo/paraphrase it before responding
-        prompt = f"【玩家的新行動】\n{user_message}\n\n請直接推進故事，不要複述或改寫玩家的行動內容。"
-        cmd = [
-            CLAUDE_BIN, "-p",
-            "--model", "claude-sonnet-4-5-20250929",
-            "--resume", session_id,
-            "--output-format", "json",
-        ]
-    else:
-        # First call — seed with system prompt + recent context
-        context_lines: list[str] = []
-        for msg in recent_messages:
-            prefix = "【玩家】" if msg["role"] == "user" else "【GM】"
-            context_lines.append(f"{prefix}\n{msg['content']}")
+    context_lines: list[str] = []
+    for msg in recent_messages:
+        prefix = "【玩家】" if msg["role"] == "user" else "【GM】"
+        context_lines.append(f"{prefix}\n{msg['content']}")
 
-        prompt = (
-            "以下是最近的對話紀錄：\n\n"
-            + "\n\n".join(context_lines)
-            + f"\n\n---\n【玩家的新行動】\n{user_message}\n\n"
-            "請以 GM 身份回應，繼續推進故事。"
-        )
-        cmd = [
-            CLAUDE_BIN, "-p",
-            "--model", "claude-sonnet-4-5-20250929",
-            "--system-prompt", system_prompt,
-            "--output-format", "json",
-        ]
+    prompt = (
+        "以下是最近的對話紀錄：\n\n"
+        + "\n\n".join(context_lines)
+        + f"\n\n---\n【玩家的新行動】\n{user_message}\n\n"
+        "請以 GM 身份回應，繼續推進故事。"
+    )
+    cmd = [
+        CLAUDE_BIN, "-p",
+        "--model", "claude-sonnet-4-5-20250929",
+        "--system-prompt", system_prompt,
+        "--output-format", "json",
+    ]
 
-    mode = "resume" if session_id else "new"
-    log.info("    claude_bridge: calling CLI mode=%s prompt_len=%d", mode, len(prompt))
+    log.info("    claude_bridge: calling CLI mode=stateless prompt_len=%d", len(prompt))
     t0 = time.time()
 
     try:
@@ -83,32 +70,31 @@ def call_claude_gm(
             log.info("    claude_bridge: FAILED in %.1fs rc=%d err=%s", elapsed, result.returncode, error_msg[:100])
             return f"【系統錯誤】Claude 回應失敗：{error_msg}", session_id
 
-        # Parse JSON response to extract result text and session_id
+        # Parse JSON response to extract result text
         try:
             data = json.loads(result.stdout)
             response_text = data.get("result", "").strip()
-            new_session_id = data.get("session_id") or session_id
             log.info("    claude_bridge: OK in %.1fs response_len=%d", elapsed, len(response_text))
             if not response_text:
-                return "【系統錯誤】Claude 回傳空白回應", new_session_id
-            return response_text, new_session_id
+                return "【系統錯誤】Claude 回傳空白回應", None
+            return response_text, None
         except json.JSONDecodeError:
             # Fallback: treat stdout as plain text
             text = result.stdout.strip()
             log.info("    claude_bridge: JSON parse failed, fallback plain text in %.1fs", elapsed)
             if text:
-                return text, session_id
-            return "【系統錯誤】無法解析 Claude 回應", session_id
+                return text, None
+            return "【系統錯誤】無法解析 Claude 回應", None
 
     except subprocess.TimeoutExpired:
         log.info("    claude_bridge: TIMEOUT after %ds", CLAUDE_TIMEOUT)
-        return "【系統錯誤】Claude 回應逾時，請稍後再試。", session_id
+        return "【系統錯誤】Claude 回應逾時，請稍後再試。", None
     except FileNotFoundError:
         log.info("    claude_bridge: claude CLI not found")
         return "【系統錯誤】找不到 claude CLI。請確認已安裝 Claude Code。", None
     except Exception as e:
         log.info("    claude_bridge: EXCEPTION %s", e)
-        return f"【系統錯誤】{e}", session_id
+        return f"【系統錯誤】{e}", None
 
 
 # ---------------------------------------------------------------------------
@@ -121,47 +107,37 @@ def call_claude_gm_stream(
     recent_messages: list[dict],
     session_id: str | None = None,
 ):
-    """Stream a GM response from Claude CLI.
+    """Stream a GM response from Claude CLI (stateless).
 
-    Uses --output-format stream-json (NDJSON) with subprocess.Popen.
+    Always uses system prompt + recent context (no --resume).
+    session_id param kept for API compat but ignored.
+
     Yields tuples:
       ("text", delta_str)          — incremental text chunk
-      ("done", {response, session_id})  — final result
+      ("done", {response, session_id})  — final result (session_id always None)
       ("error", msg)               — on failure
     """
 
-    if session_id:
-        # Label the player's action explicitly so Claude doesn't echo/paraphrase it
-        prompt = f"【玩家的新行動】\n{user_message}\n\n請直接推進故事，不要複述或改寫玩家的行動內容。"
-        cmd = [
-            CLAUDE_BIN, "-p",
-            "--verbose",
-            "--model", "claude-sonnet-4-5-20250929",
-            "--resume", session_id,
-            "--output-format", "stream-json",
-        ]
-    else:
-        context_lines: list[str] = []
-        for msg in recent_messages:
-            prefix = "【玩家】" if msg["role"] == "user" else "【GM】"
-            context_lines.append(f"{prefix}\n{msg['content']}")
+    context_lines: list[str] = []
+    for msg in recent_messages:
+        prefix = "【玩家】" if msg["role"] == "user" else "【GM】"
+        context_lines.append(f"{prefix}\n{msg['content']}")
 
-        prompt = (
-            "以下是最近的對話紀錄：\n\n"
-            + "\n\n".join(context_lines)
-            + f"\n\n---\n【玩家的新行動】\n{user_message}\n\n"
-            "請以 GM 身份回應，繼續推進故事。"
-        )
-        cmd = [
-            CLAUDE_BIN, "-p",
-            "--verbose",
-            "--model", "claude-sonnet-4-5-20250929",
-            "--system-prompt", system_prompt,
-            "--output-format", "stream-json",
-        ]
+    prompt = (
+        "以下是最近的對話紀錄：\n\n"
+        + "\n\n".join(context_lines)
+        + f"\n\n---\n【玩家的新行動】\n{user_message}\n\n"
+        "請以 GM 身份回應，繼續推進故事。"
+    )
+    cmd = [
+        CLAUDE_BIN, "-p",
+        "--verbose",
+        "--model", "claude-sonnet-4-5-20250929",
+        "--system-prompt", system_prompt,
+        "--output-format", "stream-json",
+    ]
 
-    mode = "resume" if session_id else "new"
-    log.info("    claude_bridge_stream: calling CLI mode=%s prompt_len=%d", mode, len(prompt))
+    log.info("    claude_bridge_stream: calling CLI mode=stateless prompt_len=%d", len(prompt))
     t0 = time.time()
 
     try:
@@ -194,7 +170,6 @@ def call_claude_gm_stream(
         return
 
     accumulated = ""
-    new_session_id = session_id
 
     try:
         while True:
@@ -227,9 +202,8 @@ def call_claude_gm_stream(
                         yield ("text", delta)
 
             elif msg_type == "result":
-                # Final result — extract session_id and full text
+                # Final result
                 result_text = data.get("result", "").strip()
-                new_session_id = data.get("session_id") or session_id
                 if result_text:
                     # Yield any remaining delta
                     if result_text != accumulated:
@@ -261,7 +235,7 @@ def call_claude_gm_stream(
             yield ("error", "Claude 回傳空白回應")
             return
 
-        yield ("done", {"response": accumulated, "session_id": new_session_id})
+        yield ("done", {"response": accumulated, "session_id": None})
 
     except Exception as e:
         log.info("    claude_bridge_stream: EXCEPTION %s", e)
@@ -270,7 +244,7 @@ def call_claude_gm_stream(
         except Exception:
             pass
         if accumulated:
-            yield ("done", {"response": accumulated, "session_id": new_session_id})
+            yield ("done", {"response": accumulated, "session_id": None})
         else:
             yield ("error", str(e))
 

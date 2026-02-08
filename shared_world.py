@@ -1,11 +1,13 @@
-"""Cross-agent awareness for multi-agent shared universe.
+"""Snapshot-based cross-agent awareness for multi-agent shared universe.
 
-Aggregates data from all agents to build:
-- Leaderboard (排行榜)
-- Hub presence (誰在主神空間)
-- Context injection for human player + agent branches
-- Adventure summaries
-- Bidirectional encounter events
+Agent data is accessed via time-indexed snapshots (read-only reference).
+No live cross-branch reads, no NPC sync, no bidirectional encounters.
+
+Provides:
+- Agent context injection for human player (snapshot-based)
+- Leaderboard from snapshots
+- Detailed agent profile from snapshot (for GM roleplay)
+- Snapshot storage and lookup
 """
 
 import json
@@ -21,21 +23,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Persistence helpers
 # ---------------------------------------------------------------------------
 
-def _shared_world_path(story_id: str) -> str:
-    return os.path.join(BASE_DIR, "data", "stories", story_id, "shared_world.json")
-
-
-def _encounters_path(story_id: str, branch_id: str) -> str:
+def _snapshots_path(story_id: str, branch_id: str) -> str:
     return os.path.join(
         BASE_DIR, "data", "stories", story_id,
-        "branches", branch_id, "encounters.json"
-    )
-
-
-def _adventure_summary_path(story_id: str, branch_id: str) -> str:
-    return os.path.join(
-        BASE_DIR, "data", "stories", story_id,
-        "branches", branch_id, "adventure_summary.json"
+        "branches", branch_id, "agent_snapshots.json",
     )
 
 
@@ -55,82 +46,107 @@ def _save_json(path: str, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def _load_shared_world(story_id: str) -> dict | None:
-    return _load_json(_shared_world_path(story_id))
+# ---------------------------------------------------------------------------
+# Snapshot storage
+# ---------------------------------------------------------------------------
+
+def save_agent_snapshot(
+    story_id: str, branch_id: str,
+    turn: int, phase: str,
+    char_state: dict,
+    completed_missions: list | None = None,
+    summary: str = "",
+):
+    """Append a snapshot to agent_snapshots.json."""
+    from world_timer import get_world_day
+
+    path = _snapshots_path(story_id, branch_id)
+    snapshots = _load_json(path, [])
+
+    snapshot = {
+        "world_day": get_world_day(story_id, branch_id),
+        "turn": turn,
+        "phase": phase,
+        "character_state": char_state,
+        "summary": summary,
+        "completed_missions": completed_missions or char_state.get("completed_missions", []),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    snapshots.append(snapshot)
+    _save_json(path, snapshots)
+    log.info("    snapshot saved: branch=%s turn=%d world_day=%.1f",
+             branch_id, turn, snapshot["world_day"])
 
 
-def _save_shared_world(story_id: str, world: dict):
-    _save_json(_shared_world_path(story_id), world)
+def get_agent_snapshot_at(
+    story_id: str, agent_branch_id: str, world_day: float,
+) -> dict | None:
+    """Get the most recent snapshot at or before the given world_day."""
+    path = _snapshots_path(story_id, agent_branch_id)
+    snapshots = _load_json(path, [])
+
+    best = None
+    for s in snapshots:
+        if s["world_day"] <= world_day:
+            best = s
+        else:
+            break  # snapshots are chronological
+    return best
+
+
+def get_latest_snapshot(story_id: str, agent_branch_id: str) -> dict | None:
+    """Get the most recent snapshot regardless of world_day."""
+    path = _snapshots_path(story_id, agent_branch_id)
+    snapshots = _load_json(path, [])
+    return snapshots[-1] if snapshots else None
 
 
 # ---------------------------------------------------------------------------
-# Rebuild shared world cache
+# Snapshot summary generation
 # ---------------------------------------------------------------------------
 
-def rebuild_shared_world(story_id: str) -> dict:
-    """Read every agent's branch data and build shared_world.json cache."""
-    from agent_manager import _load_agents
-    from auto_play import load_run_state
-    from app import _load_character_state
+def generate_snapshot_summaries(story_id: str, agent_branch_id: str):
+    """Generate narrative summaries for unsummarized snapshots.
 
-    agents_data = _load_agents(story_id)
-    leaderboard = []
-    hub_presence = []
-    recent_achievements = []
+    Called after auto_play completes or periodically during play.
+    """
+    from llm_bridge import call_oneshot
 
-    for agent_id, agent in agents_data.get("agents", {}).items():
-        branch_id = agent["branch_id"]
+    path = _snapshots_path(story_id, agent_branch_id)
+    snapshots = _load_json(path, [])
+    if not snapshots:
+        return
 
-        char_state = _load_character_state(story_id, branch_id)
-        if not char_state:
+    updated = False
+    for snap in snapshots:
+        if snap.get("summary"):
             continue
 
+        cs = snap.get("character_state", {})
+        name = cs.get("name", "未知")
+        missions = snap.get("completed_missions", [])
+        phase = snap.get("phase", "unknown")
+        turn = snap.get("turn", 0)
+
+        prompt = (
+            f"用繁體中文寫一句話（50-80字）總結輪迴者「{name}」在回合{turn}的狀態。\n"
+            f"當前階段：{'副本中' if phase == 'dungeon' else '主神空間'}\n"
+            f"已完成副本：{', '.join(str(m) for m in missions) if missions else '無'}\n"
+            f"獎勵點：{cs.get('reward_points', 0)}\n"
+            f"狀態：{cs.get('current_status', '未知')}\n\n"
+            f"直接輸出摘要文字，不要加標記。"
+        )
+
         try:
-            run_state = load_run_state(story_id, branch_id)
-        except Exception:
-            run_state = None
+            summary = call_oneshot(prompt)
+            if summary:
+                snap["summary"] = summary.strip()
+                updated = True
+        except Exception as e:
+            log.warning("snapshot summary generation failed: %s", e)
 
-        entry = {
-            "agent_id": agent_id,
-            "name": char_state.get("name", agent["name"]),
-            "reward_points": char_state.get("reward_points", 0),
-            "completed_missions": len(char_state.get("completed_missions", [])),
-            "gene_lock": char_state.get("gene_lock", "未開啟"),
-            "dungeon_count": run_state.dungeon_count if run_state else 0,
-            "current_phase": run_state.phase if run_state else "unknown",
-            "current_status": char_state.get("current_status", ""),
-            "status": agent["status"],
-        }
-        leaderboard.append(entry)
-
-        # Hub presence: agent is in hub AND running
-        if run_state and run_state.phase == "hub" and agent["status"] == "running":
-            hub_presence.append({
-                "agent_id": agent_id,
-                "name": char_state.get("name", agent["name"]),
-                "appearance": char_state.get("physique", ""),
-                "current_status": char_state.get("current_status", ""),
-            })
-
-        # Recent achievements
-        missions = char_state.get("completed_missions", [])
-        if missions:
-            recent_achievements.append({
-                "agent_id": agent_id,
-                "name": char_state.get("name", agent["name"]),
-                "achievement": missions[-1],
-            })
-
-    leaderboard.sort(key=lambda x: x.get("reward_points", 0), reverse=True)
-
-    world = {
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-        "leaderboard": leaderboard,
-        "hub_presence": hub_presence,
-        "recent_achievements": recent_achievements[-10:],
-    }
-    _save_shared_world(story_id, world)
-    return world
+    if updated:
+        _save_json(path, snapshots)
 
 
 # ---------------------------------------------------------------------------
@@ -138,114 +154,103 @@ def rebuild_shared_world(story_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_agents_context(
-    story_id: str, current_branch_id: str, user_text: str = ""
+    story_id: str, branch_id: str, user_text: str = "",
 ) -> str:
-    """Build [其他輪迴者動態] text for injection into human player messages."""
+    """Build [其他輪迴者動態] using snapshots at current branch's world_day."""
     from agent_manager import _load_agents
+    from world_timer import get_world_day
 
     agents_data = _load_agents(story_id)
     if not agents_data.get("agents"):
         return ""
 
-    world = _load_shared_world(story_id)
-    if not world:
-        world = rebuild_shared_world(story_id)
-    if not world:
-        return ""
-
+    current_day = get_world_day(story_id, branch_id)
     lines = ["[其他輪迴者動態]"]
 
-    # Hub presence
-    hub = world.get("hub_presence", [])
-    if hub:
-        lines.append("目前在主神空間的輪迴者：")
-        for p in hub:
-            lines.append(f"- {p['name']}：{p.get('current_status', '休息中')}")
+    # Status list for each agent
+    for agent_id, agent in agents_data["agents"].items():
+        snapshot = get_agent_snapshot_at(
+            story_id, agent["branch_id"], current_day,
+        )
+        if not snapshot:
+            # No snapshot yet — show as newly arrived
+            lines.append(f"- {agent['name']}：剛進入主神空間（新人）")
+            continue
 
-    # In-dungeon agents
-    lb = world.get("leaderboard", [])
-    in_dungeon = [
-        e for e in lb
-        if e["current_phase"] == "dungeon" and e["status"] == "running"
-    ]
-    if in_dungeon:
-        lines.append("正在副本中的輪迴者：")
-        for e in in_dungeon:
-            lines.append(f"- {e['name']}（已完成{e['completed_missions']}次副本）")
+        cs = snapshot.get("character_state", {})
+        name = cs.get("name", agent["name"])
+        phase = snapshot.get("phase", "unknown")
+        missions = len(snapshot.get("completed_missions", []))
 
-    # Leaderboard top 5
-    if lb:
+        if phase == "hub":
+            lines.append(f"- {name}：在主神空間（已完成{missions}次副本）")
+        elif phase == "dungeon":
+            lines.append(f"- {name}：正在副本中")
+        else:
+            lines.append(f"- {name}：狀態未知")
+
+    # Leaderboard from snapshots
+    entries = []
+    for agent_id, agent in agents_data["agents"].items():
+        snapshot = get_agent_snapshot_at(
+            story_id, agent["branch_id"], current_day,
+        )
+        if snapshot:
+            cs = snapshot.get("character_state", {})
+            entries.append({
+                "name": cs.get("name", agent["name"]),
+                "reward_points": cs.get("reward_points", 0),
+            })
+    entries.sort(key=lambda x: x["reward_points"], reverse=True)
+    if entries:
         lines.append("排行榜（獎勵點）：")
-        for i, e in enumerate(lb[:5], 1):
+        for i, e in enumerate(entries[:5], 1):
             lines.append(f"  {i}. {e['name']} — {e['reward_points']}點")
 
-    # Name-match: detailed profile for agent mentioned by player
+    # Name-match: detailed profile from snapshot
     matched_agent = _find_mentioned_agent(user_text, agents_data)
     if matched_agent:
-        profile = _build_detailed_profile(story_id, matched_agent)
-        if profile:
+        snapshot = get_agent_snapshot_at(
+            story_id, matched_agent["branch_id"], current_day,
+        )
+        if snapshot:
+            profile = _build_profile_from_snapshot(matched_agent, snapshot)
             lines.append("")
             lines.append(profile)
 
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def get_hub_presence(story_id: str) -> list[dict]:
-    """Return hub presence list from cached shared_world."""
-    world = _load_shared_world(story_id)
-    if not world:
-        world = rebuild_shared_world(story_id)
-    return world.get("hub_presence", []) if world else []
+def get_leaderboard(story_id: str, world_day: float | None = None) -> list[dict]:
+    """Build leaderboard from snapshots. If world_day is None, use latest snapshots."""
+    from agent_manager import _load_agents
 
+    agents_data = _load_agents(story_id)
+    entries = []
 
-def get_leaderboard(story_id: str) -> list[dict]:
-    """Return leaderboard from cached shared_world."""
-    world = _load_shared_world(story_id)
-    if not world:
-        world = rebuild_shared_world(story_id)
-    return world.get("leaderboard", []) if world else []
+    for agent_id, agent in agents_data.get("agents", {}).items():
+        if world_day is not None:
+            snapshot = get_agent_snapshot_at(story_id, agent["branch_id"], world_day)
+        else:
+            snapshot = get_latest_snapshot(story_id, agent["branch_id"])
 
+        if not snapshot:
+            continue
 
-# ---------------------------------------------------------------------------
-# Context injection for agent branches (encounter events)
-# ---------------------------------------------------------------------------
+        cs = snapshot.get("character_state", {})
+        entries.append({
+            "agent_id": agent_id,
+            "name": cs.get("name", agent["name"]),
+            "reward_points": cs.get("reward_points", 0),
+            "completed_missions": len(snapshot.get("completed_missions", [])),
+            "gene_lock": cs.get("gene_lock", "未開啟"),
+            "current_phase": snapshot.get("phase", "unknown"),
+            "current_status": cs.get("current_status", ""),
+            "status": agent.get("status", "stopped"),
+        })
 
-def get_encounter_context(story_id: str, branch_id: str) -> str:
-    """Build [與其他輪迴者的互動] text for agent branch context injection."""
-    encounters = _load_json(_encounters_path(story_id, branch_id), [])
-    if not encounters:
-        return ""
-
-    # Show most recent 3 encounters
-    recent = encounters[-3:]
-    lines = ["[與其他輪迴者的互動]"]
-    for enc in recent:
-        lines.append(f"- {enc['from_name']}：{enc['summary']}（回合 {enc.get('turn_index', '?')}）")
-
-    return "\n".join(lines)
-
-
-def write_encounter(
-    story_id: str,
-    agent_branch_id: str,
-    from_name: str,
-    from_branch_id: str,
-    summary: str,
-    turn_index: int = 0,
-):
-    """Write a cross-branch encounter event to the agent's branch."""
-    path = _encounters_path(story_id, agent_branch_id)
-    encounters = _load_json(path, [])
-
-    encounters.append({
-        "from_name": from_name,
-        "from_branch_id": from_branch_id,
-        "summary": summary,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "turn_index": turn_index,
-    })
-
-    _save_json(path, encounters)
+    entries.sort(key=lambda x: x["reward_points"], reverse=True)
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -261,146 +266,42 @@ def _find_mentioned_agent(user_text: str, agents_data: dict) -> dict | None:
         name = char.get("character_state", {}).get("name", "")
         if name and name in user_text:
             return agent
+        # Also check agent's display name
+        if agent.get("name") and agent["name"] in user_text:
+            return agent
     return None
 
 
 # ---------------------------------------------------------------------------
-# Detailed profile for GM roleplay
+# Detailed profile from snapshot
 # ---------------------------------------------------------------------------
 
-def _build_detailed_profile(story_id: str, agent: dict) -> str:
-    """Build detailed profile text so GM can roleplay this agent."""
-    from app import _load_character_state
-
-    branch_id = agent["branch_id"]
-    char_state = _load_character_state(story_id, branch_id)
-    if not char_state:
-        return ""
-
+def _build_profile_from_snapshot(agent: dict, snapshot: dict) -> str:
+    """Build detailed profile from a snapshot (not live branch data)."""
     char_config = agent.get("character_config", {})
+    cs = snapshot.get("character_state", {})
+    name = cs.get("name", agent["name"])
 
-    # Load adventure summary if it exists
-    summary_data = _load_json(_adventure_summary_path(story_id, branch_id))
-    summary_text = summary_data.get("summary", "") if summary_data else ""
-
-    name = char_state.get("name", agent["name"])
     lines = [
         f"[輪迴者「{name}」詳細資料 — 供你扮演此角色時參考]",
         f"性格：{char_config.get('personality', '未知')}",
-        f"體質：{char_state.get('physique', '未知')}",
-        f"精神力：{char_state.get('spirit', '未知')}",
-        f"基因鎖：{char_state.get('gene_lock', '未開啟')}",
-        f"獎勵點：{char_state.get('reward_points', 0)}",
-        f"當前狀態：{char_state.get('current_status', '未知')}",
+        f"體質：{cs.get('physique', '未知')}",
+        f"精神力：{cs.get('spirit', '未知')}",
+        f"基因鎖：{cs.get('gene_lock', '未開啟')}",
+        f"獎勵點：{cs.get('reward_points', 0)}",
+        f"當前狀態：{cs.get('current_status', '未知')}",
     ]
 
-    inventory = char_state.get("inventory", [])
+    inventory = cs.get("inventory", [])
     if inventory:
         lines.append(f"裝備：{', '.join(str(i) for i in inventory[:5])}")
 
-    missions = char_state.get("completed_missions", [])
+    missions = cs.get("completed_missions", [])
     if missions:
         lines.append(f"已完成副本：{', '.join(str(m) for m in missions)}")
 
-    if summary_text:
-        lines.append(f"冒險經歷：{summary_text}")
+    summary = snapshot.get("summary", "")
+    if summary:
+        lines.append(f"冒險經歷：{summary}")
 
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Adventure summary generation
-# ---------------------------------------------------------------------------
-
-def generate_adventure_summary(story_id: str, agent_id: str) -> str:
-    """Use call_oneshot() to generate a narrative summary of an agent's adventure."""
-    from app import get_full_timeline, _load_character_state
-    from llm_bridge import call_oneshot
-    from agent_manager import _load_agents
-
-    agents_data = _load_agents(story_id)
-    agent = agents_data["agents"].get(agent_id)
-    if not agent:
-        return ""
-
-    branch_id = agent["branch_id"]
-    timeline = get_full_timeline(story_id, branch_id)
-    if not timeline:
-        return ""
-
-    # Take last 50 messages, truncated
-    recent = timeline[-50:]
-    context_lines = []
-    for msg in recent:
-        role = "玩家" if msg.get("role") == "user" else "GM"
-        content = msg.get("content", "")[:200]
-        context_lines.append(f"【{role}】{content}")
-
-    char_state = _load_character_state(story_id, branch_id)
-
-    prompt = (
-        "根據以下對話紀錄，用200-300字總結這位輪迴者的冒險經歷。"
-        "重點包括：經歷了哪些副本、關鍵抉擇、獲得的能力、遇到的危機。\n\n"
-        f"角色名稱：{char_state.get('name', '未知')}\n"
-        f"角色狀態：{json.dumps(char_state, ensure_ascii=False)[:500]}\n\n"
-        f"對話紀錄：\n" + "\n".join(context_lines) + "\n\n"
-        "請直接輸出摘要文字，不要加任何標記。"
-    )
-
-    summary = call_oneshot(prompt)
-    if not summary:
-        return ""
-
-    summary_data = {
-        "agent_id": agent_id,
-        "name": char_state.get("name", ""),
-        "summary": summary.strip(),
-        "last_updated_at_turn": len(timeline) // 2,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _save_json(_adventure_summary_path(story_id, branch_id), summary_data)
-
-    return summary.strip()
-
-
-# ---------------------------------------------------------------------------
-# Update agent NPC data from real character state
-# ---------------------------------------------------------------------------
-
-def update_agent_npc(story_id: str, agent_id: str):
-    """Update the agent's NPC entry in the player's main branch with fresh data."""
-    from agent_manager import _load_agents
-    from app import _load_character_state, _save_npc
-
-    agents_data = _load_agents(story_id)
-    agent = agents_data["agents"].get(agent_id)
-    if not agent:
-        return
-
-    branch_id = agent["branch_id"]
-    char_state = _load_character_state(story_id, branch_id)
-    if not char_state:
-        return
-
-    char_config = agent.get("character_config", {})
-    name = char_state.get("name", agent["name"])
-
-    npc_update = {
-        "name": name,
-        "role": "輪迴者（獨立冒險者）",
-        "appearance": char_state.get("physique", ""),
-        "backstory": char_config.get("personality", ""),
-        "current_status": char_state.get("current_status", ""),
-        "is_agent": True,
-        "agent_id": agent_id,
-    }
-
-    missions = char_state.get("completed_missions", [])
-    if missions:
-        npc_update["traits"] = [
-            "獨立冒險者",
-            f"已完成{len(missions)}次副本",
-            f"最近副本：{missions[-1]}",
-        ]
-
-    _save_npc(story_id, npc_update, branch_id="main")

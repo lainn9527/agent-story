@@ -617,8 +617,12 @@ def analyze_response(
     return result
 
 
-def update_phase(state: RunState, analysis: dict):
-    """Update run state phase based on analysis results."""
+def update_phase(state: RunState, analysis: dict,
+                  story_id: str = "", branch_id: str = ""):
+    """Update run state phase based on analysis results.
+
+    Also advances world_day on phase transitions (dungeon enter/exit).
+    """
     if analysis["death"]:
         state.death_detected = True
         return
@@ -629,6 +633,10 @@ def update_phase(state: RunState, analysis: dict):
             state.dungeon_count += 1
             state.hub_turns = 0
             log.info(">>> Phase: hub -> dungeon (dungeon #%d)", state.dungeon_count)
+            # Auto-advance world_day for dungeon entry
+            if story_id and branch_id:
+                from world_timer import advance_dungeon_enter
+                advance_dungeon_enter(story_id, branch_id)
         else:
             state.hub_turns += 1
     elif state.phase == "dungeon":
@@ -638,6 +646,10 @@ def update_phase(state: RunState, analysis: dict):
             state.phase = "hub"
             state.hub_turns = 0
             log.info(">>> Phase: dungeon -> hub")
+            # Auto-advance world_day for dungeon exit (recovery day)
+            if story_id and branch_id:
+                from world_timer import advance_dungeon_exit
+                advance_dungeon_exit(story_id, branch_id)
 
 
 # ---------------------------------------------------------------------------
@@ -855,7 +867,7 @@ def auto_play(config: AutoPlayConfig):
 
             # D. Analyze & update phase
             analysis = analyze_response(gm_response, story_id, branch_id)
-            update_phase(state, analysis)
+            update_phase(state, analysis, story_id, branch_id)
 
             # E. Log
             log_turn(story_id, branch_id, state, player_text, gm_response)
@@ -876,20 +888,20 @@ def auto_play(config: AutoPlayConfig):
                     state.phase, summary_msgs, state.to_dict(),
                 )
 
-            # H. Shared world rebuild + adventure summary (agent mode)
-            if config.agent_id and state.turn % 10 == 0:
-                try:
-                    from shared_world import rebuild_shared_world, generate_adventure_summary, update_agent_npc
-                    rebuild_shared_world(config.story_id)
-                    update_agent_npc(config.story_id, config.agent_id)
-                except Exception as e:
-                    log.warning("shared_world rebuild failed: %s", e)
-            if config.agent_id and state.turn % 20 == 0:
-                try:
-                    from shared_world import generate_adventure_summary
-                    generate_adventure_summary(config.story_id, config.agent_id)
-                except Exception as e:
-                    log.warning("adventure summary generation failed: %s", e)
+            # H. Save agent snapshot on phase change or every 20 turns
+            if config.agent_id:
+                phase_changed = analysis.get("dungeon_start") or analysis.get("dungeon_end")
+                if phase_changed or state.turn % 20 == 0:
+                    try:
+                        from shared_world import save_agent_snapshot
+                        char_state = _load_character_state(story_id, branch_id)
+                        save_agent_snapshot(
+                            story_id, branch_id,
+                            turn=state.turn, phase=state.phase,
+                            char_state=char_state,
+                        )
+                    except Exception as e:
+                        log.warning("snapshot save failed: %s", e)
 
             state.turn += 1
             time.sleep(config.turn_delay)
@@ -914,6 +926,20 @@ def auto_play(config: AutoPlayConfig):
     state.status = "finished"
     state.last_turn_at = datetime.now(timezone.utc).isoformat()
     save_run_state(story_id, branch_id, state)
+
+    # Save final snapshot and generate summaries for all snapshots
+    if config.agent_id:
+        try:
+            from shared_world import save_agent_snapshot, generate_snapshot_summaries
+            char_state = _load_character_state(story_id, branch_id)
+            save_agent_snapshot(
+                story_id, branch_id,
+                turn=state.turn, phase=state.phase,
+                char_state=char_state,
+            )
+            generate_snapshot_summaries(story_id, branch_id)
+        except Exception as e:
+            log.warning("final snapshot/summary failed: %s", e)
 
     print_summary(state, story_id, branch_id)
 

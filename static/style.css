@@ -43,6 +43,7 @@ body {
 
 /* ---------- Header ---------- */
 #header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -83,6 +84,19 @@ body {
 .header-sub {
   font-size: 0.82rem;
   color: var(--text-dim);
+}
+
+.world-day-display {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--gold, #d4a574);
+  background: rgba(212, 165, 116, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
 #live-indicator {

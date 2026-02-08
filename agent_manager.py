@@ -127,36 +127,7 @@ def create_agent(
     agents_data["agents"][agent_id] = agent
     _save_agents(story_id, agents_data)
 
-    # Register agent as NPC in the player's main branch
-    _register_agent_as_npc(story_id, agent)
-
     return agent
-
-
-def _register_agent_as_npc(story_id: str, agent: dict):
-    """Register the agent as an NPC in the player's main branch."""
-    from app import _save_npc
-
-    char_config = agent.get("character_config", {})
-    char_state = char_config.get("character_state", {})
-
-    npc_data = {
-        "name": char_state.get("name", agent["name"]),
-        "role": "輪迴者（獨立冒險者）",
-        "appearance": char_state.get("physique", ""),
-        "personality": {
-            "openness": 7,
-            "conscientiousness": 5,
-            "extraversion": 4,
-            "agreeableness": 6,
-            "neuroticism": 3,
-        },
-        "backstory": char_config.get("personality", ""),
-        "traits": ["獨立冒險者", "有自己的副本經歷"],
-        "is_agent": True,
-        "agent_id": agent["id"],
-    }
-    _save_npc(story_id, npc_data, branch_id="main")
 
 
 # ---------------------------------------------------------------------------

@@ -281,23 +281,23 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
 
-    # Build other agents text (human branches only)
+    # Build other agents text (human branches only, snapshot-based)
     other_agents_text = ""
     if not branch_id.startswith("auto_"):
         try:
-            from shared_world import get_hub_presence, get_leaderboard
-            hub = get_hub_presence(story_id)
-            lb = get_leaderboard(story_id)
-            lines = []
-            if hub:
-                lines.append("目前在主神空間的其他輪迴者：")
-                for p in hub:
-                    lines.append(f"- {p['name']}：{p.get('current_status', '')}")
-            if lb:
-                lines.append("排行榜前三：" + "、".join(
-                    f"{e['name']}({e['reward_points']}點)" for e in lb[:3]
-                ))
-            other_agents_text = "\n".join(lines)
+            from shared_world import get_leaderboard
+            from world_timer import get_world_day
+            from agent_manager import _load_agents
+            current_day = get_world_day(story_id, branch_id)
+            agents_data = _load_agents(story_id)
+            if agents_data.get("agents"):
+                lb = get_leaderboard(story_id, world_day=current_day)
+                lines = []
+                if lb:
+                    lines.append("排行榜前三：" + "、".join(
+                        f"{e['name']}({e['reward_points']}點)" for e in lb[:3]
+                    ))
+                other_agents_text = "\n".join(lines)
         except Exception:
             pass
 
@@ -1114,6 +1114,10 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         filename = generate_image_async(story_id, img_prompt, msg_index)
         image_info = {"filename": filename, "ready": False}
 
+    # Extract TIME tags and advance world_day
+    from world_timer import process_time_tags
+    gm_response = process_time_tags(gm_response, story_id, branch_id)
+
     # Build snapshots for branch forking accuracy
     snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
     if npc_updates:
@@ -1173,23 +1177,13 @@ def _build_augmented_message(
     if activities:
         parts.append(activities)
 
-    # Cross-agent awareness
+    # Cross-agent awareness (human branches only, snapshot-based)
     if not branch_id.startswith("auto_"):
-        # Human player: inject other agents' status + leaderboard
         try:
             from shared_world import get_agents_context
             agents_ctx = get_agents_context(story_id, branch_id, user_text)
             if agents_ctx:
                 parts.append(agents_ctx)
-        except Exception:
-            pass
-    else:
-        # Agent branch: inject encounter events (bidirectional awareness)
-        try:
-            from shared_world import get_encounter_context
-            enc_ctx = get_encounter_context(story_id, branch_id)
-            if enc_ctx:
-                parts.append(enc_ctx)
         except Exception:
             pass
 
@@ -1314,6 +1308,10 @@ def api_messages():
     fork_points = _get_fork_points(story_id, branch_id)
     sibling_groups = _get_sibling_groups(story_id, branch_id)
 
+    # Include world_day for all branches
+    from world_timer import get_world_day
+    current_world_day = get_world_day(story_id, branch_id)
+
     result = {
         "messages": page,
         "total": total,
@@ -1322,6 +1320,7 @@ def api_messages():
         "fork_points": fork_points,
         "sibling_groups": sibling_groups,
         "branch_id": branch_id,
+        "world_day": current_world_day,
     }
 
     if branch_id.startswith("auto_"):
@@ -1428,29 +1427,7 @@ def api_send():
         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
         run_npc_evolution_async(story_id, branch_id, turn_count, npc_text, recent_text)
 
-    # 8. Write cross-branch encounter if player mentioned an agent
-    if not branch_id.startswith("auto_"):
-        try:
-            from shared_world import _find_mentioned_agent, write_encounter
-            from agent_manager import _load_agents
-            agents_data = _load_agents(story_id)
-            matched = _find_mentioned_agent(user_text, agents_data)
-            if matched:
-                # Brief summary from GM response (~100 chars)
-                summary_snippet = gm_response[:100].replace("\n", " ")
-                player_name = state.get("name", "玩家") if state else "玩家"
-                write_encounter(
-                    story_id,
-                    agent_branch_id=matched["branch_id"],
-                    from_name=player_name,
-                    from_branch_id=branch_id,
-                    summary=summary_snippet,
-                    turn_index=gm_msg_index,
-                )
-        except Exception:
-            pass
-
-    # 9. Trigger compaction if due
+    # 8. Trigger compaction if due
     recap = load_recap(story_id, branch_id)
     if should_compact(recap, len(full_timeline) + 1):
         full_timeline.append(gm_msg)
@@ -1588,11 +1565,23 @@ def api_status():
 
 @app.route("/api/branches")
 def api_branches():
-    """Return all branches (excluding soft-deleted ones)."""
+    """Return all branches (excluding soft-deleted, merged, and agent branches)."""
     story_id = _active_story_id()
     tree = _load_tree(story_id)
+
+    # Collect agent branch IDs to filter them out
+    agent_branch_ids = set()
+    try:
+        from agent_manager import _load_agents
+        agents_data = _load_agents(story_id)
+        for agent in agents_data.get("agents", {}).values():
+            agent_branch_ids.add(agent["branch_id"])
+    except Exception:
+        pass
+
     visible = {bid: b for bid, b in tree.get("branches", {}).items()
-               if not b.get("deleted") and not b.get("merged")}
+               if not b.get("deleted") and not b.get("merged")
+               and bid not in agent_branch_ids}
     return jsonify({
         "active_branch_id": tree.get("active_branch_id", "main"),
         "branches": visible,
@@ -1627,6 +1616,10 @@ def api_branches_create():
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+
+    # Inherit world_day from parent
+    from world_timer import copy_world_day
+    copy_world_day(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2842,12 +2835,12 @@ def api_agents_stop(agent_id):
 
 @app.route("/api/leaderboard")
 def api_leaderboard():
-    """Get the shared world leaderboard (always fresh)."""
-    from shared_world import rebuild_shared_world
+    """Get the shared world leaderboard from snapshots."""
+    from shared_world import get_leaderboard
 
     story_id = _active_story_id()
-    world = rebuild_shared_world(story_id)
-    return jsonify({"ok": True, "leaderboard": world.get("leaderboard", [])})
+    lb = get_leaderboard(story_id)
+    return jsonify({"ok": True, "leaderboard": lb})
 
 
 # ---------------------------------------------------------------------------

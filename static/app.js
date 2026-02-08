@@ -305,6 +305,7 @@ function startLivePolling(branchId) {
       }
 
       updateLiveIndicator(true, data.auto_play_state);
+      updateWorldDayDisplay(data.world_day);
 
       // Refresh summaries if drawer is open and new summaries available
       if (data.summary_count != null && data.summary_count > _lastSummaryCount) {
@@ -359,6 +360,17 @@ function updateLiveIndicator(isLive, autoState) {
     if (autoState.phase) text += ` (${autoState.phase})`;
   }
   el.textContent = text;
+}
+
+function updateWorldDayDisplay(worldDay) {
+  const el = document.getElementById("world-day-display");
+  if (!el) return;
+  if (worldDay != null && worldDay > 0) {
+    el.style.display = "";
+    el.textContent = `\u2726 \u4E16\u754C\u7B2C ${Math.floor(worldDay)} \u5929`;
+  } else {
+    el.style.display = "none";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +927,7 @@ async function loadMessages(branchId, { tail } = {}) {
   forkPoints = msgResult.fork_points || {};
   siblingGroups = msgResult.sibling_groups || {};
   renderMessages(allMessages);
+  updateWorldDayDisplay(msgResult.world_day);
 }
 
 // ---------------------------------------------------------------------------
