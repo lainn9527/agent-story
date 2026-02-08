@@ -926,10 +926,12 @@ function _btRenderTree(container, modal) {
     });
   }
 
-  function containsCurrent(branchId) {
+  function containsCurrent(branchId, visited = new Set()) {
+    if (visited.has(branchId)) return false;
+    visited.add(branchId);
     if (branchId === currentBranchId) return true;
     const kids = childrenMap[branchId] || [];
-    return kids.some(k => containsCurrent(k.id));
+    return kids.some(k => containsCurrent(k.id, visited));
   }
 
   function renderNode(branch, isRoot) {
@@ -1000,25 +1002,27 @@ function _btRenderTree(container, modal) {
       const actions = document.createElement("span");
       actions.className = "bt-actions" + (_btSelectMode ? " hidden" : "");
 
-      const mergeBtn = document.createElement("span");
-      mergeBtn.className = "bt-action-btn";
-      mergeBtn.textContent = "\u2934";
-      mergeBtn.title = "合併到上層";
-      mergeBtn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const parentBranch = branches[branch.parent_branch_id];
-        const parentName = parentBranch ? parentBranch.name : branch.parent_branch_id;
-        if (!(await showConfirm(`合併「${branch.name}」到「${parentName}」？`))) return;
-        const res = await API.mergeBranch(branch.id);
-        if (res.ok) {
-          await loadBranches();
-          _btRenderTree(container, modal);
-          renderBranchList();
-        } else {
-          alert(res.error || "合併失敗");
-        }
-      });
-      actions.appendChild(mergeBtn);
+      if (!branch.blank) {
+        const mergeBtn = document.createElement("span");
+        mergeBtn.className = "bt-action-btn";
+        mergeBtn.textContent = "\u2934";
+        mergeBtn.title = "合併到上層";
+        mergeBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const parentBranch = branches[branch.parent_branch_id];
+          const parentName = parentBranch ? parentBranch.name : branch.parent_branch_id;
+          if (!(await showConfirm(`合併「${branch.name}」到「${parentName}」？`))) return;
+          const res = await API.mergeBranch(branch.id);
+          if (res.ok) {
+            await loadBranches();
+            _btRenderTree(container, modal);
+            renderBranchList();
+          } else {
+            alert(res.error || "合併失敗");
+          }
+        });
+        actions.appendChild(mergeBtn);
+      }
 
       const delBtn = document.createElement("span");
       delBtn.className = "bt-action-btn bt-action-del";
@@ -1118,14 +1122,37 @@ function _btUpdateToolbar() {
 async function _btDeleteSelected() {
   const ids = [..._btSelected];
   if (ids.length === 0) return;
+
+  // Deduplicate: remove any id whose ancestor is also selected
+  const selectedSet = new Set(ids);
+  const deduped = ids.filter(id => {
+    let cur = branches[id]?.parent_branch_id;
+    while (cur && cur !== "main") {
+      if (selectedSet.has(cur)) return false;
+      cur = branches[cur]?.parent_branch_id;
+    }
+    return true;
+  });
+
   let totalDesc = 0;
-  for (const id of ids) totalDesc += countDescendants(id);
-  let msg = `確定刪除 ${ids.length} 個分支？`;
+  for (const id of deduped) totalDesc += countDescendants(id);
+  let msg = `確定刪除 ${deduped.length} 個分支？`;
   if (totalDesc > 0) msg += `\n（另含 ${totalDesc} 個子分支也會一併刪除）`;
   if (!(await showConfirm(msg))) return;
 
-  for (const id of ids) {
-    await API.deleteBranch(id);
+  // Sort leaf-first (most descendants = delete last)
+  deduped.sort((a, b) => countDescendants(a) - countDescendants(b));
+
+  const failures = [];
+  for (const id of deduped) {
+    try {
+      await API.deleteBranch(id);
+    } catch (e) {
+      failures.push(id);
+    }
+  }
+  if (failures.length > 0) {
+    alert(`${failures.length} 個分支刪除失敗：${failures.join(", ")}`);
   }
   _btSelected.clear();
   await loadBranches();
@@ -2725,12 +2752,20 @@ document.getElementById("summary-modal").addEventListener("click", (e) => {
   if (e.target.id === "summary-modal") closeSummaryModal();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !document.getElementById("summary-modal").classList.contains("hidden")) {
-    e.stopImmediatePropagation();
-    closeSummaryModal();
+  if (e.key === "Escape") {
+    if (!document.getElementById("branch-tree-modal").classList.contains("hidden")) {
+      e.stopImmediatePropagation();
+      closeBranchTreeModal();
+      return;
+    }
+    if (!document.getElementById("summary-modal").classList.contains("hidden")) {
+      e.stopImmediatePropagation();
+      closeSummaryModal();
+      return;
+    }
   }
   // Cmd+B (Mac) / Ctrl+B (Win) — toggle branch tree modal
-  if ((e.metaKey || e.ctrlKey) && e.key === "b") {
+  if ((e.metaKey || e.ctrlKey) && e.key === "b" && document.activeElement?.tagName !== "TEXTAREA") {
     e.preventDefault();
     const modal = document.getElementById("branch-tree-modal");
     if (modal.classList.contains("hidden")) {
