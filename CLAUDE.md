@@ -6,7 +6,7 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 ## Architecture
 - **Backend**: Flask on port 5051 (`app.py`)
 - **AI Bridge**: Multi-provider LLM bridge (`llm_bridge.py`) — dispatches to Gemini API or Claude CLI
-- **Frontend**: Vanilla HTML/CSS/JS, light theme, single-page app with slide-out drawer
+- **Frontend**: Vanilla HTML/CSS/JS, dark theme, single-page app with slide-out drawer
 - **Data**: Per-story isolation in `data/stories/<story_id>/`, SQLite for search indexes
 
 ## Key Commands
@@ -18,7 +18,9 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 | `app.py` | Flask routes, multi-story support, unified tag pipeline |
 | `llm_bridge.py` | LLM provider dispatcher, auto-reloads `llm_config.json` |
 | `llm_config.json` | Provider config: switch `"provider"` between `"gemini"` / `"claude_cli"` |
-| `gemini_bridge.py` | Gemini API bridge (streaming + non-streaming) |
+| `gemini_bridge.py` | Gemini API bridge (streaming + non-streaming), multi-key fallback |
+| `gemini_key_manager.py` | Gemini API key pool with rate-limit/expiry cooldown tracking |
+| `compaction.py` | Conversation compaction: rolling narrative recap via background LLM |
 | `claude_bridge.py` | Claude CLI bridge, `--output-format json` for session_id |
 | `lore_db.py` | SQLite lore search engine (CJK bigram scoring) |
 | `event_db.py` | SQLite event tracing engine (CJK bigram search) |
@@ -26,7 +28,7 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 | `npc_evolution.py` | Background NPC evolution via Claude CLI |
 | `auto_play.py` | AI self-play: GM + Player AI loop on dedicated `auto_` branch |
 | `static/app.js` | Frontend: drawer UI, NPC/events/images, schema-driven panels |
-| `static/style.css` | Light theme CSS |
+| `static/style.css` | Dark theme CSS (mobile: novel reader style with serif fonts) |
 | `templates/index.html` | Single page HTML with slide-out drawer |
 
 ## Data Layout
@@ -147,16 +149,35 @@ The `system_prompt.txt` template uses these placeholders:
 - `{npc_profiles}` — Formatted NPC profiles
 
 ## LLM Provider System
-Switch provider by editing `llm_config.json` (auto-reloads on file change, no server restart needed):
-```json
-{"provider": "gemini"}      // Gemini API (free tier available)
-{"provider": "claude_cli"}  // Claude CLI via subprocess (uses Claude subscription)
-```
+Switch provider via drawer UI (⚙️ 設定) or by editing `llm_config.json` (auto-reloads on file change, no server restart needed).
 
-| Provider | Config | Streaming | Session Resume | Cost |
-|----------|--------|-----------|---------------|------|
-| `gemini` | `gemini.api_key`, `gemini.model` | SSE via `streamGenerateContent` | No (sends history each call) | Free tier / pay-per-token |
-| `claude_cli` | `claude_cli.model` | NDJSON via `--output-format stream-json` | Yes (`--resume session_id`) | Included in Claude subscription |
+**API endpoints**: `GET /api/config` (sanitized, no keys), `POST /api/config` (update provider/model)
+
+**Config format** (`llm_config.json`):
+```json
+{
+  "provider": "gemini",
+  "gemini": {
+    "api_keys": [
+      {"key": "AIza...", "tier": "free"},
+      {"key": "AIza...", "tier": "paid"}
+    ],
+    "model": "gemini-2.5-flash"
+  },
+  "claude_cli": { "model": "claude-sonnet-4-5-20250929" }
+}
+```
+Backward-compatible: old `"api_key": "string"` format auto-converts to single-element list.
+
+**Multi-key Gemini fallback** (`gemini_key_manager.py`):
+- On HTTP 429 (rate limit), 400 (expired key), 401, 403 → mark key with 60s cooldown, try next
+- Key priority: free keys first, paid keys last
+- All `gemini_bridge.py` functions accept `gemini_cfg` dict (not raw `api_key`)
+
+| Provider | Config | Streaming | Cost |
+|----------|--------|-----------|------|
+| `gemini` | `gemini.api_keys[]`, `gemini.model` | SSE via `streamGenerateContent` | Free tier / pay-per-token |
+| `claude_cli` | `claude_cli.model` | NDJSON via `--output-format stream-json` | Included in Claude subscription |
 
 - `llm_bridge.py` exports `call_claude_gm`, `call_claude_gm_stream`, `generate_story_summary`, `call_oneshot`
 - `app.py` and `npc_evolution.py` import from `llm_bridge` (never directly from provider bridges)
