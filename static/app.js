@@ -402,6 +402,7 @@ const $branchList = document.getElementById("branch-list");
 const $newStoryBtn = document.getElementById("new-story-btn");
 const $newBranchBtn = document.getElementById("new-branch-btn");
 const $newBlankBranchBtn = document.getElementById("new-blank-branch-btn");
+const $branchTreeBtn = document.getElementById("branch-tree-btn");
 const $promoteBtn = document.getElementById("promote-branch-btn");
 const $branchIndicator = document.getElementById("branch-indicator");
 const $storyModal = document.getElementById("new-story-modal");
@@ -683,7 +684,8 @@ function renderBranchList() {
 function createBranchItem(branch, depth, hasChildren, isExpanded) {
   const item = document.createElement("div");
   item.className = "drawer-item" + (branch.id === currentBranchId ? " active" : "");
-  if (depth > 0) item.style.paddingLeft = (12 + depth * 16) + "px";
+  const cappedDepth = Math.min(depth, 4);
+  if (cappedDepth > 0) item.style.paddingLeft = (12 + cappedDepth * 16) + "px";
 
   // Toggle arrow for depth-0 items with children
   if (depth === 0 && hasChildren) {
@@ -893,7 +895,277 @@ function buildBranchTree() {
   return result;
 }
 
-async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePreserve } = {}) {
+// ---------- Branch Tree Modal ----------
+let _btSelectMode = false;
+const _btSelected = new Set();
+
+function openBranchTreeModal() {
+  const modal = document.getElementById("branch-tree-modal");
+  const container = document.getElementById("branch-tree-container");
+  _btSelectMode = false;
+  _btSelected.clear();
+  _btUpdateToolbar();
+  document.getElementById("bt-select-toggle").textContent = "\u2610";
+  modal.classList.remove("hidden");
+  _btRenderTree(container, modal);
+}
+
+function _btRenderTree(container, modal) {
+  // Build children map
+  const childrenMap = {};
+  for (const b of Object.values(branches)) {
+    const parent = b.blank ? "__root__" : (b.parent_branch_id || "__root__");
+    if (!childrenMap[parent]) childrenMap[parent] = [];
+    childrenMap[parent].push(b);
+  }
+  for (const key of Object.keys(childrenMap)) {
+    childrenMap[key].sort((a, b) => {
+      if (a.id === "main") return -1;
+      if (b.id === "main") return 1;
+      return (a.created_at || "").localeCompare(b.created_at || "");
+    });
+  }
+
+  function containsCurrent(branchId) {
+    if (branchId === currentBranchId) return true;
+    const kids = childrenMap[branchId] || [];
+    return kids.some(k => containsCurrent(k.id));
+  }
+
+  function renderNode(branch, isRoot) {
+    const node = document.createElement("div");
+    node.className = "bt-node" + (isRoot ? " bt-root" : "");
+
+    const item = document.createElement("div");
+    item.className = "bt-item" + (branch.id === currentBranchId ? " bt-active" : "");
+    item.dataset.branchId = branch.id;
+
+    const kids = childrenMap[branch.id] || [];
+
+    // Checkbox (select mode)
+    if (branch.id !== "main") {
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "bt-checkbox" + (_btSelectMode ? "" : " hidden");
+      cb.checked = _btSelected.has(branch.id);
+      cb.addEventListener("click", (e) => e.stopPropagation());
+      cb.addEventListener("change", (e) => {
+        if (e.target.checked) _btSelected.add(branch.id);
+        else _btSelected.delete(branch.id);
+        _btUpdateToolbar();
+      });
+      item.appendChild(cb);
+    }
+
+    // Toggle arrow — only for real forks (2+ children); single-child chains are inline
+    if (kids.length > 1) {
+      const toggle = document.createElement("span");
+      toggle.className = "bt-toggle" + (containsCurrent(branch.id) || isRoot ? " expanded" : "");
+      toggle.textContent = "\u25B6";
+      toggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const childrenEl = node.querySelector(":scope > .bt-children");
+        if (childrenEl) {
+          childrenEl.classList.toggle("collapsed");
+          toggle.classList.toggle("expanded");
+        }
+      });
+      item.appendChild(toggle);
+    }
+
+    const dot = document.createElement("span");
+    dot.className = "bt-dot";
+    item.appendChild(dot);
+
+    const name = document.createElement("span");
+    name.className = "bt-name";
+    name.textContent = branch.name || branch.id;
+    item.appendChild(name);
+
+    if (branch.id.startsWith("auto_")) {
+      const badge = document.createElement("span");
+      badge.className = "bt-auto-badge";
+      badge.textContent = "AUTO";
+      item.appendChild(badge);
+    }
+
+    const idLabel = document.createElement("span");
+    idLabel.className = "bt-id";
+    const shortId = branch.id.replace(/^branch_/, "");
+    idLabel.textContent = shortId.length > 8 ? shortId.slice(0, 8) + "…" : shortId;
+    item.appendChild(idLabel);
+
+    // Action buttons (non-select mode, non-main)
+    if (branch.id !== "main") {
+      const actions = document.createElement("span");
+      actions.className = "bt-actions" + (_btSelectMode ? " hidden" : "");
+
+      const mergeBtn = document.createElement("span");
+      mergeBtn.className = "bt-action-btn";
+      mergeBtn.textContent = "\u2934";
+      mergeBtn.title = "合併到上層";
+      mergeBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const parentBranch = branches[branch.parent_branch_id];
+        const parentName = parentBranch ? parentBranch.name : branch.parent_branch_id;
+        if (!(await showConfirm(`合併「${branch.name}」到「${parentName}」？`))) return;
+        const res = await API.mergeBranch(branch.id);
+        if (res.ok) {
+          await loadBranches();
+          _btRenderTree(container, modal);
+          renderBranchList();
+        } else {
+          alert(res.error || "合併失敗");
+        }
+      });
+      actions.appendChild(mergeBtn);
+
+      const delBtn = document.createElement("span");
+      delBtn.className = "bt-action-btn bt-action-del";
+      delBtn.textContent = "\u2715";
+      delBtn.title = "刪除";
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const desc = countDescendants(branch.id);
+        let msg = `刪除「${branch.name}」？`;
+        if (desc > 0) msg += `\n（含 ${desc} 個子分支）`;
+        if (!(await showConfirm(msg))) return;
+        const res = await API.deleteBranch(branch.id);
+        if (res.ok) {
+          await loadBranches();
+          if (currentBranchId === branch.id || !branches[currentBranchId]) {
+            await switchToBranch("main");
+          }
+          _btRenderTree(container, modal);
+          renderBranchList();
+        } else {
+          alert(res.error || "刪除失敗");
+        }
+      });
+      actions.appendChild(delBtn);
+
+      item.appendChild(actions);
+    }
+
+    // Click to switch branch — scroll to branch point (start of divergence)
+    item.addEventListener("click", async () => {
+      if (_btSelectMode) return;
+      modal.classList.add("hidden");
+      closeDrawer();
+      const bpIndex = branch.branch_point_index;
+      const scrollTo = (bpIndex != null && bpIndex >= 0) ? bpIndex + 1 : undefined;
+      await switchToBranch(branch.id, { scrollToIndex: scrollTo, scrollBlock: "start" });
+    });
+
+    node.appendChild(item);
+
+    // Render children
+    if (kids.length === 1) {
+      const childNode = renderNode(kids[0], false);
+      childNode.classList.add("bt-root");
+      const childItem = childNode.querySelector(":scope > .bt-item");
+      if (childItem) childItem.classList.add("bt-inline-child");
+      node.appendChild(childNode);
+    } else if (kids.length > 1) {
+      const childrenEl = document.createElement("div");
+      const shouldExpand = containsCurrent(branch.id) || isRoot;
+      childrenEl.className = "bt-children" + (shouldExpand ? "" : " collapsed");
+      for (const kid of kids) {
+        childrenEl.appendChild(renderNode(kid, false));
+      }
+      node.appendChild(childrenEl);
+    }
+
+    return node;
+  }
+
+  container.innerHTML = "";
+  const roots = childrenMap["__root__"] || [];
+  for (const root of roots) {
+    container.appendChild(renderNode(root, true));
+  }
+
+  requestAnimationFrame(() => {
+    const active = container.querySelector(".bt-active");
+    if (active) active.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+}
+
+function _btToggleSelectMode() {
+  _btSelectMode = !_btSelectMode;
+  _btSelected.clear();
+  document.getElementById("bt-select-toggle").textContent = _btSelectMode ? "\u2611" : "\u2610";
+  // Toggle checkbox / action visibility
+  document.querySelectorAll("#branch-tree-container .bt-checkbox").forEach(cb => {
+    cb.classList.toggle("hidden", !_btSelectMode);
+    cb.checked = false;
+  });
+  document.querySelectorAll("#branch-tree-container .bt-actions").forEach(el => {
+    el.classList.toggle("hidden", _btSelectMode);
+  });
+  _btUpdateToolbar();
+}
+
+function _btUpdateToolbar() {
+  const n = _btSelected.size;
+  const delBtn = document.getElementById("bt-delete-selected");
+  const mergeBtn = document.getElementById("bt-merge-selected");
+  delBtn.classList.toggle("hidden", !_btSelectMode || n === 0);
+  delBtn.textContent = n > 0 ? `\u2715 刪除 (${n})` : "\u2715 刪除";
+  mergeBtn.classList.toggle("hidden", !_btSelectMode || n !== 1);
+}
+
+async function _btDeleteSelected() {
+  const ids = [..._btSelected];
+  if (ids.length === 0) return;
+  let totalDesc = 0;
+  for (const id of ids) totalDesc += countDescendants(id);
+  let msg = `確定刪除 ${ids.length} 個分支？`;
+  if (totalDesc > 0) msg += `\n（另含 ${totalDesc} 個子分支也會一併刪除）`;
+  if (!(await showConfirm(msg))) return;
+
+  for (const id of ids) {
+    await API.deleteBranch(id);
+  }
+  _btSelected.clear();
+  await loadBranches();
+  if (!branches[currentBranchId]) await switchToBranch("main");
+  const modal = document.getElementById("branch-tree-modal");
+  const container = document.getElementById("branch-tree-container");
+  _btRenderTree(container, modal);
+  renderBranchList();
+  _btUpdateToolbar();
+}
+
+async function _btMergeSelected() {
+  const ids = [..._btSelected];
+  if (ids.length !== 1) return;
+  const branch = branches[ids[0]];
+  if (!branch) return;
+  const parentBranch = branches[branch.parent_branch_id];
+  const parentName = parentBranch ? parentBranch.name : branch.parent_branch_id;
+  if (!(await showConfirm(`合併「${branch.name}」到「${parentName}」？`))) return;
+  const res = await API.mergeBranch(branch.id);
+  if (res.ok) {
+    _btSelected.clear();
+    await loadBranches();
+    const modal = document.getElementById("branch-tree-modal");
+    const container = document.getElementById("branch-tree-container");
+    _btRenderTree(container, modal);
+    renderBranchList();
+    _btUpdateToolbar();
+  } else {
+    alert(res.error || "合併失敗");
+  }
+}
+
+function closeBranchTreeModal() {
+  _btSelectMode = false;
+  _btSelected.clear();
+  document.getElementById("branch-tree-modal").classList.add("hidden");
+}
+
+async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveScroll, forcePreserve } = {}) {
   clearDeletePreviousBtn();
   closeSummaryModal();
   const container = document.getElementById("messages");
@@ -991,12 +1263,18 @@ async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePr
 
   if (scrollToIndex != null) {
     $messages.style.minHeight = "";
-    const target = $messages.querySelector(`.message[data-index="${scrollToIndex}"]`);
-    if (target) {
-      target.scrollIntoView({ block: "center" });
-    } else {
-      scrollToBottom();
-    }
+    const blk = scrollBlock || "center";
+    // Delay scroll to ensure DOM is fully rendered
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const target = $messages.querySelector(`.message[data-index="${scrollToIndex}"]`);
+        if (target) {
+          target.scrollIntoView({ block: blk });
+        } else {
+          scrollToBottom();
+        }
+      }, 50);
+    });
     return;
   }
   scrollToBottom();
@@ -2367,6 +2645,16 @@ $newBranchBtn.addEventListener("click", () => {
   const lastIndex = allMessages[allMessages.length - 1].index;
   createBranchFromIndex(lastIndex);
 });
+
+// Branch tree modal
+$branchTreeBtn.addEventListener("click", () => openBranchTreeModal());
+document.getElementById("branch-tree-modal-close").addEventListener("click", closeBranchTreeModal);
+document.getElementById("branch-tree-modal").addEventListener("click", (e) => {
+  if (e.target.id === "branch-tree-modal") closeBranchTreeModal();
+});
+document.getElementById("bt-select-toggle").addEventListener("click", _btToggleSelectMode);
+document.getElementById("bt-delete-selected").addEventListener("click", _btDeleteSelected);
+document.getElementById("bt-merge-selected").addEventListener("click", _btMergeSelected);
 
 // Blank branch button — start a fresh game from scratch
 $newBlankBranchBtn.addEventListener("click", async () => {

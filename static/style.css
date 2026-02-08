@@ -1691,3 +1691,169 @@ body {
   .header-sub { display: none; }
   #world-day-display { font-size: 0.75rem; }
 }
+
+/* ---------- Branch Tree Modal ---------- */
+.branch-tree-modal-content {
+  width: 95%;
+  max-width: 720px;
+  max-height: 90vh;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.branch-tree-modal-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.branch-tree-modal-header h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.bt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+}
+.bt-toolbar-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.15s;
+}
+.bt-toolbar-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.bt-toolbar-btn.bt-danger { color: var(--accent); border-color: var(--accent); }
+.bt-toolbar-btn.bt-danger:hover { background: rgba(217, 48, 37, 0.1); }
+.bt-toolbar-btn.bt-merge { color: var(--gold); border-color: var(--gold); }
+.bt-toolbar-btn.bt-merge:hover { background: rgba(184, 134, 11, 0.1); }
+.branch-tree-container {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px 24px;
+}
+.bt-node {
+  position: relative;
+  padding-left: 14px;
+}
+.bt-node.bt-root {
+  padding-left: 0;
+}
+.bt-children {
+  margin-left: 4px;
+  border-left: 1px solid var(--border);
+  padding-left: 0;
+}
+.bt-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  margin: 0;
+}
+.bt-item::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  width: 10px;
+  height: 1px;
+  background: var(--border);
+}
+.bt-root > .bt-item::before {
+  display: none;
+}
+.bt-inline-child::before {
+  display: none;
+}
+.bt-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.bt-item.bt-active {
+  background: rgba(184, 134, 11, 0.15);
+  border: 1px solid var(--gold);
+}
+.bt-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+.bt-active .bt-dot {
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(184, 134, 11, 0.5);
+}
+.bt-name {
+  font-size: 0.88rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+.bt-id {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.bt-auto-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  background: rgba(255, 68, 68, 0.1);
+  color: #ff6b6b;
+  flex-shrink: 0;
+}
+.bt-toggle {
+  cursor: pointer;
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  padding: 2px;
+}
+.bt-toggle.expanded {
+  transform: rotate(90deg);
+}
+.bt-children.collapsed {
+  display: none;
+}
+.bt-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--gold);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.bt-checkbox.hidden, .bt-actions.hidden { display: none; }
+.bt-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.bt-item:hover .bt-actions { opacity: 1; }
+.bt-action-btn {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.bt-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+.bt-action-del:hover { color: var(--accent); }
