@@ -636,7 +636,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 f"## GM 回覆\n{gm_text}\n\n"
                 "## 1. 世界設定（lore）\n"
                 "提取新的世界設定：體系規則、副本背景、場景描述等。不要提取劇情動態或角色行動。\n"
-                f"已有設定（避免重複）：\n{toc}\n"
+                "**重要：**\n"
+                "- 如果已有設定中有密切相關的主題，**更新該條目**（使用完全相同的 topic 名稱）\n"
+                "- 每個條目只涵蓋一個具體概念，content 控制在 200-800 字\n"
+                f"已有設定（優先更新而非新建）：\n{toc}\n"
                 '格式：[{{"category": "分類", "topic": "主題", "content": "完整描述"}}]\n'
                 "可用分類：主神設定與規則/體系/商城/副本世界觀/場景/NPC/故事追蹤\n\n"
                 "## 2. 事件追蹤（events）\n"
@@ -692,16 +695,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
             saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False}
 
-            # Lore — dedup by topic
+            # Lore — upsert by topic (_save_lore_entry handles dedup)
             for entry in data.get("lore", []):
                 topic = entry.get("topic", "").strip()
-                if topic and topic not in existing_topics:
-                    entry["source"] = {
-                        "branch_id": branch_id,
-                        "msg_index": msg_index,
-                        "excerpt": gm_text[:100],
-                        "timestamp": datetime.now().isoformat(),
-                    }
+                if topic:
                     _save_lore_entry(story_id, entry)
                     existing_topics.add(topic)
                     saved_counts["lore"] += 1
