@@ -1604,7 +1604,7 @@ def api_status():
     """Return character state for a branch."""
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
-    state = _load_character_state(story_id, branch_id)
+    state = dict(_load_character_state(story_id, branch_id))
     state["world_day"] = get_world_day(story_id, branch_id)
     return jsonify(state)
 

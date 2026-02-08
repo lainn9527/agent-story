@@ -1656,4 +1656,7 @@ body {
   .summary-modal-body {
     padding: 14px 16px 16px;
   }
+
+  .header-sub { display: none; }
+  #world-day-display { font-size: 0.75rem; }
 }
