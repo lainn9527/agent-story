@@ -750,7 +750,7 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
       const descCount = countDescendants(branch.id);
       let msg = `確定要刪除分支「${branch.name}」？`;
       if (descCount > 0) {
-        msg += `\n（包含 ${descCount} 個子分支也會一併刪除）`;
+        msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
       }
       if (!(await showConfirm(msg))) return;
       const res = await API.deleteBranch(branch.id);
@@ -1050,7 +1050,7 @@ function _btRenderTree(container, modal) {
         e.stopPropagation();
         const desc = countDescendants(branch.id);
         let msg = `刪除「${branch.name}」？`;
-        if (desc > 0) msg += `\n（含 ${desc} 個子分支）`;
+        if (desc > 0) msg += `\n（${desc} 個子分支將重新掛載）`;
         if (!(await showConfirm(msg))) return;
         const res = await API.deleteBranch(branch.id);
         if (res.ok) {
@@ -1155,7 +1155,7 @@ async function _btDeleteSelected() {
   let totalDesc = 0;
   for (const id of deduped) totalDesc += countDescendants(id);
   let msg = `確定刪除 ${deduped.length} 個分支？`;
-  if (totalDesc > 0) msg += `\n（另含 ${totalDesc} 個子分支也會一併刪除）`;
+  if (totalDesc > 0) msg += `\n（另含 ${totalDesc} 個子分支將重新掛載）`;
   if (!(await showConfirm(msg))) return;
 
   // Sort leaf-first (most descendants = delete last)
@@ -1793,7 +1793,7 @@ function renderMessages(messages) {
           const branchToDelete = currentVariant.branch_id;
           const descCount = countDescendants(branchToDelete);
           let msg = "刪除此版本？";
-          if (descCount > 0) msg += `\n（含 ${descCount} 個子分支也會一併刪除）`;
+          if (descCount > 0) msg += `\n（${descCount} 個子分支將重新掛載）`;
           if (!(await showConfirm(msg))) return;
           try {
             const res = await API.deleteBranch(branchToDelete);
