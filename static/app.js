@@ -811,90 +811,134 @@ function pollForBranchTitle(branchId) {
 function renderBranchList() {
   $branchList.innerHTML = "";
 
-  // Collect root-level branches: main + blank branches (includes auto_ branches)
-  const roots = [];
+  // Split into user branches and auto branches
+  const userBranches = [];
+  const autoBranches = [];
   for (const b of Object.values(branches)) {
-    if (b.id === "main" || b.blank) roots.push(b);
+    if (b.id === "main" || (b.blank && !b.id.startsWith("auto_"))) {
+      userBranches.push(b);
+    } else if (b.id.startsWith("auto_")) {
+      autoBranches.push(b);
+    }
   }
   // Sort: main first, then by created_at
-  roots.sort((a, b) => {
+  const byDate = (a, b) => {
     if (a.id === "main") return -1;
     if (b.id === "main") return 1;
     return (a.created_at || "").localeCompare(b.created_at || "");
-  });
+  };
+  userBranches.sort(byDate);
+  autoBranches.sort(byDate);
 
-  for (const branch of roots) {
-    const item = document.createElement("div");
-    item.className = "drawer-item" + (branch.id === currentBranchId ? " active" : "");
+  // Render user branches
+  for (const branch of userBranches) {
+    $branchList.appendChild(_createBranchItem(branch));
+  }
 
-    const label = document.createElement("span");
-    label.className = "drawer-item-label";
-    label.textContent = branch.title || branch.name || branch.id;
-    label.title = branch.name || branch.id;
-    item.appendChild(label);
+  // Render auto branches in collapsible section
+  if (autoBranches.length > 0) {
+    const autoCurrentInside = autoBranches.some(b => b.id === currentBranchId);
 
-    if (branch.id.startsWith("auto_")) {
-      const badge = document.createElement("span");
-      badge.className = "auto-branch-badge";
-      badge.textContent = "AUTO";
-      item.appendChild(badge);
-    }
+    const header = document.createElement("div");
+    header.className = "auto-play-section-header";
 
-    // Action buttons (not for main)
-    if (branch.id !== "main") {
-      const ren = document.createElement("span");
-      ren.className = "drawer-item-action";
-      ren.textContent = "\u270E";
-      ren.title = "重新命名";
-      ren.addEventListener("click", (e) => {
-        e.stopPropagation();
-        startRenamingBranch(item, branch);
-      });
-      item.appendChild(ren);
+    const arrow = document.createElement("span");
+    arrow.className = "branch-toggle-arrow" + (autoCurrentInside ? " expanded" : "");
+    arrow.textContent = "\u25B6";
+    header.appendChild(arrow);
 
-      const del = document.createElement("span");
-      del.className = "drawer-item-action drawer-item-action-del";
-      del.textContent = "\u2715";
-      del.title = "刪除分支";
-      del.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const descCount = countDescendants(branch.id);
-        let msg = `確定要刪除分支「${branch.name}」？`;
-        if (descCount > 0) {
-          msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
-        }
-        if (!(await showConfirm(msg))) return;
-        const res = await API.deleteBranch(branch.id);
-        if (res.ok) {
-          await loadBranches();
-          if (currentBranchId === branch.id || !branches[currentBranchId]) {
-            await switchToBranch(res.switch_to || "main");
-          }
-          renderBranchList();
-        } else {
-          showAlert(res.error || "刪除失敗");
-        }
-      });
-      item.appendChild(del);
-    }
+    const headerLabel = document.createElement("span");
+    headerLabel.textContent = "Auto-Play (" + autoBranches.length + ")";
+    header.appendChild(headerLabel);
 
-    // Branch ID tag (skip for main — redundant)
-    if (branch.id !== "main") {
-      const idTag = document.createElement("div");
-      idTag.className = "branch-id-tag";
-      idTag.textContent = branch.id;
-      item.appendChild(idTag);
-    }
+    const container = document.createElement("div");
+    container.className = "branch-group-children" + (autoCurrentInside ? "" : " collapsed");
 
-    item.addEventListener("click", () => {
-      if (branch.id !== currentBranchId) {
-        switchToBranch(branch.id);
-        closeDrawer();
-      }
+    header.addEventListener("click", () => {
+      container.classList.toggle("collapsed");
+      arrow.classList.toggle("expanded");
     });
 
-    $branchList.appendChild(item);
+    for (const branch of autoBranches) {
+      container.appendChild(_createBranchItem(branch));
+    }
+
+    $branchList.appendChild(header);
+    $branchList.appendChild(container);
   }
+}
+
+function _createBranchItem(branch) {
+  const item = document.createElement("div");
+  item.className = "drawer-item" + (branch.id === currentBranchId ? " active" : "");
+
+  const label = document.createElement("span");
+  label.className = "drawer-item-label";
+  label.textContent = branch.title || branch.name || branch.id;
+  label.title = branch.name || branch.id;
+  item.appendChild(label);
+
+  if (branch.id.startsWith("auto_")) {
+    const badge = document.createElement("span");
+    badge.className = "auto-branch-badge";
+    badge.textContent = "AUTO";
+    item.appendChild(badge);
+  }
+
+  // Action buttons (not for main)
+  if (branch.id !== "main") {
+    const ren = document.createElement("span");
+    ren.className = "drawer-item-action";
+    ren.textContent = "\u270E";
+    ren.title = "重新命名";
+    ren.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startRenamingBranch(item, branch);
+    });
+    item.appendChild(ren);
+
+    const del = document.createElement("span");
+    del.className = "drawer-item-action drawer-item-action-del";
+    del.textContent = "\u2715";
+    del.title = "刪除分支";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const descCount = countDescendants(branch.id);
+      let msg = `確定要刪除分支「${branch.name}」？`;
+      if (descCount > 0) {
+        msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
+      }
+      if (!(await showConfirm(msg))) return;
+      const res = await API.deleteBranch(branch.id);
+      if (res.ok) {
+        await loadBranches();
+        if (currentBranchId === branch.id || !branches[currentBranchId]) {
+          await switchToBranch(res.switch_to || "main");
+        }
+        renderBranchList();
+      } else {
+        showAlert(res.error || "刪除失敗");
+      }
+    });
+    item.appendChild(del);
+  }
+
+  // Branch ID tag (skip for main — redundant)
+  if (branch.id !== "main") {
+    const idTag = document.createElement("div");
+    idTag.className = "branch-id-tag";
+    idTag.textContent = branch.id;
+    item.appendChild(idTag);
+  }
+
+  item.addEventListener("click", () => {
+    if (branch.id !== currentBranchId) {
+      switchToBranch(branch.id);
+      closeDrawer();
+    }
+  });
+
+  return item;
 }
 
 function startRenamingBranch(item, branch) {
