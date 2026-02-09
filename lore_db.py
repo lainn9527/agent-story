@@ -1,9 +1,16 @@
-"""SQLite FTS5 search engine for world_lore — supports CJK full-text + tag search."""
+"""SQLite FTS5 search engine for world_lore — supports CJK full-text + embedding hybrid search."""
 
+import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
+import threading
+
+import numpy as np
+
+log = logging.getLogger("rpg")
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -14,6 +21,10 @@ STORIES_DIR = os.path.join(DATA_DIR, "stories")
 
 _TAG_RE = re.compile(r"\[tag:\s*([^\]]+)\]")
 _INLINE_META_RE = re.compile(r"\s*\[(?:tag|source):\s*[^\]]*\]")
+
+EMBEDDING_DIM = 768
+RRF_K = 60  # Reciprocal Rank Fusion constant
+DEFAULT_TOKEN_BUDGET = 3000  # ~3000 CJK chars ≈ 3000 tokens
 
 
 def _db_path(story_id: str) -> str:
@@ -70,6 +81,71 @@ def _ensure_tables(conn: sqlite3.Connection):
             VALUES (new.id, new.topic, new.content, new.category, new.tags);
         END;
     """)
+    # Safe migration: add embedding columns if not yet present
+    for col, typ in [("embedding", "BLOB"), ("text_hash", "TEXT")]:
+        try:
+            conn.execute(f"ALTER TABLE lore ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+
+# ---------------------------------------------------------------------------
+# Embedding cache (in-memory per story_id)
+# ---------------------------------------------------------------------------
+
+_embedding_cache: dict[str, dict] = {}  # story_id → {"matrix": ndarray, "ids": list, "categories": list}
+_cache_lock = threading.Lock()
+
+
+def _compute_text_hash(topic: str, content: str) -> str:
+    return hashlib.sha256(f"{topic}\n{content}".encode("utf-8")).hexdigest()[:16]
+
+
+def _load_embedding_cache(story_id: str) -> dict | None:
+    """Load all embeddings from SQLite into numpy matrix. Returns cache dict or None."""
+    with _cache_lock:
+        cached = _embedding_cache.get(story_id)
+        if cached is not None:
+            return cached
+
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        "SELECT id, category, embedding FROM lore WHERE embedding IS NOT NULL ORDER BY id"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return None
+
+    ids = []
+    categories = []
+    vectors = []
+    for row in rows:
+        emb_bytes = row["embedding"]
+        if emb_bytes and len(emb_bytes) == EMBEDDING_DIM * 4:
+            ids.append(row["id"])
+            categories.append(row["category"])
+            vectors.append(np.frombuffer(emb_bytes, dtype=np.float32))
+
+    if not vectors:
+        return None
+
+    matrix = np.stack(vectors)  # (N, 768)
+    # Normalize rows for cosine similarity via dot product
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0] = 1  # avoid division by zero
+    matrix = matrix / norms
+
+    cache = {"matrix": matrix, "ids": ids, "categories": categories}
+    with _cache_lock:
+        _embedding_cache[story_id] = cache
+    return cache
+
+
+def _invalidate_cache(story_id: str):
+    with _cache_lock:
+        _embedding_cache.pop(story_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -112,17 +188,25 @@ def rebuild_index(story_id: str):
         if content.startswith("（待建立）"):
             continue
         tags = extract_tags(content)
+        topic = entry.get("topic", "")
+        text_hash = _compute_text_hash(topic, content)
         conn.execute(
-            "INSERT OR REPLACE INTO lore (category, topic, content, tags) VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO lore (category, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?)",
             (
                 entry.get("category", "其他"),
-                entry.get("topic", ""),
+                topic,
                 content,
                 ",".join(tags),
+                text_hash,
             ),
         )
     conn.commit()
     conn.close()
+
+    _invalidate_cache(story_id)
+
+    # Trigger background embedding if any entries lack embeddings
+    _embed_all_if_needed(story_id)
 
 
 def upsert_entry(story_id: str, entry: dict):
@@ -139,23 +223,143 @@ def upsert_entry(story_id: str, entry: dict):
         conn.close()
         return
 
-    existing = conn.execute("SELECT id FROM lore WHERE topic = ?", (topic,)).fetchone()
+    new_hash = _compute_text_hash(topic, content)
+    existing = conn.execute("SELECT id, text_hash FROM lore WHERE topic = ?", (topic,)).fetchone()
+
+    hash_changed = True
     if existing:
+        if existing["text_hash"] == new_hash:
+            hash_changed = False
         conn.execute(
-            "UPDATE lore SET category=?, content=?, tags=? WHERE topic=?",
-            (entry.get("category", "其他"), content, ",".join(tags), topic),
+            "UPDATE lore SET category=?, content=?, tags=?, text_hash=? WHERE topic=?",
+            (entry.get("category", "其他"), content, ",".join(tags), new_hash, topic),
         )
     else:
         conn.execute(
-            "INSERT INTO lore (category, topic, content, tags) VALUES (?, ?, ?, ?)",
-            (entry.get("category", "其他"), topic, content, ",".join(tags)),
+            "INSERT INTO lore (category, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?)",
+            (entry.get("category", "其他"), topic, content, ",".join(tags), new_hash),
         )
     conn.commit()
     conn.close()
 
+    if hash_changed:
+        _invalidate_cache(story_id)
+        _embed_single_async(story_id, topic, content)
+
 
 # ---------------------------------------------------------------------------
-# Search
+# Background embedding
+# ---------------------------------------------------------------------------
+
+def _embed_single_async(story_id: str, topic: str, content: str):
+    """Embed a single entry in a background daemon thread."""
+    def _do():
+        try:
+            from llm_bridge import embed_text
+            text = f"{topic}\n{content}"
+            vec = embed_text(text, task_type="RETRIEVAL_DOCUMENT")
+            if vec and len(vec) == EMBEDDING_DIM:
+                emb_bytes = np.array(vec, dtype=np.float32).tobytes()
+                text_hash = _compute_text_hash(topic, content)
+                conn = _get_conn(story_id)
+                conn.execute(
+                    "UPDATE lore SET embedding=?, text_hash=? WHERE topic=?",
+                    (emb_bytes, text_hash, topic),
+                )
+                conn.commit()
+                conn.close()
+                _invalidate_cache(story_id)
+                log.info("lore_db: embedded '%s'", topic)
+        except Exception as e:
+            log.warning("lore_db: _embed_single_async failed for '%s' — %s", topic, e)
+
+    t = threading.Thread(target=_do, daemon=True)
+    t.start()
+
+
+def _embed_all_if_needed(story_id: str):
+    """If any entries lack embeddings, batch-embed all missing ones in background."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    missing = conn.execute(
+        "SELECT COUNT(*) as cnt FROM lore WHERE embedding IS NULL"
+    ).fetchone()["cnt"]
+    conn.close()
+
+    if missing == 0:
+        return
+
+    def _do():
+        try:
+            embed_all_entries(story_id)
+        except Exception as e:
+            log.warning("lore_db: _embed_all_if_needed failed — %s", e)
+
+    t = threading.Thread(target=_do, daemon=True)
+    t.start()
+
+
+def embed_all_entries(story_id: str):
+    """Batch-embed all entries that are missing embeddings. Blocking call."""
+    from llm_bridge import embed_texts_batch
+    import time
+
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        "SELECT id, topic, content FROM lore WHERE embedding IS NULL ORDER BY id"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return
+
+    log.info("lore_db: embedding %d entries for story %s", len(rows), story_id)
+    batch_size = 100
+
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        texts = [f"{r['topic']}\n{r['content']}" for r in batch]
+
+        vectors = embed_texts_batch(texts, task_type="RETRIEVAL_DOCUMENT")
+        if not vectors:
+            log.warning("lore_db: batch embed returned None at offset %d", i)
+            continue
+
+        conn = _get_conn(story_id)
+        for row, vec in zip(batch, vectors):
+            if vec and len(vec) == EMBEDDING_DIM:
+                emb_bytes = np.array(vec, dtype=np.float32).tobytes()
+                text_hash = _compute_text_hash(row["topic"], row["content"])
+                conn.execute(
+                    "UPDATE lore SET embedding=?, text_hash=? WHERE id=?",
+                    (emb_bytes, text_hash, row["id"]),
+                )
+        conn.commit()
+        conn.close()
+
+        log.info("lore_db: embedded batch %d-%d/%d", i, i + len(batch), len(rows))
+        if i + batch_size < len(rows):
+            time.sleep(1)  # rate limit: 100 RPM
+
+    _invalidate_cache(story_id)
+    log.info("lore_db: embedding complete for story %s", story_id)
+
+
+def get_embedding_stats(story_id: str) -> dict:
+    """Return embedding coverage stats."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    total = conn.execute("SELECT COUNT(*) as cnt FROM lore").fetchone()["cnt"]
+    embedded = conn.execute(
+        "SELECT COUNT(*) as cnt FROM lore WHERE embedding IS NOT NULL"
+    ).fetchone()["cnt"]
+    conn.close()
+    return {"total": total, "embedded": embedded}
+
+
+# ---------------------------------------------------------------------------
+# Search — keyword (existing CJK bigram)
 # ---------------------------------------------------------------------------
 
 def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
@@ -179,7 +383,7 @@ def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
         keywords = {query}
 
     # Score each entry by how many keywords match
-    rows = conn.execute("SELECT category, topic, content, tags FROM lore").fetchall()
+    rows = conn.execute("SELECT id, category, topic, content, tags FROM lore").fetchall()
     scored = []
     for row in rows:
         text = f"{row['topic']} {row['content']} {row['tags']}"
@@ -195,6 +399,7 @@ def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
                     score += 1
         if score > 0:
             scored.append({
+                "id": row["id"],
                 "category": row["category"],
                 "topic": row["topic"],
                 "content": row["content"],
@@ -207,6 +412,148 @@ def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
     conn.close()
     return scored[:limit]
 
+
+# ---------------------------------------------------------------------------
+# Search — embedding (cosine similarity)
+# ---------------------------------------------------------------------------
+
+def _search_embedding(story_id: str, query: str, limit: int = 20) -> list[dict]:
+    """Search lore by embedding similarity. Returns entries with cosine scores."""
+    cache = _load_embedding_cache(story_id)
+    if cache is None:
+        return []
+
+    from llm_bridge import embed_text
+    query_vec = embed_text(query, task_type="RETRIEVAL_QUERY")
+    if not query_vec or len(query_vec) != EMBEDDING_DIM:
+        return []
+
+    q = np.array(query_vec, dtype=np.float32)
+    q_norm = np.linalg.norm(q)
+    if q_norm == 0:
+        return []
+    q = q / q_norm
+
+    # Cosine similarity = dot product (both normalized)
+    similarities = cache["matrix"] @ q  # (N,)
+
+    # Get top-k indices
+    k = min(limit, len(similarities))
+    top_indices = np.argpartition(similarities, -k)[-k:]
+    top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
+
+    # Fetch full entries for matched IDs
+    matched_ids = [cache["ids"][i] for i in top_indices]
+    scores = [float(similarities[i]) for i in top_indices]
+
+    conn = _get_conn(story_id)
+    results = []
+    for row_id, score in zip(matched_ids, scores):
+        row = conn.execute(
+            "SELECT id, category, topic, content, tags FROM lore WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        if row:
+            results.append({
+                "id": row["id"],
+                "category": row["category"],
+                "topic": row["topic"],
+                "content": row["content"],
+                "tags": row["tags"],
+                "emb_score": score,
+            })
+    conn.close()
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Search — hybrid (RRF fusion)
+# ---------------------------------------------------------------------------
+
+def search_hybrid(
+    story_id: str,
+    query: str,
+    token_budget: int = DEFAULT_TOKEN_BUDGET,
+    context: dict | None = None,
+) -> list[dict]:
+    """Hybrid search: combine keyword + embedding results via RRF.
+
+    context: optional dict with "phase" and "status" for category boosting.
+    Returns entries up to token_budget.
+    """
+    # Keyword search (top 20)
+    kw_results = search_lore(story_id, query, limit=20)
+
+    # Embedding search (top 20)
+    emb_results = _search_embedding(story_id, query, limit=20)
+
+    if not kw_results and not emb_results:
+        return []
+
+    # Build rank maps: id → rank (1-based)
+    kw_rank = {}
+    for rank, r in enumerate(kw_results, 1):
+        kw_rank[r["id"]] = rank
+
+    emb_rank = {}
+    for rank, r in enumerate(emb_results, 1):
+        emb_rank[r["id"]] = rank
+
+    # Merge all candidates
+    all_ids = set(kw_rank.keys()) | set(emb_rank.keys())
+    candidates = {}  # id → entry dict
+    for r in kw_results + emb_results:
+        if r["id"] not in candidates:
+            candidates[r["id"]] = r
+
+    # RRF scoring
+    rrf_scores = {}
+    for entry_id in all_ids:
+        score = 0.0
+        if entry_id in emb_rank:
+            score += 1.0 / (RRF_K + emb_rank[entry_id])
+        if entry_id in kw_rank:
+            score += 1.0 / (RRF_K + kw_rank[entry_id])
+        rrf_scores[entry_id] = score
+
+    # Location pinning: boost categories based on game phase
+    if context:
+        phase = context.get("phase", "")
+        status = context.get("status", "")
+        boost_categories = set()
+        if "副本" in phase:
+            boost_categories.add("副本世界觀")
+        if "主神空間" in phase or "空間" in phase:
+            boost_categories.update(["主神設定與規則", "商城", "場景"])
+        if "戰鬥" in status:
+            boost_categories.add("體系")
+
+        if boost_categories:
+            for entry_id, entry in candidates.items():
+                if entry["category"] in boost_categories:
+                    rrf_scores[entry_id] *= 1.5
+
+    # Sort by RRF score
+    sorted_ids = sorted(all_ids, key=lambda x: rrf_scores[x], reverse=True)
+
+    # Token-budgeted selection
+    results = []
+    tokens_used = 0
+    for entry_id in sorted_ids:
+        entry = candidates[entry_id]
+        # Estimate: 1 CJK char ≈ 1 token
+        entry_tokens = len(entry.get("content", "")) + len(entry.get("topic", "")) + 20  # header overhead
+        if tokens_used + entry_tokens > token_budget and results:
+            break
+        results.append(entry)
+        tokens_used += entry_tokens
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Search — public API
+# ---------------------------------------------------------------------------
 
 def search_by_tags(story_id: str, tags: list[str], limit: int = 10) -> list[dict]:
     """Find entries that match any of the given tags."""
@@ -240,6 +587,15 @@ def get_all_entries(story_id: str) -> list[dict]:
     ]
     conn.close()
     return results
+
+
+def get_entry_count(story_id: str) -> int:
+    """Return the total number of indexed lore entries."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    count = conn.execute("SELECT COUNT(*) as cnt FROM lore").fetchone()["cnt"]
+    conn.close()
+    return count
 
 
 def get_toc(story_id: str) -> str:
@@ -303,20 +659,31 @@ def delete_entry(story_id: str, topic: str):
     conn.execute("DELETE FROM lore WHERE topic = ?", (topic,))
     conn.commit()
     conn.close()
+    _invalidate_cache(story_id)
 
 
-def search_relevant_lore(story_id: str, user_message: str, limit: int = 5) -> str:
-    """Search for lore relevant to a user message. Returns formatted text for injection."""
-    # Just use the main search function which handles CJK bigram extraction
-    results = search_lore(story_id, user_message, limit=limit)
+def search_relevant_lore(
+    story_id: str,
+    user_message: str,
+    limit: int = 5,
+    context: dict | None = None,
+) -> str:
+    """Search for lore relevant to a user message. Returns formatted text for injection.
+
+    Uses hybrid search (embedding + keyword) when embeddings are available,
+    falls back to keyword-only search otherwise.
+    """
+    results = search_hybrid(
+        story_id, user_message,
+        token_budget=DEFAULT_TOKEN_BUDGET,
+        context=context,
+    )
 
     if not results:
         return ""
 
-    entries = results
-
     lines = ["[相關世界設定]"]
-    for e in entries:
+    for e in results:
         # Strip inline [tag: ...] and [source: ...] markers — already indexed in tags column
         content = _INLINE_META_RE.sub("", e["content"]).strip()
         if len(content) > 800:
@@ -326,3 +693,60 @@ def search_relevant_lore(story_id: str, user_message: str, limit: int = 5) -> st
         lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate detection (embedding-based)
+# ---------------------------------------------------------------------------
+
+def find_duplicates(story_id: str, threshold: float = 0.90) -> list[dict]:
+    """Find near-duplicate lore entries via embedding cosine similarity.
+
+    Returns pairs with similarity > threshold.
+    """
+    cache = _load_embedding_cache(story_id)
+    if cache is None or len(cache["ids"]) < 2:
+        return []
+
+    matrix = cache["matrix"]  # already normalized
+    n = matrix.shape[0]
+
+    # Pairwise cosine similarity (dot product of normalized vectors)
+    sim_matrix = matrix @ matrix.T  # (N, N)
+
+    # Find pairs above threshold (upper triangle only)
+    pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            sim = float(sim_matrix[i, j])
+            if sim >= threshold:
+                pairs.append({
+                    "id_a": cache["ids"][i],
+                    "id_b": cache["ids"][j],
+                    "similarity": round(sim, 4),
+                })
+
+    if not pairs:
+        return []
+
+    # Sort by similarity descending
+    pairs.sort(key=lambda x: x["similarity"], reverse=True)
+
+    # Enrich with entry details
+    conn = _get_conn(story_id)
+    enriched = []
+    for p in pairs:
+        a = conn.execute(
+            "SELECT category, topic, content FROM lore WHERE id=?", (p["id_a"],)
+        ).fetchone()
+        b = conn.execute(
+            "SELECT category, topic, content FROM lore WHERE id=?", (p["id_b"],)
+        ).fetchone()
+        if a and b:
+            enriched.append({
+                "entry_a": {"category": a["category"], "topic": a["topic"], "content": a["content"][:200]},
+                "entry_b": {"category": b["category"], "topic": b["topic"], "content": b["content"][:200]},
+                "similarity": p["similarity"],
+            })
+    conn.close()
+    return enriched

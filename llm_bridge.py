@@ -225,6 +225,38 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 
 
 # ---------------------------------------------------------------------------
+# Embedding (always uses Gemini — Claude CLI has no embedding API)
+# ---------------------------------------------------------------------------
+
+def _get_gemini_cfg() -> dict | None:
+    """Return Gemini config if keys are configured, else None."""
+    cfg = _get_config()
+    g = cfg.get("gemini", {})
+    from gemini_key_manager import load_keys
+    if not load_keys(g):
+        return None
+    return g
+
+
+def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float] | None:
+    """Embed a single text via Gemini. Returns 768-dim vector or None."""
+    g = _get_gemini_cfg()
+    if not g:
+        return None
+    from gemini_bridge import embed_text as _embed
+    return _embed(text, gemini_cfg=g, task_type=task_type)
+
+
+def embed_texts_batch(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]] | None:
+    """Batch-embed up to 100 texts via Gemini. Returns list of vectors or None."""
+    g = _get_gemini_cfg()
+    if not g:
+        return None
+    from gemini_bridge import embed_texts_batch as _batch
+    return _batch(texts, gemini_cfg=g, task_type=task_type)
+
+
+# ---------------------------------------------------------------------------
 # Web-grounded search (always uses Gemini for Google Search grounding)
 # ---------------------------------------------------------------------------
 
