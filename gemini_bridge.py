@@ -14,7 +14,8 @@ log = logging.getLogger("rpg")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-GEMINI_TIMEOUT = 120  # seconds
+GEMINI_TIMEOUT = 120  # seconds (connection timeout)
+GEMINI_READ_TIMEOUT = 90  # seconds (per-chunk read timeout for SSE stream)
 
 # Build SSL context using certifi certificates (fixes macOS SSL issues)
 try:
@@ -310,6 +311,11 @@ def call_gemini_gm_stream(
         yield ("error", "所有 Gemini API key 都失敗")
         return
 
+    # Set socket-level read timeout so readline() won't block forever
+    sock = resp.fp.raw._sock if hasattr(resp.fp, 'raw') else None
+    if sock:
+        sock.settimeout(GEMINI_READ_TIMEOUT)
+
     accumulated = ""
     truncated = False
     grounding_metadata = None
@@ -373,6 +379,17 @@ def call_gemini_gm_stream(
                      grounding.get("searchQueries", []))
         yield ("done", done_payload)
 
+    except (TimeoutError, OSError) as e:
+        elapsed = time.time() - t0
+        log.info("    gemini_bridge_stream: read timeout after %.1fs — %s", elapsed, e)
+        try:
+            resp.close()
+        except Exception:
+            pass
+        if accumulated:
+            yield ("done", {"response": accumulated, "session_id": None})
+        else:
+            yield ("error", f"Gemini API 串流逾時（{GEMINI_READ_TIMEOUT}s 無回應）")
     except Exception as e:
         log.info("    gemini_bridge_stream: EXCEPTION %s", e)
         try:
