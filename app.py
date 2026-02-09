@@ -446,11 +446,30 @@ def _load_npcs(story_id: str, branch_id: str = "main") -> list[dict]:
 
 
 def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
-    """Save or update an NPC entry. Matches by 'name' field."""
+    """Save or update an NPC entry. Matches by 'name' field.
+
+    Merge rules:
+    - Filter out None / empty-string values to prevent null pollution
+    - personality dict: deep-merge (preserve existing Big5 scores)
+    - notable_traits list: union merge (deduplicate)
+    - offscreen_adventures list: append (keep latest 5)
+    """
     npcs = _load_npcs(story_id, branch_id)
     name = npc_data.get("name", "").strip()
     if not name:
         return
+
+    # Filter out None and empty-string values from incoming data
+    cleaned = {}
+    for k, v in npc_data.items():
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        if isinstance(v, dict) and not v:
+            continue
+        cleaned[k] = v
+    npc_data = cleaned
 
     # Generate id if not present
     if "id" not in npc_data:
@@ -458,6 +477,30 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
 
     for i, existing in enumerate(npcs):
         if existing.get("name") == name:
+            # Deep-merge personality dict (preserve existing Big5 scores)
+            if "personality" in npc_data and isinstance(npc_data["personality"], dict):
+                old_p = existing.get("personality", {})
+                if isinstance(old_p, dict):
+                    merged_p = {**old_p, **{k: v for k, v in npc_data["personality"].items() if v is not None}}
+                    npc_data["personality"] = merged_p
+
+            # Union-merge notable_traits (deduplicate)
+            if "notable_traits" in npc_data and isinstance(npc_data["notable_traits"], list):
+                old_traits = existing.get("notable_traits", [])
+                if isinstance(old_traits, list):
+                    combined = list(old_traits)
+                    for t in npc_data["notable_traits"]:
+                        if t and t not in combined:
+                            combined.append(t)
+                    npc_data["notable_traits"] = combined
+
+            # Append offscreen_adventures (keep latest 5)
+            if "offscreen_adventures" in npc_data and isinstance(npc_data["offscreen_adventures"], list):
+                old_adventures = existing.get("offscreen_adventures", [])
+                if isinstance(old_adventures, list):
+                    combined = list(old_adventures) + npc_data["offscreen_adventures"]
+                    npc_data["offscreen_adventures"] = combined[-5:]
+
             # Merge: preserve fields not in update
             merged = {**existing, **npc_data}
             npcs[i] = merged
@@ -474,29 +517,145 @@ def _copy_npcs_to_branch(story_id: str, from_branch_id: str, to_branch_id: str):
     _save_json(_story_npcs_path(story_id, to_branch_id), npcs)
 
 
+# Role keywords for NPC classification.
+# Active NPCs get rich format in system prompt; offscreen-eligible NPCs get adventures.
+# Uses substring matching to handle compound roles like "隊友/智囊" or "輪迴者/隊友".
+_ACTIVE_ROLE_KEYWORDS = {"隊友", "重要NPC", "敵人", "boss", "夥伴", "盟友"}
+_OFFSCREEN_ROLE_KEYWORDS = {"隊友", "重要NPC", "夥伴", "盟友"}  # exclude 敵人/boss
+
+
+def _is_active_npc(role: str) -> bool:
+    """Check if a role qualifies as an active NPC (rich format in system prompt)."""
+    return any(keyword in role for keyword in _ACTIVE_ROLE_KEYWORDS)
+
+
+def _is_offscreen_eligible(role: str) -> bool:
+    """Check if a role qualifies for offscreen adventures (friendly NPCs only)."""
+    return any(keyword in role for keyword in _OFFSCREEN_ROLE_KEYWORDS)
+
+
+def _big5_to_behavioral_hints(personality: dict) -> list[str]:
+    """Convert extreme Big5 scores (<=3 or >=8) to actionable behavioral hints for the GM."""
+    hints = []
+    if not isinstance(personality, dict):
+        return hints
+
+    o = personality.get("openness")
+    c = personality.get("conscientiousness")
+    e = personality.get("extraversion")
+    a = personality.get("agreeableness")
+    n = personality.get("neuroticism")
+
+    if isinstance(e, (int, float)):
+        if e >= 8:
+            hints.append("話多，主動搭話，喜歡成為焦點")
+        elif e <= 3:
+            hints.append("沉默寡言，不主動交流，偏好獨處")
+    if isinstance(n, (int, float)):
+        if n >= 8:
+            hints.append("情緒波動大，壓力下容易崩潰或暴怒")
+        elif n <= 3:
+            hints.append("極度冷靜，幾乎不受情緒影響")
+    if isinstance(a, (int, float)):
+        if a >= 8:
+            hints.append("樂於助人，容易心軟，不忍拒絕")
+        elif a <= 3:
+            hints.append("不留情面，直言不諱，容易與人起衝突")
+    if isinstance(o, (int, float)):
+        if o >= 8:
+            hints.append("好奇心旺盛，樂於嘗試未知事物")
+        elif o <= 3:
+            hints.append("保守固執，排斥新事物和改變")
+    if isinstance(c, (int, float)):
+        if c >= 8:
+            hints.append("做事嚴謹有計劃，不容許馬虎")
+        elif c <= 3:
+            hints.append("散漫隨性，不喜歡規則和計劃")
+
+    return hints
+
+
 def _build_npc_text(story_id: str, branch_id: str = "main") -> str:
-    """Build NPC profiles text for system prompt injection."""
+    """Build NPC profiles text for system prompt injection.
+
+    Active NPCs (隊友/重要NPC/敵人) get full rich format with behavioral hints.
+    Background NPCs get a single-line summary.
+    """
     npcs = _load_npcs(story_id, branch_id)
     if not npcs:
         return "（尚無已記錄的 NPC）"
 
-    lines = []
-    for npc in npcs:
-        lines.append(f"### {npc.get('name', '?')}（{npc.get('role', '?')}）")
-        if npc.get("appearance"):
-            lines.append(f"- 外觀：{npc['appearance']}")
-        p = npc.get("personality", {})
-        if isinstance(p, dict) and p.get("summary"):
-            lines.append(f"- 性格：{p['summary']}")
-        if npc.get("relationship_to_player"):
-            lines.append(f"- 與主角關係：{npc['relationship_to_player']}")
-        if npc.get("current_status"):
-            lines.append(f"- 狀態：{npc['current_status']}")
-        if npc.get("notable_traits"):
-            lines.append(f"- 特質：{'、'.join(npc['notable_traits'])}")
-        lines.append("")
+    active_lines = []
+    background_npcs = []
 
-    return "\n".join(lines).strip()
+    for npc in npcs:
+        role = npc.get("role", "?")
+        name = npc.get("name", "?")
+
+        if _is_active_npc(role):
+            lines = [f"### {name}（{role}）"]
+            if npc.get("appearance"):
+                lines.append(f"- 外觀：{npc['appearance']}")
+            p = npc.get("personality", {})
+            if isinstance(p, dict) and p.get("summary"):
+                lines.append(f"- 性格：{p['summary']}")
+            # Behavioral hints from extreme Big5 values
+            hints = _big5_to_behavioral_hints(p)
+            if hints:
+                lines.append(f"- 行為傾向：{'；'.join(hints)}")
+            if npc.get("speech_pattern"):
+                lines.append(f"- 說話方式：{npc['speech_pattern']}")
+            if npc.get("catchphrase"):
+                lines.append(f"- 口頭禪：「{npc['catchphrase']}」")
+            if npc.get("motivation"):
+                lines.append(f"- 核心動機：{npc['motivation']}")
+            if npc.get("backstory"):
+                lines.append(f"- 背景：{npc['backstory']}")
+            if npc.get("stress_response"):
+                lines.append(f"- 壓力反應：{npc['stress_response']}")
+            if npc.get("secret"):
+                lines.append(f"- 隱藏秘密（玩家未知）：{npc['secret']}")
+            if npc.get("fear"):
+                lines.append(f"- 恐懼/觸發點：{npc['fear']}")
+            if npc.get("relationship_to_player"):
+                lines.append(f"- 與主角關係：{npc['relationship_to_player']}")
+            if npc.get("current_status"):
+                lines.append(f"- 狀態：{npc['current_status']}")
+            if npc.get("notable_traits"):
+                lines.append(f"- 特質：{'、'.join(npc['notable_traits'])}")
+            # Latest offscreen adventure hook
+            adventures = npc.get("offscreen_adventures", [])
+            if adventures:
+                latest = adventures[-1]
+                hook = latest.get("story_hook", "")
+                summary = latest.get("adventure_summary", "")
+                if summary:
+                    line = f"- 近期經歷：{summary}"
+                    if hook:
+                        line += f"\n  → 可聊話題：{hook}"
+                    lines.append(line)
+            active_lines.extend(lines)
+            active_lines.append("")
+        else:
+            # Background NPC — single-line summary
+            p = npc.get("personality", {})
+            summary = p.get("summary", "") if isinstance(p, dict) else ""
+            status = npc.get("current_status", "")
+            parts = [f"{name}（{role}"]
+            if summary:
+                parts[0] += f"，{summary}"
+            if status:
+                parts[0] += f"，{status}"
+            parts[0] += "）"
+            background_npcs.append("- " + parts[0])
+
+    result_lines = active_lines
+    if background_npcs:
+        result_lines.append("### 其他已知角色")
+        result_lines.extend(background_npcs)
+        result_lines.append("")
+
+    return "\n".join(result_lines).strip()
 
 
 def _story_lore_path(story_id: str) -> str:
@@ -738,10 +897,18 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
                 "可用狀態：planted/triggered/resolved\n\n"
                 "## 3. NPC 資料（npcs）\n"
-                "提取首次登場或有重大變化的 NPC。\n"
+                "提取首次登場或有重大變化的 NPC。不確定的欄位直接省略，不要填 null。\n"
                 '格式：[{{"name": "名字", "role": "定位", "appearance": "外觀", '
                 '"personality": {{"openness": N, "conscientiousness": N, "extraversion": N, '
-                '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
+                '"agreeableness": N, "neuroticism": N, "summary": "一句話性格描述"}}, '
+                '"backstory": "背景", '
+                '"speech_pattern": "說話風格（如：粗俗直白，常帶髒話）", '
+                '"catchphrase": "口頭禪", '
+                '"motivation": "核心動機（如：活著回去，保護弟弟）", '
+                '"stress_response": "壓力反應（如：暴怒咆哮，先動手再想）", '
+                '"secret": "隱藏秘密（GM知道但玩家未知的）", '
+                '"fear": "恐懼或心理觸發點"'
+                '}}]\n\n'
                 "## 4. 角色狀態變化（state）\n"
                 f"Schema 告訴你角色有哪些欄位：\n{schema_summary}\n"
                 f"角色目前有這些欄位：{existing_state_keys}\n\n"
@@ -867,6 +1034,159 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
     t.start()
 
 
+# ---------------------------------------------------------------------------
+# Helpers — Offscreen adventures
+# ---------------------------------------------------------------------------
+
+# Per-branch debounce: prevent duplicate triggers on the same return-to-hub
+_offscreen_triggered: set[tuple[str, str]] = set()
+_offscreen_lock = threading.Lock()
+
+
+def _dungeon_enter_day_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "dungeon_enter_day.json")
+
+
+def _record_dungeon_enter_day(story_id: str, branch_id: str):
+    """Record the world day when player enters a dungeon."""
+    wd = get_world_day(story_id, branch_id)
+    _save_json(_dungeon_enter_day_path(story_id, branch_id), wd)
+    log.info("    offscreen: recorded dungeon entry at day %s, hour %s",
+             wd.get("day", 1), wd.get("hour", 0))
+
+
+def _trigger_offscreen_adventures_debounced(story_id: str, branch_id: str):
+    """Debounced trigger for offscreen adventures on return to hub."""
+    key = (story_id, branch_id)
+    with _offscreen_lock:
+        if key in _offscreen_triggered:
+            return
+        _offscreen_triggered.add(key)
+    _trigger_offscreen_adventures(story_id, branch_id)
+
+
+def _trigger_offscreen_adventures(story_id: str, branch_id: str):
+    """Generate offscreen adventures for NPC teammates while player was in dungeon.
+
+    Runs in a background thread via call_oneshot().
+    """
+    npcs = _load_npcs(story_id, branch_id)
+    # Filter to offscreen-eligible NPC roles (friendly NPCs only, not enemies)
+    candidates = [n for n in npcs if _is_offscreen_eligible(n.get("role", ""))]
+    if not candidates:
+        log.info("    offscreen: no active NPCs to generate adventures for")
+        # Clear debounce flag since nothing to do
+        _offscreen_triggered.discard((story_id, branch_id))
+        return
+
+    # Calculate elapsed days (guard against missing dungeon_enter_day.json on edit/regen branches)
+    enter_path = _dungeon_enter_day_path(story_id, branch_id)
+    enter_day = _load_json(enter_path, {})
+    if not enter_day:
+        # No entry record (e.g. edit/regen branch) — use conservative default
+        elapsed_days = 3
+        log.info("    offscreen: no dungeon_enter_day.json found, using default %d days", elapsed_days)
+    else:
+        current_wd = get_world_day(story_id, branch_id)
+        elapsed_days = max(1, min(30, current_wd.get("day", 1) - enter_day.get("day", 1)))
+
+    # Build NPC descriptions
+    npc_descs = []
+    for npc in candidates:
+        name = npc.get("name", "?")
+        role = npc.get("role", "?")
+        p = npc.get("personality", {})
+        summary = p.get("summary", "") if isinstance(p, dict) else ""
+        motivation = npc.get("motivation", "")
+        backstory = npc.get("backstory", "")
+        # Last adventure summary for anti-repeat
+        adventures = npc.get("offscreen_adventures", [])
+        last_adv = adventures[-1].get("adventure_summary", "") if adventures else ""
+        desc = f"- {name}（{role}）：{summary}"
+        if motivation:
+            desc += f"，動機：{motivation}"
+        if backstory:
+            desc += f"，背景：{backstory}"
+        if last_adv:
+            desc += f"\n  上次經歷：{last_adv}"
+        npc_descs.append(desc)
+
+    npc_text = "\n".join(npc_descs)
+
+    def _run():
+        from llm_bridge import call_oneshot
+        try:
+            prompt = (
+                "你是「主神空間」RPG 的敘事模擬器。玩家剛從副本歸來，"
+                "期間以下 NPC 各自在主神空間中度過了自己的時間。\n"
+                "請為每個 NPC 生成一段「離屏冒險」。\n\n"
+                f"## 經過時間\n{elapsed_days} 天\n\n"
+                f"## NPC 角色\n{npc_text}\n\n"
+                "## 規則（嚴格遵守）\n"
+                "1. NPC 不能死亡、不能重傷、不能獲得改變世界的力量\n"
+                "2. 冒險僅限個人範圍：訓練、探索設施、與他人交流、反思、發現小秘密\n"
+                "3. 冒險內容要符合角色性格\n"
+                "4. 經歷豐富程度與經過天數成正比\n"
+                "5. story_hook 是之後跟玩家聊天時會主動提起的話題\n"
+                "6. 不要重複上次經歷\n\n"
+                "## 輸出\n"
+                "JSON 陣列：\n"
+                '[{"npc_name": "名字", "adventure_summary": "2-3句描述", '
+                '"growth": "成長或變化", "story_hook": "可聊話題", '
+                '"mood_after": "情緒", "status_update": "新狀態一句話"}]\n'
+                "只輸出 JSON，不要其他文字。"
+            )
+
+            result = call_oneshot(prompt)
+            if not result:
+                log.warning("    offscreen: LLM returned empty response")
+                return
+
+            json_match = re.search(r'\[.*\]', result, re.DOTALL)
+            if not json_match:
+                log.warning("    offscreen: no JSON array found in response")
+                return
+
+            adventures = json.loads(json_match.group())
+            if not isinstance(adventures, list):
+                return
+
+            # Map adventures to NPCs
+            npc_name_map = {n.get("name"): n for n in candidates}
+            updated_count = 0
+            for adv in adventures:
+                npc_name = adv.get("npc_name", "")
+                if npc_name not in npc_name_map:
+                    continue
+                # Build adventure entry
+                entry = {
+                    "adventure_summary": adv.get("adventure_summary", ""),
+                    "growth": adv.get("growth", ""),
+                    "story_hook": adv.get("story_hook", ""),
+                    "mood_after": adv.get("mood_after", ""),
+                    "elapsed_days": elapsed_days,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                # Save via _save_npc which handles append + cap at 5
+                _save_npc(story_id, {
+                    "name": npc_name,
+                    "offscreen_adventures": [entry],
+                    "current_status": adv.get("status_update", ""),
+                }, branch_id)
+                updated_count += 1
+
+            log.info("    offscreen: generated adventures for %d NPCs (%d days elapsed)",
+                     updated_count, elapsed_days)
+
+        except Exception as e:
+            log.exception("    offscreen: failed — %s", e)
+        finally:
+            _offscreen_triggered.discard((story_id, branch_id))
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
 def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schema: dict):
     """Core logic: apply a STATE update dict to character state. No normalization."""
     state = _load_character_state(story_id, branch_id)
@@ -937,16 +1257,31 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
 
     1. Immediately applies the raw update (never blocks)
     2. Kicks off background LLM normalization for non-standard fields
+    3. Detects phase transitions to trigger offscreen adventures
     """
     # Soft-validate current_phase (log only, never block)
     phase = update.get("current_phase")
     if phase and phase not in VALID_PHASES:
         log.warning("Invalid current_phase '%s' (expected one of %s)", phase, VALID_PHASES)
 
+    # Detect phase change BEFORE applying update
+    old_state = _load_character_state(story_id, branch_id)
+    old_phase = old_state.get("current_phase", "")
+
     schema = _load_character_schema(story_id)
 
     # Apply immediately with raw update
     _apply_state_update_inner(story_id, branch_id, update, schema)
+
+    new_phase = phase or old_phase  # use updated phase, or old if not changed
+
+    # Phase transition: entering a dungeon → record entry day
+    if old_phase == "主神空間" and new_phase in ("副本中", "傳送中"):
+        _record_dungeon_enter_day(story_id, branch_id)
+
+    # Phase transition: returning from dungeon → trigger offscreen adventures
+    if old_phase in ("副本中", "副本結算") and new_phase == "主神空間":
+        _trigger_offscreen_adventures_debounced(story_id, branch_id)
 
     # Background: normalize non-standard fields and re-apply
     _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
@@ -1389,11 +1724,41 @@ def _find_npcs_at_index(story_id: str, branch_id: str, target_index: int) -> lis
     return []
 
 
+def _build_adventure_hooks(story_id: str, branch_id: str, character_state: dict | None = None) -> str:
+    """Build NPC offscreen adventure hooks for context injection.
+
+    Only injected when player is in 主神空間 (just returned from dungeon).
+    """
+    if not character_state or character_state.get("current_phase") != "主神空間":
+        return ""
+
+    npcs = _load_npcs(story_id, branch_id)
+    lines = []
+    for npc in npcs:
+        adventures = npc.get("offscreen_adventures", [])
+        if not adventures:
+            continue
+        latest = adventures[-1]
+        summary = latest.get("adventure_summary", "")
+        hook = latest.get("story_hook", "")
+        if not summary:
+            continue
+        name = npc.get("name", "?")
+        line = f"- {name}：{summary}"
+        if hook:
+            line += f"（想聊的話題：{hook}）"
+        lines.append(line)
+
+    if not lines:
+        return ""
+    return "[NPC 近期個人經歷]\n" + "\n".join(lines)
+
+
 def _build_augmented_message(
     story_id: str, branch_id: str, user_text: str,
     character_state: dict | None = None,
 ) -> tuple[str, dict | None]:
-    """Add lore + events + NPC activities + dice context to user message.
+    """Add lore + events + NPC activities + adventure hooks + dice context to user message.
 
     Returns (augmented_text, dice_result_or_None).
     """
@@ -1412,6 +1777,11 @@ def _build_augmented_message(
     activities = get_recent_activities(story_id, branch_id, limit=2)
     if activities:
         parts.append(activities)
+
+    # NPC offscreen adventure hooks (only in 主神空間)
+    adventure_hooks = _build_adventure_hooks(story_id, branch_id, character_state)
+    if adventure_hooks:
+        parts.append(adventure_hooks)
 
     # Dice roll
     dice_result = None
