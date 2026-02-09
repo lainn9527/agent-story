@@ -5,6 +5,22 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-02-10
+
+### Added
+- LLM branch titles: background `_extract_tags_async()` generates 4-8 char Chinese action summaries for each branch ([#44])
+- Game save system: 5 API routes for snapshot/restore game state (character, NPCs, world day, recap) ([#44])
+- Dark-themed custom modals: replaced all native `alert()`, `prompt()`, `confirm()` with styled modals ([#44])
+- Auto-polling for branch title updates in drawer after send/edit/regen ([#44])
+- Backfill script `scripts/backfill_branch_titles.py` for existing branches ([#44])
+
+### Fixed
+- Save/load world_day format: use `set_world_day()` instead of raw JSON write to prevent `AttributeError` crash ([#44])
+- Frontend save card world_day display to match `updateWorldDayDisplay()` logic ([#44])
+- Saves list API strips snapshot data to reduce payload size ([#44])
+
+[#44]: https://github.com/lainn9527/agent-story/pull/44
+
 ## [0.11.0] - 2026-02-09
 
 ### Added
