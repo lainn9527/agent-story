@@ -2,6 +2,18 @@
    主神空間 RPG — Frontend Logic (multi-story + drawer UI)
    ============================================================ */
 
+function showToast(msg, duration = 2000) {
+  const el = document.createElement("div");
+  el.className = "toast-msg";
+  el.textContent = msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
 function showConfirm(msg) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("confirm-modal");
@@ -1800,6 +1812,11 @@ function renderMessages(messages) {
     el.className = `message ${msg.role}`;
     if (msg.inherited) el.classList.add("inherited");
     el.dataset.index = msg.index;
+    // Mobile tap-to-reveal index/report button
+    el.addEventListener("touchstart", () => {
+      document.querySelectorAll(".message.touched").forEach(m => m.classList.remove("touched"));
+      el.classList.add("touched");
+    }, { passive: true });
 
     const sibKey = String(msg.index);
     const hasSwitcher = siblingGroups[sibKey] && siblingGroups[sibKey].total >= 2;
@@ -1958,7 +1975,11 @@ function renderMessages(messages) {
           await loadBranches();
           await switchToBranch(keepId, { preserveScroll: true });
           renderBranchList();
-          if (failed > 0) alert(`${failed} 個分支刪除失敗`);
+          if (failed > 0) {
+            alert(`${failed} 個分支刪除失敗`);
+          } else {
+            showToast(`已刪除 ${others.length} 個分支`);
+          }
         });
         switcher.appendChild(pruneBtn);
       }
@@ -2012,19 +2033,21 @@ function makeGmOptionsClickable(contentEl) {
     return;
   }
   // Fallback: detect "N. text" or "N、text" patterns in plain text paragraphs
+  // Require at least 2 matching paragraphs to avoid false positives on narrative text
   const paragraphs = contentEl.querySelectorAll("p");
-  paragraphs.forEach(p => {
-    // Match lines starting with a number + period/dot
-    const optionRe = /^(<strong>)?(\d+)[.、）)]\s*(<\/strong>)?\s*(.+)/;
-    if (optionRe.test(p.textContent.trim()) && p.textContent.trim().length < 200) {
+  const optionRe = /^(\d+)[.、）)]\s*(.+)/;
+  const candidates = Array.from(paragraphs).filter(
+    p => optionRe.test(p.textContent.trim()) && p.textContent.trim().length < 200
+  );
+  if (candidates.length >= 2) {
+    candidates.forEach(p => {
       p.classList.add("gm-option-p");
       p.addEventListener("click", () => {
-        // Strip the number prefix, just send the option text
         const match = p.textContent.trim().match(/^\d+[.、）)]\s*(.*)/);
         fillInputWithOption(match ? match[1] : p.textContent.trim());
       });
-    }
-  });
+    });
+  }
 }
 
 function fillInputWithOption(text) {
@@ -2032,9 +2055,9 @@ function fillInputWithOption(text) {
   if (!$input || $input.disabled) return;
   $input.value = text;
   $input.focus();
-  // Auto-resize textarea
   $input.style.height = "auto";
   $input.style.height = $input.scrollHeight + "px";
+  $input.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 // ---------------------------------------------------------------------------
@@ -2115,6 +2138,7 @@ function showReportModal(msg) {
       const data = await res.json();
       if (data.ok) {
         close();
+        showToast("回報已送出");
       } else {
         alert(data.error || "送出失敗");
         submitBtn.disabled = false;
@@ -2858,6 +2882,10 @@ function appendMessage(msg) {
   el.className = `message ${msg.role}`;
   if (msg.inherited) el.classList.add("inherited");
   el.dataset.index = msg.index;
+  el.addEventListener("touchstart", () => {
+    document.querySelectorAll(".message.touched").forEach(m => m.classList.remove("touched"));
+    el.classList.add("touched");
+  }, { passive: true });
 
   const roleTag = document.createElement("div");
   roleTag.className = "role-tag";

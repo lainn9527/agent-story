@@ -757,8 +757,8 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "## 5. 時間流逝（time）\n"
                 "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
                 "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
-                "- 隱含流逝：一場戰鬥 → hours:1、探索一棟建築 → hours:2、一段對話 → hours:0（不輸出）\n"
-                "- 純對話/短暫互動/思考不需要輸出。只有場景中有實際行動推進才估算。\n"
+                "- 隱含流逝參考：一場小戰鬥 → hours:1、大型戰役/Boss戰 → hours:3、探索建築/區域 → hours:2、長途移動/趕路 → hours:4、休息/過夜 → hours:8、訓練/修煉 → days:1\n"
+                "- 純對話/短暫互動/思考/角色創建/主神空間閒聊不需要輸出。只有場景中有實際行動推進才估算。\n"
                 '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
@@ -838,7 +838,6 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 saved_counts["state"] = True
 
             # Time — advance world_day (skip if regex already found TIME tags)
-            time_applied = False
             time_data = data.get("time", {})
             if time_data and isinstance(time_data, dict) and not skip_time:
                 days = time_data.get("days") or 0
@@ -847,12 +846,6 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 if total_days > 0:
                     advance_world_day(story_id, branch_id, total_days)
                     saved_counts["time"] = total_days
-                    time_applied = True
-
-            # Fallback: if neither regex TIME tags nor LLM detected time, apply +30min
-            if not skip_time and not time_applied:
-                advance_world_day(story_id, branch_id, 0.5 / 24)  # +30 minutes
-                saved_counts["time"] = 0.5 / 24
 
             log.info(
                 "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s",
@@ -917,8 +910,8 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 state[base_key] = state.get(base_key, 0) + update[key]
             # else: base field is not numeric or doesn't exist — skip delta
 
-    # If GM sets reward_points directly (no delta), accept it — placed after
-    # delta loop so direct value takes precedence when both are present
+    # If GM sets reward_points directly (no delta), accept it.
+    # Only applies when delta is absent — delta takes precedence when both present.
     if "reward_points" in update and "reward_points_delta" not in update:
         val = update["reward_points"]
         if isinstance(val, (int, float)):
@@ -3347,6 +3340,8 @@ def api_bug_report():
     }
     reports_path = os.path.join(_story_dir(story_id), "bug_reports.json")
     reports = _load_json(reports_path, [])
+    if len(reports) >= 500:
+        reports = reports[-400:]  # keep latest 400 when cap hit
     reports.append(report)
     _save_json(reports_path, reports)
     log.info("Bug report saved: branch=%s msg=%s", report["branch_id"], report["message_index"])

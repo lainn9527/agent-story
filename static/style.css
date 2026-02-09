@@ -1743,15 +1743,18 @@ body {
     opacity: 0.5;
   }
 
-  /* Show msg-index and report button on mobile (no hover) */
-  .msg-index { opacity: 0.3; }
-  .msg-report-btn { opacity: 0.4; font-size: 0.85rem; padding: 6px 8px; }
+  /* Mobile: msg-index and report button hidden by default, shown on tap via .touched */
+  .msg-index { opacity: 0; }
+  .msg-report-btn { opacity: 0; font-size: 0.85rem; padding: 6px 8px; }
+  .message.touched .msg-index { opacity: 0.3; }
+  .message.touched .msg-report-btn { opacity: 0.4; }
 
   /* GM options: subtle rest-state affordance for touch */
   .gm-option-li,
   .gm-option-p {
     border-left: 2px solid rgba(212, 168, 83, 0.3);
     padding-left: 8px;
+    text-indent: 0;
   }
 
   /* Action buttons */
@@ -1969,7 +1972,7 @@ body {
 }
 .message:hover .msg-report-btn { opacity: 0.5; }
 .msg-report-btn:hover { opacity: 1 !important; color: var(--accent); }
-.message.gm .msg-report-btn { left: 40px; }
+.message.gm .msg-report-btn { left: 52px; }
 .message.user .msg-report-btn { right: 56px; }
 
 .report-modal-overlay {
@@ -2039,6 +2042,28 @@ body {
 }
 .sibling-switcher:hover .sw-prune { opacity: 0.6; }
 .sw-prune:hover { opacity: 1 !important; color: var(--gold); }
+
+/* ---------- Toast message ---------- */
+.toast-msg {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 20px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  z-index: 10000;
+  pointer-events: none;
+}
+.toast-msg.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 
 /* ---------- GM clickable options (#8) ---------- */
 .gm-option-li,
