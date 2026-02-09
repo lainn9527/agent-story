@@ -806,21 +806,6 @@ body {
 }
 
 /* ---------- Delete Previous Button ---------- */
-.delete-prev-btn {
-  left: 40px !important;
-  color: var(--accent);
-  opacity: 0.7;
-  font-size: 0.85rem;
-  transition: opacity 0.2s;
-  animation: fadeInBtn 0.3s ease;
-}
-.delete-prev-btn:hover {
-  opacity: 1;
-}
-@keyframes fadeInBtn {
-  from { opacity: 0; }
-  to { opacity: 0.7; }
-}
 
 /* ---------- Regen spinner ---------- */
 .message .regen-spinner {

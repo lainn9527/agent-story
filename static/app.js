@@ -1452,7 +1452,7 @@ function closeBranchTreeModal() {
 }
 
 async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveScroll, forcePreserve } = {}) {
-  clearDeletePreviousBtn();
+
   closeSummaryModal();
   const container = document.getElementById("messages");
   let savedScrollTop = 0;
@@ -1609,7 +1609,7 @@ async function createBranchFromIndex(msgIndex) {
 // Edit flow
 // ---------------------------------------------------------------------------
 function startEditing(msgEl, msg) {
-  clearDeletePreviousBtn();
+
   msgEl.classList.add("editing");
 
   const contentEl = msgEl.querySelector(".content");
@@ -1765,7 +1765,7 @@ async function submitEdit(msg, newText) {
 // Regenerate flow
 // ---------------------------------------------------------------------------
 async function regenerateGmMessage(msg, msgEl) {
-  clearDeletePreviousBtn();
+
   const parentBranchId = msg.owner_branch_id || currentBranchId;
   const branchPointIndex = msg.index - 1;
 
@@ -1806,11 +1806,9 @@ async function regenerateGmMessage(msg, msgEl) {
       },
       // onDone — switch to new branch
       async (data) => {
-        const previousBranchId = parentBranchId;
         if (data.branch) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
-          showDeletePreviousBtn(previousBranchId);
           // Refresh branch list after background title generation
           pollForBranchTitle(currentBranchId);
         }
@@ -1838,50 +1836,6 @@ async function regenerateGmMessage(msg, msgEl) {
   $sendBtn.disabled = false;
 }
 
-// ---------------------------------------------------------------------------
-// Delete previous branch button (shown temporarily after regen)
-// ---------------------------------------------------------------------------
-let _deletePrevTimer = null;
-let _deletePrevBtn = null;
-
-function showDeletePreviousBtn(oldBranchId) {
-  clearDeletePreviousBtn();
-
-  const messages = document.querySelectorAll("#messages .message.gm");
-  const lastGm = messages[messages.length - 1];
-  if (!lastGm) return;
-
-  const btn = document.createElement("button");
-  btn.className = "msg-action-btn delete-prev-btn";
-  btn.textContent = "\u{1F5D1}";
-  btn.title = "刪除上一個結果";
-  btn.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    try {
-      await API.deleteBranch(oldBranchId);
-      await loadBranches();
-      await loadMessages();
-    } catch (err) {
-      console.error("Failed to delete previous branch:", err);
-    }
-    clearDeletePreviousBtn();
-  });
-
-  const actionBtn = lastGm.querySelector(".msg-action-btn");
-  if (actionBtn) {
-    actionBtn.parentNode.insertBefore(btn, actionBtn.nextSibling);
-  } else {
-    lastGm.appendChild(btn);
-  }
-
-  _deletePrevBtn = btn;
-  _deletePrevTimer = setTimeout(clearDeletePreviousBtn, 30000);
-}
-
-function clearDeletePreviousBtn() {
-  if (_deletePrevTimer) { clearTimeout(_deletePrevTimer); _deletePrevTimer = null; }
-  if (_deletePrevBtn) { _deletePrevBtn.remove(); _deletePrevBtn = null; }
-}
 
 function showPlaceholderSwitcher(msgEl, index) {
   const sibKey = String(index);
@@ -2060,7 +2014,41 @@ function renderMessages(messages) {
       switcher.appendChild(label);
       switcher.appendChild(rightBtn);
 
+      // Delete current variant button (only when >=2 variants and not main)
       const currentVariant = group.variants[group.current_variant - 1];
+      if (currentVariant && currentVariant.branch_id !== "main" && group.total >= 2) {
+        const delBtn = document.createElement("button");
+        delBtn.className = "sw-delete";
+        delBtn.textContent = "\u2715";
+        delBtn.title = "刪除此版本";
+        delBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const branchToDelete = currentVariant.branch_id;
+          const descCount = countDescendants(branchToDelete);
+          let msg = "刪除此版本？";
+          if (descCount > 0) msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
+          if (!(await showConfirm(msg))) return;
+          try {
+            const res = await API.deleteBranch(branchToDelete);
+            if (res.ok) {
+              const adjIdx = group.current_variant >= 2 ? group.current_variant - 2 : 0;
+              const adjacent = group.variants[adjIdx];
+              await loadBranches();
+              if (adjacent && adjacent.branch_id !== branchToDelete) {
+                await switchToBranch(adjacent.branch_id, { preserveScroll: true });
+              } else {
+                await switchToBranch(res.switch_to || "main");
+              }
+              renderBranchList();
+            } else {
+              alert(res.error || "刪除失敗");
+            }
+          } catch (err) {
+            alert("網路錯誤：" + err.message);
+          }
+        });
+        switcher.appendChild(delBtn);
+      }
 
       // Prune siblings button — keep only current, delete all others (#7)
       if (group.total >= 2) {
@@ -2073,10 +2061,7 @@ function renderMessages(messages) {
           const keepId = currentVariant ? currentVariant.branch_id : currentBranchId;
           const others = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main" && !branches[v.branch_id]?.protected);
           if (others.length === 0) return;
-          const protectedCount = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main" && branches[v.branch_id]?.protected).length;
-          let confirmMsg = `刪除其他 ${others.length} 個版本，只保留當前？`;
-          if (protectedCount > 0) confirmMsg += `\n（${protectedCount} 個受保護的版本將保留）`;
-          if (!(await showConfirm(confirmMsg))) return;
+          if (!(await showConfirm(`刪除其他 ${others.length} 個版本，只保留當前？`))) return;
           let failed = 0;
           for (const v of others) {
             try {
@@ -2087,11 +2072,6 @@ function renderMessages(messages) {
           await loadBranches();
           await switchToBranch(keepId, { preserveScroll: true });
           renderBranchList();
-          if (failed > 0) {
-            showAlert(`${failed} 個分支刪除失敗`);
-          } else {
-            showToast(`已刪除 ${others.length} 個分支`);
-          }
         });
         switcher.appendChild(pruneBtn);
       }
@@ -2996,7 +2976,7 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
 // Send message
 // ---------------------------------------------------------------------------
 async function sendMessage() {
-  clearDeletePreviousBtn();
+
   const text = $input.value.trim();
   if (!text || isSending) return;
 
@@ -3119,9 +3099,8 @@ async function sendMessage() {
         // Refresh branch list after background tag extraction (title generation)
         pollForBranchTitle(currentBranchId);
 
-        // Auto-prune notification
+        // Auto-prune — silently refresh branch list
         if (data.pruned_branches && data.pruned_branches.length > 0) {
-          showToast(`自動清理了 ${data.pruned_branches.length} 個廢棄分支`);
           await loadBranches();
           renderBranchList();
         }
