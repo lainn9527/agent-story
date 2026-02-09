@@ -1551,8 +1551,11 @@ def _build_augmented_message(
             "status": character_state.get("current_status", ""),
         }
 
+    # Skip embedding search for auto-play branches to save Gemini API quota
+    use_embedding = not branch_id.startswith("auto_")
+
     parts = []
-    lore = search_relevant_lore(story_id, user_text, context=lore_context)
+    lore = search_relevant_lore(story_id, user_text, context=lore_context, use_embedding=use_embedding)
     if lore:
         parts.append(lore)
     if not is_blank:
