@@ -724,7 +724,7 @@ function renderStoryList() {
       del.title = "刪除故事";
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!confirm(`確定要刪除故事「${story.name}」？所有分支和對話都會被刪除！`)) return;
+        if (!(await showConfirm(`確定要刪除故事「${story.name}」？所有分支和對話都會被刪除！`))) return;
         const res = await API.deleteStory(story.id);
         if (res.ok) {
           await loadStories();
@@ -3379,7 +3379,7 @@ $promoteBtn.addEventListener("click", async () => {
   closeSummaryModal();
   const branch = branches[currentBranchId];
   const name = branch ? branch.name : currentBranchId;
-  if (!confirm(`確定要將分支「${name}」的內容設為主時間線嗎？`)) return;
+  if (!(await showConfirm(`確定要將分支「${name}」的內容設為主時間線嗎？`))) return;
 
   $promoteBtn.disabled = true;
   try {
