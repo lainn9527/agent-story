@@ -45,7 +45,7 @@ from compaction import (
     load_recap, save_recap, get_recap_text, should_compact, compact_async,
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
 )
-from world_timer import process_time_tags, get_world_day, copy_world_day, advance_world_day, TIME_RE
+from world_timer import process_time_tags, get_world_day, set_world_day, copy_world_day, advance_world_day, TIME_RE
 from lore_organizer import (
     get_lore_lock, try_classify_topic, build_prefix_registry, invalidate_prefix_cache,
     should_organize, organize_lore_async,
@@ -1382,9 +1382,11 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
                         skip_time=had_time_tags)
 
     # Build snapshots for branch forking accuracy
-    snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
-    if npc_updates:
-        snapshots["npcs_snapshot"] = _load_npcs(story_id, branch_id)
+    snapshots = {
+        "state_snapshot": _load_character_state(story_id, branch_id),
+        "npcs_snapshot": _load_npcs(story_id, branch_id),
+        "world_day_snapshot": get_world_day(story_id, branch_id),
+    }
 
     return gm_response, image_info, snapshots
 
@@ -1414,6 +1416,17 @@ def _find_npcs_at_index(story_id: str, branch_id: str, target_index: int) -> lis
         if "npcs_snapshot" in msg:
             return msg["npcs_snapshot"]
     return []
+
+
+def _find_world_day_at_index(story_id: str, branch_id: str, target_index: int) -> float:
+    """Walk timeline backwards to find most recent world_day_snapshot at or before target_index."""
+    timeline = get_full_timeline(story_id, branch_id)
+    for msg in reversed(timeline):
+        if msg.get("index", 0) > target_index:
+            continue
+        if "world_day_snapshot" in msg:
+            return msg["world_day_snapshot"]
+    return 0  # default: day 0 (same as world_timer default)
 
 
 def _build_augmented_message(
@@ -1891,7 +1904,8 @@ def api_branches_create():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
-    copy_world_day(story_id, parent_branch_id, branch_id)
+    forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
+    set_world_day(story_id, branch_id, forked_world_day)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2041,7 +2055,8 @@ def api_branches_edit():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
-    copy_world_day(story_id, parent_branch_id, branch_id)
+    forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
+    set_world_day(story_id, branch_id, forked_world_day)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2163,7 +2178,8 @@ def api_branches_edit_stream():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
-    copy_world_day(story_id, parent_branch_id, branch_id)
+    forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
+    set_world_day(story_id, branch_id, forked_world_day)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2303,7 +2319,8 @@ def api_branches_regenerate():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
-    copy_world_day(story_id, parent_branch_id, branch_id)
+    forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
+    set_world_day(story_id, branch_id, forked_world_day)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2417,7 +2434,8 @@ def api_branches_regenerate_stream():
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
-    copy_world_day(story_id, parent_branch_id, branch_id)
+    forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
+    set_world_day(story_id, branch_id, forked_world_day)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {

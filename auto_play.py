@@ -60,6 +60,7 @@ from app import (
     _build_npc_text,
     _find_state_at_index,
     _find_npcs_at_index,
+    _find_world_day_at_index,
     _load_branch_config,
     _save_branch_config,
     RECENT_MESSAGE_COUNT,
@@ -67,6 +68,7 @@ from app import (
 )
 from compaction import get_recap_text, load_recap, should_compact, compact_async
 from llm_bridge import call_claude_gm, call_oneshot, set_provider, web_search
+from world_timer import set_world_day
 import usage_db
 from npc_evolution import should_run_evolution, run_npc_evolution_async
 from auto_summary import should_generate_summary, generate_summary_async, _load_summaries
@@ -287,6 +289,13 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
     parent_config = _load_branch_config(story_id, config.parent_branch_id)
     if parent_config:
         _save_branch_config(story_id, branch_id, parent_config)
+
+    # Fork world_day from parent at branch_point_index (not current value)
+    if not config.blank:
+        forked_world_day = _find_world_day_at_index(
+            story_id, config.parent_branch_id, config.branch_point_index
+        )
+        set_world_day(story_id, branch_id, forked_world_day)
 
     # Initialize empty messages
     _save_json(_story_messages_path(story_id, branch_id), [])
