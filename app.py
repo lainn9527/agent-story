@@ -3368,10 +3368,16 @@ def api_npc_activities():
 
 @app.route("/api/saves")
 def api_saves_list():
-    """Return all saves for the active story."""
+    """Return all saves for the active story (without bulky snapshots)."""
     story_id = _active_story_id()
     saves = _load_json(_story_saves_path(story_id), [])
-    return jsonify({"ok": True, "saves": saves})
+    # Strip snapshot data from list response to keep payload small
+    slim = []
+    for s in saves:
+        entry = {k: v for k, v in s.items()
+                 if k not in ("character_snapshot", "npc_snapshot", "recap_snapshot")}
+        slim.append(entry)
+    return jsonify({"ok": True, "saves": slim})
 
 
 @app.route("/api/saves", methods=["POST"])
@@ -3388,7 +3394,7 @@ def api_saves_create():
 
     # Snapshot current state
     character_state = _load_character_state(story_id, branch_id)
-    npcs = _load_json(_story_npcs_path(story_id, branch_id), [])
+    npcs = _load_npcs(story_id, branch_id)
     world_day = get_world_day(story_id, branch_id)
     recap = load_recap(story_id, branch_id)
 
@@ -3408,7 +3414,7 @@ def api_saves_create():
 
     save_entry = {
         "id": save_id,
-        "name": body.get("name", "").strip() or f"{branch_name} — 第{world_day.get('day', 1)}天",
+        "name": body.get("name", "").strip() or f"{branch_name} — 第{int(world_day) + 1}天",
         "branch_id": branch_id,
         "message_index": last_index,
         "created_at": now,
@@ -3453,9 +3459,9 @@ def api_saves_load(save_id):
     _save_json(_story_npcs_path(story_id, branch_id), save.get("npc_snapshot", []))
     _save_json(_story_messages_path(story_id, branch_id), [])
 
-    # Restore world day
-    wd = save.get("world_day", {"day": 1, "hour": 0})
-    _save_json(os.path.join(_branch_dir(story_id, branch_id), "world_day.json"), wd)
+    # Restore world day (world_day is a float, use set_world_day for correct format)
+    wd = save.get("world_day", 0)
+    set_world_day(story_id, branch_id, wd)
 
     # Restore recap from snapshot (preferred) or fallback to parent copy
     recap_snapshot = save.get("recap_snapshot")

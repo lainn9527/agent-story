@@ -88,8 +88,12 @@ def backfill_story(story_id: str, dry_run: bool = False):
 
         if not gm_msgs:
             # Try parsed_conversation for main-line branches
-            log.info("  %s: no GM messages in delta, skipping", bid)
-            continue
+            parsed_path = os.path.join(story_dir, "parsed_conversation.json")
+            parsed = _load_json(parsed_path, [])
+            gm_msgs = [m.get("content", "") for m in parsed if m.get("role") == "gm" and m.get("content")]
+            if not gm_msgs:
+                log.info("  %s: no GM messages found, skipping", bid)
+                continue
 
         if dry_run:
             log.info("  %s: would generate title from %d GM messages", bid, len(gm_msgs))
