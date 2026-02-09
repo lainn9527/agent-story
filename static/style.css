@@ -2077,6 +2077,9 @@ body {
 }
 .bt-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
 .bt-action-del:hover { color: var(--accent); }
+.bt-action-heart { font-size: 0.85rem; }
+.bt-action-heart:hover { color: #ff6b9d; background: rgba(255,107,157,0.1); }
+.bt-protected-badge { font-size: 0.65rem; color: #ff6b9d; margin-left: 2px; }
 
 /* ---------- Message index label (#5) ---------- */
 .msg-index {
@@ -2176,6 +2179,15 @@ body {
 }
 .sibling-switcher:hover .sw-prune { opacity: 0.6; }
 .sw-prune:hover { opacity: 1 !important; color: var(--gold); }
+.sw-heart {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+}
+.sw-heart:hover { color: #ff6b9d; }
 
 /* ---------- Toast message ---------- */
 .toast-msg {
