@@ -1978,8 +1978,17 @@ body {
 .bt-root > .bt-item::before {
   display: none;
 }
-.bt-inline-child::before {
-  display: none;
+.bt-chain {
+  border-left: 1px solid var(--border);
+  margin-left: 3px;
+  padding-left: 11px;
+}
+.bt-chain > .bt-item {
+  position: relative;
+}
+.bt-chain > .bt-item::before {
+  left: -11px;
+  width: 8px;
 }
 .bt-item:hover {
   background: rgba(255, 255, 255, 0.05);
