@@ -1872,8 +1872,10 @@ body {
     opacity: 0.5;
   }
 
-  /* Mobile: msg-index always visible */
+  /* Mobile: msg-index always visible; report button shown on tap */
   .msg-index { opacity: 0.25; }
+  .msg-report-btn { opacity: 0; font-size: 0.85rem; padding: 6px 8px; }
+  .message.touched .msg-report-btn { opacity: 0.4; }
 
   /* GM options: subtle rest-state affordance for touch */
   .gm-option-li,
@@ -2092,6 +2094,71 @@ body {
 }
 .message.gm .msg-index { right: auto; left: 0; }
 
+/* ---------- Bug report button (#6) ---------- */
+.msg-report-btn {
+  position: absolute;
+  bottom: 8px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.message:hover .msg-report-btn { opacity: 0.5; }
+.msg-report-btn:hover { opacity: 1 !important; color: var(--accent); }
+.message.gm .msg-report-btn { left: 52px; }
+.message.user .msg-report-btn { right: 56px; }
+
+.report-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.report-modal {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  width: min(90vw, 480px);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.report-info {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  font-family: monospace;
+}
+.report-preview {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  background: rgba(0,0,0,0.2);
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  max-height: 100px;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.report-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  margin-bottom: 12px;
+}
+.report-textarea:focus { border-color: var(--accent); }
 .report-actions {
   display: flex;
   gap: 8px;

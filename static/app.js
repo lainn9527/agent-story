@@ -2001,6 +2001,16 @@ function renderMessages(messages) {
       });
     }
 
+    // Bug report button (#6)
+    const reportBtn = document.createElement("button");
+    reportBtn.className = "msg-report-btn";
+    reportBtn.textContent = "\uD83D\uDEA9";
+    reportBtn.title = "回報問題";
+    reportBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showReportModal(msg);
+    });
+
     el.appendChild(roleTag);
     el.appendChild(indexLabel);
     el.appendChild(content);
@@ -2011,6 +2021,7 @@ function renderMessages(messages) {
     }
 
     el.appendChild(actionBtn);
+    el.appendChild(reportBtn);
 
     if (hasSwitcher) {
       const group = siblingGroups[sibKey];
@@ -2094,16 +2105,9 @@ function renderMessages(messages) {
         pruneBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           const keepId = currentVariant ? currentVariant.branch_id : currentBranchId;
-          const others = group.variants.filter(v =>
-            v.branch_id !== keepId && v.branch_id !== "main" && !branches[v.branch_id]?.protected
-          );
+          const others = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main");
           if (others.length === 0) return;
-          const protectedCount = group.variants.filter(v =>
-            v.branch_id !== keepId && v.branch_id !== "main" && branches[v.branch_id]?.protected
-          ).length;
-          let confirmMsg = `刪除其他 ${others.length} 個版本，只保留當前？`;
-          if (protectedCount > 0) confirmMsg += `\n（${protectedCount} 個受保護版本不會被刪除）`;
-          if (!(await showConfirm(confirmMsg))) return;
+          if (!(await showConfirm(`刪除其他 ${others.length} 個版本，只保留當前？`))) return;
           let failed = 0;
           for (const v of others) {
             try {
@@ -2222,6 +2226,97 @@ function fillInputWithOption(text) {
   $input.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+// ---------------------------------------------------------------------------
+// Bug report modal (#6)
+// ---------------------------------------------------------------------------
+function showReportModal(msg) {
+  // Create modal overlay
+  const overlay = document.createElement("div");
+  overlay.className = "report-modal-overlay";
+
+  const modal = document.createElement("div");
+  modal.className = "report-modal";
+
+  const title = document.createElement("h3");
+  title.textContent = `回報問題 — 訊息 #${msg.index}`;
+  title.style.marginBottom = "12px";
+
+  const info = document.createElement("div");
+  info.className = "report-info";
+  info.textContent = `分支: ${currentBranchId} | 角色: ${msg.role} | 索引: ${msg.index}`;
+
+  const preview = document.createElement("div");
+  preview.className = "report-preview";
+  preview.textContent = (msg.content || "").slice(0, 200) + ((msg.content || "").length > 200 ? "..." : "");
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "report-textarea";
+  textarea.placeholder = "描述問題...";
+  textarea.rows = 4;
+
+  const actions = document.createElement("div");
+  actions.className = "report-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "edit-cancel-btn";
+  cancelBtn.textContent = "取消";
+
+  const submitBtn = document.createElement("button");
+  submitBtn.className = "edit-save-btn";
+  submitBtn.textContent = "送出";
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(submitBtn);
+
+  modal.appendChild(title);
+  modal.appendChild(info);
+  modal.appendChild(preview);
+  modal.appendChild(textarea);
+  modal.appendChild(actions);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  textarea.focus();
+
+  function close() { document.removeEventListener("keydown", onEsc); overlay.remove(); }
+  function onEsc(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
+  cancelBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onEsc);
+
+  submitBtn.addEventListener("click", async () => {
+    const description = textarea.value.trim();
+    if (!description) { textarea.focus(); return; }
+    submitBtn.disabled = true;
+    submitBtn.textContent = "送出中...";
+    try {
+      const res = await fetch("/api/bug-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          branch_id: currentBranchId,
+          message_index: msg.index,
+          role: msg.role,
+          content_preview: (msg.content || "").slice(0, 500),
+          description,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        close();
+        showToast("回報已送出");
+      } else {
+        alert(data.error || "送出失敗");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "送出";
+      }
+    } catch (err) {
+      alert("網路錯誤：" + err.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = "送出";
+    }
+  });
+}
 
 function markdownToHtml(text) {
   if (!text) return "";
@@ -3030,6 +3125,17 @@ async function sendMessage() {
         });
         gmEl.appendChild(actionBtn);
 
+        // Add report button
+        const reportBtn = document.createElement("button");
+        reportBtn.className = "msg-report-btn";
+        reportBtn.textContent = "\uD83D\uDEA9";
+        reportBtn.title = "回報問題";
+        reportBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          showReportModal(gmMsg);
+        });
+        gmEl.appendChild(reportBtn);
+
         // Only auto-scroll at the end if user was following along
         if (wasAtBottom && !userScrolledDuringStream) {
           smartScrollToBottom();
@@ -3123,6 +3229,15 @@ function appendMessage(msg) {
     });
   }
 
+  const reportBtn = document.createElement("button");
+  reportBtn.className = "msg-report-btn";
+  reportBtn.textContent = "\uD83D\uDEA9";
+  reportBtn.title = "回報問題";
+  reportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showReportModal(msg);
+  });
+
   el.appendChild(roleTag);
   el.appendChild(indexLabel);
   el.appendChild(content);
@@ -3133,6 +3248,7 @@ function appendMessage(msg) {
   }
 
   el.appendChild(actionBtn);
+  el.appendChild(reportBtn);
   $messages.appendChild(el);
 }
 
