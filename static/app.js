@@ -728,6 +728,23 @@ async function loadBranches() {
   updateBranchIndicator();
 }
 
+// Poll for branch title generation (background _extract_tags_async takes ~20-30s)
+let _titlePollTimer = null;
+function pollForBranchTitle(branchId) {
+  if (_titlePollTimer) clearInterval(_titlePollTimer);
+  let attempts = 0;
+  _titlePollTimer = setInterval(async () => {
+    attempts++;
+    await loadBranches();
+    const meta = branches[branchId];
+    if ((meta && meta.title) || attempts >= 6) {
+      clearInterval(_titlePollTimer);
+      _titlePollTimer = null;
+    }
+    renderBranchList();
+  }, 5000);
+}
+
 function renderBranchList() {
   $branchList.innerHTML = "";
 
@@ -1618,7 +1635,7 @@ async function submitEdit(msg, newText) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
           // Refresh branch list after background title generation
-          setTimeout(() => { loadBranches().then(() => renderBranchList()); }, 5000);
+          pollForBranchTitle(currentBranchId);
         }
         activeStreamController = null;
       },
@@ -1695,7 +1712,7 @@ async function regenerateGmMessage(msg, msgEl) {
           await switchToBranch(data.branch.id, { forcePreserve: true });
           showDeletePreviousBtn(previousBranchId);
           // Refresh branch list after background title generation
-          setTimeout(() => { loadBranches().then(() => renderBranchList()); }, 5000);
+          pollForBranchTitle(currentBranchId);
         }
         activeStreamController = null;
       },
@@ -3010,7 +3027,7 @@ async function sendMessage() {
         loadEvents();
 
         // Refresh branch list after background tag extraction (title generation)
-        setTimeout(() => { loadBranches().then(() => renderBranchList()); }, 5000);
+        pollForBranchTitle(currentBranchId);
       },
       // onError
       (msg) => {
