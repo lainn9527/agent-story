@@ -46,6 +46,69 @@ function showConfirm(msg) {
   });
 }
 
+function showAlert(msg) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("alert-modal");
+    const msgEl = document.getElementById("alert-modal-msg");
+    const okBtn = document.getElementById("alert-modal-ok");
+    msgEl.textContent = msg;
+    overlay.classList.remove("hidden");
+
+    function cleanup() {
+      overlay.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      overlay.removeEventListener("click", onOverlay);
+      document.removeEventListener("keydown", onKey);
+      resolve();
+    }
+    function onOk() { cleanup(); }
+    function onOverlay(e) { if (e.target === overlay) cleanup(); }
+    function onKey(e) {
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); cleanup(); }
+    }
+
+    okBtn.addEventListener("click", onOk);
+    overlay.addEventListener("click", onOverlay);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+function showPrompt(msg, defaultValue = "") {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("prompt-modal");
+    const msgEl = document.getElementById("prompt-modal-msg");
+    const input = document.getElementById("prompt-modal-input");
+    const okBtn = document.getElementById("prompt-modal-ok");
+    const cancelBtn = document.getElementById("prompt-modal-cancel");
+    msgEl.textContent = msg;
+    input.value = defaultValue;
+    overlay.classList.remove("hidden");
+    input.focus();
+    input.select();
+
+    function cleanup(result) {
+      overlay.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onOverlay);
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    }
+    function onOk() { cleanup(input.value); }
+    function onCancel() { cleanup(null); }
+    function onOverlay(e) { if (e.target === overlay) cleanup(null); }
+    function onKey(e) {
+      if (e.key === "Enter") { e.preventDefault(); cleanup(input.value); }
+      if (e.key === "Escape") { e.preventDefault(); cleanup(null); }
+    }
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    overlay.addEventListener("click", onOverlay);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
 const API = {
   init: () => fetch("/api/init", { method: "POST" }).then(r => r.json()),
 
@@ -670,7 +733,7 @@ function renderStoryList() {
           }
           renderStoryList();
         } else {
-          alert(res.error || "刪除失敗");
+          showAlert(res.error || "刪除失敗");
         }
       });
       item.appendChild(del);
@@ -695,7 +758,7 @@ async function switchToStory(storyId) {
   try {
     const result = await API.switchStory(storyId);
     if (!result.ok) {
-      alert(result.error || "切換故事失敗");
+      showAlert(result.error || "切換故事失敗");
       return;
     }
 
@@ -712,7 +775,7 @@ async function switchToStory(storyId) {
     await Promise.all([loadNpcs(), loadEvents(), loadSummaries(), loadSaves()]);
     scrollToBottom();
   } catch (err) {
-    alert("切換故事錯誤：" + err.message);
+    showAlert("切換故事錯誤：" + err.message);
   }
 }
 
@@ -897,7 +960,7 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
         }
         renderBranchList();
       } else {
-        alert(res.error || "刪除失敗");
+        showAlert(res.error || "刪除失敗");
       }
     });
     item.appendChild(del);
@@ -917,7 +980,7 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
         await switchToBranch(res.parent_branch_id);
         renderBranchList();
       } else {
-        alert(res.error || "合併失敗");
+        showAlert(res.error || "合併失敗");
       }
     });
     item.appendChild(merge);
@@ -992,7 +1055,7 @@ function startRenamingBranch(item, branch) {
       await loadBranches();
       renderBranchList();
     } else {
-      alert(res.error || "重新命名失敗");
+      showAlert(res.error || "重新命名失敗");
       renderBranchList();
     }
   }
@@ -1173,7 +1236,7 @@ function _btRenderTree(container, modal) {
             _btRenderTree(container, modal);
             renderBranchList();
           } else {
-            alert(res.error || "合併失敗");
+            showAlert(res.error || "合併失敗");
           }
         });
         actions.appendChild(mergeBtn);
@@ -1198,7 +1261,7 @@ function _btRenderTree(container, modal) {
           _btRenderTree(container, modal);
           renderBranchList();
         } else {
-          alert(res.error || "刪除失敗");
+          showAlert(res.error || "刪除失敗");
         }
       });
       actions.appendChild(delBtn);
@@ -1311,7 +1374,7 @@ async function _btDeleteSelected() {
   }
   if (failures.length > 0) {
     const names = failures.map(id => branches[id]?.name || id).join(", ");
-    alert(`${failures.length} 個分支刪除失敗：${names}`);
+    showAlert(`${failures.length} 個分支刪除失敗：${names}`);
   }
   _btSelected.clear();
   await loadBranches();
@@ -1341,7 +1404,7 @@ async function _btMergeSelected() {
     renderBranchList();
     _btUpdateToolbar();
   } else {
-    alert(res.error || "合併失敗");
+    showAlert(res.error || "合併失敗");
   }
 }
 
@@ -1493,7 +1556,7 @@ async function loadMessages(branchId, { tail } = {}) {
 // Create branch flow
 // ---------------------------------------------------------------------------
 async function createBranchFromIndex(msgIndex) {
-  const name = prompt("為新分支命名：");
+  const name = await showPrompt("為新分支命名：");
   if (!name || !name.trim()) return;
 
   const res = await API.createBranch(name.trim(), currentBranchId, msgIndex);
@@ -1501,7 +1564,7 @@ async function createBranchFromIndex(msgIndex) {
     await loadBranches();
     await switchToBranch(res.branch.id);
   } else {
-    alert(res.error || "建立分支失敗");
+    showAlert(res.error || "建立分支失敗");
   }
 }
 
@@ -1645,7 +1708,7 @@ async function submitEdit(msg, newText) {
         $loading.style.display = "none";
         if (errMsg !== "AbortError") {
           loadBranches().then(() => renderBranchList());
-          alert(errMsg || "編輯失敗");
+          showAlert(errMsg || "編輯失敗");
         }
         activeStreamController = null;
       },
@@ -1655,7 +1718,7 @@ async function submitEdit(msg, newText) {
     if (err.name === 'AbortError') return;
     if (streamingEl) streamingEl.remove();
     $loading.style.display = "none";
-    alert("網路錯誤：" + err.message);
+    showAlert("網路錯誤：" + err.message);
   }
 
   $sendBtn.disabled = false;
@@ -1722,7 +1785,7 @@ async function regenerateGmMessage(msg, msgEl) {
           if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
           if (actionBtn) actionBtn.style.display = "";
           loadBranches().then(() => renderBranchList());
-          alert(errMsg || "重新生成失敗");
+          showAlert(errMsg || "重新生成失敗");
         }
         activeStreamController = null;
       },
@@ -1732,7 +1795,7 @@ async function regenerateGmMessage(msg, msgEl) {
     if (err.name === 'AbortError') return;
     if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
     if (actionBtn) actionBtn.style.display = "";
-    alert("網路錯誤：" + err.message);
+    showAlert("網路錯誤：" + err.message);
   }
 
   $sendBtn.disabled = false;
@@ -1987,10 +2050,10 @@ function renderMessages(messages) {
               }
               renderBranchList();
             } else {
-              alert(res.error || "刪除失敗");
+              showAlert(res.error || "刪除失敗");
             }
           } catch (err) {
-            alert("網路錯誤：" + err.message);
+            showAlert("網路錯誤：" + err.message);
           }
         });
         switcher.appendChild(delBtn);
@@ -2019,7 +2082,7 @@ function renderMessages(messages) {
           await switchToBranch(keepId, { preserveScroll: true });
           renderBranchList();
           if (failed > 0) {
-            alert(`${failed} 個分支刪除失敗`);
+            showAlert(`${failed} 個分支刪除失敗`);
           } else {
             showToast(`已刪除 ${others.length} 個分支`);
           }
@@ -2185,12 +2248,12 @@ function showReportModal(msg) {
         close();
         showToast("回報已送出");
       } else {
-        alert(data.error || "送出失敗");
+        showAlert(data.error || "送出失敗");
         submitBtn.disabled = false;
         submitBtn.textContent = "送出";
       }
     } catch (err) {
-      alert("網路錯誤：" + err.message);
+      showAlert("網路錯誤：" + err.message);
       submitBtn.disabled = false;
       submitBtn.textContent = "送出";
     }
@@ -2494,12 +2557,12 @@ function renderSavesList(saves) {
     nameEl.title = "雙擊重新命名";
 
     async function renameSavePrompt() {
-      const newName = prompt("重新命名存檔：", save.name);
+      const newName = await showPrompt("重新命名存檔：", save.name);
       if (newName && newName.trim() && newName.trim() !== save.name) {
         try {
           await API.renameSave(save.id, newName.trim());
         } catch (err) {
-          alert("重命名失敗：" + err.message);
+          showAlert("重命名失敗：" + err.message);
         }
         loadSaves();
       }
@@ -2576,10 +2639,10 @@ function renderSavesList(saves) {
           scrollToBottom();
           closeDrawer();
         } else {
-          alert(res.error || "讀取存檔失敗");
+          showAlert(res.error || "讀取存檔失敗");
         }
       } catch (err) {
-        alert("網路錯誤：" + err.message);
+        showAlert("網路錯誤：" + err.message);
       }
       loadBtn.disabled = false;
       loadBtn.textContent = "讀取存檔";
@@ -3151,7 +3214,7 @@ function closeNewStoryModal() {
 async function createNewStory() {
   const name = document.getElementById("ns-name").value.trim();
   if (!name) {
-    alert("請輸入故事名稱");
+    showAlert("請輸入故事名稱");
     return;
   }
 
@@ -3166,7 +3229,7 @@ async function createNewStory() {
     try {
       data.character_schema = JSON.parse(schemaText);
     } catch (e) {
-      alert("角色 Schema JSON 格式錯誤：" + e.message);
+      showAlert("角色 Schema JSON 格式錯誤：" + e.message);
       return;
     }
   }
@@ -3176,7 +3239,7 @@ async function createNewStory() {
     try {
       data.default_character_state = JSON.parse(stateText);
     } catch (e) {
-      alert("初始角色狀態 JSON 格式錯誤：" + e.message);
+      showAlert("初始角色狀態 JSON 格式錯誤：" + e.message);
       return;
     }
   }
@@ -3188,10 +3251,10 @@ async function createNewStory() {
       await loadStories();
       await switchToStory(res.story.id);
     } else {
-      alert(res.error || "建立故事失敗");
+      showAlert(res.error || "建立故事失敗");
     }
   } catch (err) {
-    alert("網路錯誤：" + err.message);
+    showAlert("網路錯誤：" + err.message);
   }
 }
 
@@ -3254,7 +3317,7 @@ $input.addEventListener("input", () => {
 // New branch button — branch from the last message
 $newBranchBtn.addEventListener("click", () => {
   if (allMessages.length === 0) {
-    alert("沒有訊息可以分支");
+    showAlert("沒有訊息可以分支");
     return;
   }
   const lastIndex = allMessages[allMessages.length - 1].index;
@@ -3273,7 +3336,7 @@ document.getElementById("bt-merge-selected").addEventListener("click", _btMergeS
 
 // Create save button
 $createSaveBtn.addEventListener("click", async () => {
-  const name = prompt("存檔名稱（留空自動命名）：", "");
+  const name = await showPrompt("存檔名稱（留空自動命名）：");
   if (name === null) return;  // cancelled
   $createSaveBtn.disabled = true;
   try {
@@ -3281,22 +3344,22 @@ $createSaveBtn.addEventListener("click", async () => {
     if (res.ok) {
       loadSaves();
     } else {
-      alert(res.error || "建立存檔失敗");
+      showAlert(res.error || "建立存檔失敗");
     }
   } catch (err) {
-    alert("網路錯誤：" + err.message);
+    showAlert("網路錯誤：" + err.message);
   }
   $createSaveBtn.disabled = false;
 });
 
 // Blank branch button — start a fresh game from scratch
 $newBlankBranchBtn.addEventListener("click", async () => {
-  const name = prompt("為新的空白分支命名：");
+  const name = await showPrompt("為新的空白分支命名：");
   if (!name || !name.trim()) return;
   try {
     const res = await API.createBlankBranch(name.trim());
     if (!res.ok) {
-      alert(res.error || "建立空白分支失敗");
+      showAlert(res.error || "建立空白分支失敗");
       return;
     }
     closeDrawer();
@@ -3306,7 +3369,7 @@ $newBlankBranchBtn.addEventListener("click", async () => {
     $input.value = "開始一個全新的冒險。請引導我創建角色（名稱、性別、背景等），然後開始故事。";
     sendMessage();
   } catch (err) {
-    alert("網路錯誤：" + err.message);
+    showAlert("網路錯誤：" + err.message);
   }
 });
 
@@ -3329,10 +3392,10 @@ $promoteBtn.addEventListener("click", async () => {
       renderCharacterStatus(status);
       scrollToBottom();
     } else {
-      alert(res.error || "設為主時間線失敗");
+      showAlert(res.error || "設為主時間線失敗");
     }
   } catch (err) {
-    alert("網路錯誤：" + err.message);
+    showAlert("網路錯誤：" + err.message);
   }
   $promoteBtn.disabled = false;
 });
