@@ -322,7 +322,9 @@ def _organize_orphans_llm(story_id: str):
 
     Always uses claude_cli to avoid burning Gemini quota on background tasks.
     """
-    from llm_bridge import call_oneshot as _call_oneshot
+    import time as _time
+    from llm_bridge import call_oneshot as _call_oneshot, get_last_usage
+    import usage_db
     def call_oneshot(prompt):
         return _call_oneshot(prompt, provider="claude_cli")
 
@@ -403,7 +405,22 @@ def _organize_orphans_llm(story_id: str):
         "只輸出 JSON。"
     )
 
+    t0 = _time.time()
     result = call_oneshot(prompt)
+    _lore_elapsed = _time.time() - t0
+    usage = get_last_usage()
+    if usage:
+        try:
+            usage_db.log_usage(
+                story_id=story_id, provider=usage.get("provider", ""),
+                model=usage.get("model", ""), call_type="lore_organize",
+                prompt_tokens=usage.get("prompt_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                elapsed_ms=int(_lore_elapsed * 1000),
+            )
+        except Exception:
+            pass
     if not result:
         log.warning("lore_organizer: LLM returned empty response")
         state["last_organized_at"] = datetime.now(timezone.utc).isoformat()

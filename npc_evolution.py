@@ -79,8 +79,24 @@ def run_npc_evolution_async(
                 "只輸出 JSON，不要其他文字。"
             )
 
-            from llm_bridge import call_oneshot
+            from llm_bridge import call_oneshot, get_last_usage
+            import usage_db
+            t0 = time.time()
             response_text = call_oneshot(prompt)
+            _npc_elapsed = time.time() - t0
+            usage = get_last_usage()
+            if usage:
+                try:
+                    usage_db.log_usage(
+                        story_id=story_id, provider=usage.get("provider", ""),
+                        model=usage.get("model", ""), call_type="npc_evolution",
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        output_tokens=usage.get("output_tokens"),
+                        total_tokens=usage.get("total_tokens"),
+                        branch_id=branch_id, elapsed_ms=int(_npc_elapsed * 1000),
+                    )
+                except Exception:
+                    pass
             if not response_text:
                 log.warning("    npc_evolution: LLM returned empty response")
                 return

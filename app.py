@@ -31,7 +31,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("rpg")
 
-from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary
+from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary, get_last_usage
+import usage_db
 from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
 from image_gen import generate_image_async, get_image_status, get_image_path
 from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry
@@ -65,6 +66,28 @@ LEGACY_TREE_PATH = os.path.join(DATA_DIR, "timeline_tree.json")
 LEGACY_CHARACTER_STATE_PATH = os.path.join(DATA_DIR, "character_state.json")
 LEGACY_SUMMARY_PATH = os.path.join(DATA_DIR, "story_summary.txt")
 LEGACY_NEW_MESSAGES_PATH = os.path.join(DATA_DIR, "new_messages.json")
+
+
+def _log_llm_usage(story_id: str, call_type: str, elapsed_s: float, branch_id: str = "", usage: dict | None = None):
+    """Log LLM usage from get_last_usage() or a streaming done payload's usage dict."""
+    if usage is None:
+        usage = get_last_usage()
+    if usage is None:
+        return
+    try:
+        usage_db.log_usage(
+            story_id=story_id,
+            provider=usage.get("provider", ""),
+            model=usage.get("model", ""),
+            call_type=call_type,
+            prompt_tokens=usage.get("prompt_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            branch_id=branch_id,
+            elapsed_ms=int(elapsed_s * 1000) if elapsed_s else None,
+        )
+    except Exception as e:
+        log.debug("usage_db: failed to log — %s", e)
 
 
 DEFAULT_CHARACTER_STATE = {
@@ -635,7 +658,9 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
         )
 
         try:
+            t0 = time.time()
             result = call_oneshot(prompt)
+            _log_llm_usage(story_id, "oneshot", time.time() - t0, branch_id=branch_id)
             if not result:
                 return
             result = result.strip()
@@ -740,7 +765,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
+            t0 = time.time()
             result = call_oneshot(prompt)
+            _log_llm_usage(story_id, "oneshot", time.time() - t0, branch_id=branch_id)
             if not result:
                 return
             result = result.strip()
@@ -1621,7 +1648,9 @@ def api_send():
     gm_response, _ = call_claude_gm(
         augmented_text, system_prompt, recent, session_id=None
     )
-    log.info("  claude_call: %.1fs", time.time() - t0)
+    gm_elapsed = time.time() - t0
+    log.info("  claude_call: %.1fs", gm_elapsed)
+    _log_llm_usage(story_id, "gm", gm_elapsed, branch_id=branch_id)
 
     # 5. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
     t0 = time.time()
@@ -1730,6 +1759,8 @@ def api_send_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
+                    _log_llm_usage(story_id, "gm_stream", time.time() - t_start,
+                                   branch_id=branch_id, usage=payload.get("usage"))
 
                     # Extract tags
                     gm_response, image_info, snapshots = _process_gm_response(
@@ -2032,7 +2063,9 @@ def api_branches_edit():
         log.info("/api/branches/edit EXCEPTION %s", e)
         _cleanup_branch(story_id, branch_id)
         return jsonify({"ok": False, "error": str(e)}), 500
-    log.info("  claude_call: %.1fs", time.time() - t0)
+    edit_elapsed = time.time() - t0
+    log.info("  claude_call: %.1fs", edit_elapsed)
+    _log_llm_usage(story_id, "gm", edit_elapsed, branch_id=branch_id)
 
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
 
@@ -2155,6 +2188,8 @@ def api_branches_edit_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
+                    _log_llm_usage(story_id, "gm_stream", time.time() - t_start,
+                                   branch_id=branch_id, usage=payload.get("usage"))
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -2271,7 +2306,9 @@ def api_branches_regenerate():
         log.info("/api/branches/regenerate EXCEPTION %s", e)
         _cleanup_branch(story_id, branch_id)
         return jsonify({"ok": False, "error": str(e)}), 500
-    log.info("  claude_call: %.1fs", time.time() - t0)
+    regen_elapsed = time.time() - t0
+    log.info("  claude_call: %.1fs", regen_elapsed)
+    _log_llm_usage(story_id, "gm", regen_elapsed, branch_id=branch_id)
 
     gm_msg_index = branch_point_index + 1
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
@@ -2387,6 +2424,8 @@ def api_branches_regenerate_stream():
                     return
                 elif event_type == "done":
                     gm_response = payload["response"]
+                    _log_llm_usage(story_id, "gm_stream", time.time() - t_start,
+                                   branch_id=branch_id, usage=payload.get("usage"))
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -3047,6 +3086,7 @@ def api_lore_chat_stream():
     last_user_msg = messages[-1].get("content", "")
 
     def generate():
+        t_start = time.time()
         try:
             for event_type, payload in call_claude_gm_stream(
                 last_user_msg, lore_system, prior, session_id=None,
@@ -3058,6 +3098,8 @@ def api_lore_chat_stream():
                     yield _sse_event({"type": "error", "message": payload})
                     return
                 elif event_type == "done":
+                    _log_llm_usage(story_id, "lore_chat", time.time() - t_start,
+                                   usage=payload.get("usage"))
                     full_response = payload.get("response", "")
                     # Parse LORE_PROPOSE tags
                     proposals = []
@@ -3380,6 +3422,27 @@ def _cleanup_incomplete_branches():
 
         if modified:
             _save_json(tree_path, tree)
+
+
+# ---------------------------------------------------------------------------
+# Usage tracking API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/usage")
+def api_usage():
+    """Return token usage summary for a story.
+
+    Query params:
+        story_id — defaults to active story
+        days     — lookback window (default 7)
+        all      — if "true", return cross-story totals instead
+    """
+    if request.args.get("all") == "true":
+        return jsonify(usage_db.get_total_usage())
+
+    story_id = request.args.get("story_id") or _active_story_id()
+    days = int(request.args.get("days", 7))
+    return jsonify(usage_db.get_usage_summary(story_id, days=days))
 
 
 if __name__ == "__main__":
