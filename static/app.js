@@ -2055,7 +2055,7 @@ function fillInputWithOption(text) {
   if (!$input || $input.disabled) return;
   // Append to existing text (allows combining multiple options)
   const existing = $input.value.trim();
-  $input.value = existing ? existing + "，" + text : text;
+  $input.value = existing ? existing + "\n" + text : text;
   $input.focus();
   $input.style.height = "auto";
   $input.style.height = $input.scrollHeight + "px";
