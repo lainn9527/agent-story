@@ -1716,6 +1716,7 @@ def api_messages():
             and not branch_meta.get("blank")
             and not branch_meta.get("deleted")
             and not branch_meta.get("merged")
+            and not branch_meta.get("pruned")
             and any(m.get("role") == "user" for m in branch_delta)
             and not any(m.get("role") == "gm" for m in branch_delta)):
         parent_id = branch_meta.get("parent_branch_id", "main")
@@ -2646,6 +2647,9 @@ def api_branches_promote():
     if branch_id not in branches:
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
+    if branches[branch_id].get("pruned"):
+        return jsonify({"ok": False, "error": "cannot promote a pruned branch"}), 400
+
     original = _load_json(_story_parsed_path(story_id), [])
     original_count = len(original)
     full_timeline = get_full_timeline(story_id, branch_id)
@@ -2721,6 +2725,8 @@ def api_branches_merge():
         return jsonify({"ok": False, "error": "cannot merge a deleted branch"}), 400
     if child.get("merged"):
         return jsonify({"ok": False, "error": "branch already merged"}), 400
+    if child.get("pruned"):
+        return jsonify({"ok": False, "error": "cannot merge a pruned branch"}), 400
 
     parent_id = child.get("parent_branch_id")
     if parent_id is None:
@@ -3769,7 +3775,7 @@ def _cleanup_incomplete_branches():
         for bid, branch in branches.items():
             if bid == "main":
                 continue
-            if branch.get("deleted") or branch.get("blank") or branch.get("merged"):
+            if branch.get("deleted") or branch.get("blank") or branch.get("merged") or branch.get("pruned"):
                 continue
             if bid.startswith("auto_"):
                 continue
