@@ -286,12 +286,9 @@ def get_toc(story_id: str) -> str:
         def _render(node: dict, depth: int):
             indent = "  " * depth
             for key, child in node.items():
-                child_keys = list(child.keys())
-                if child_keys:
-                    lines.append(f"{indent}- {key}")
+                lines.append(f"{indent}- {key}")
+                if child:
                     _render(child, depth + 1)
-                else:
-                    lines.append(f"{indent}- {key}")
 
         _render(tree, 0)
         lines.append("")
