@@ -580,12 +580,9 @@ const $drawerOverlay = document.getElementById("drawer-overlay");
 const $drawerToggleBtn = document.getElementById("drawer-toggle-btn");
 const $drawerCloseBtn = document.getElementById("drawer-close-btn");
 const $storyList = document.getElementById("story-list");
-const $branchList = document.getElementById("branch-list");
 const $newStoryBtn = document.getElementById("new-story-btn");
-const $newBranchBtn = document.getElementById("new-branch-btn");
 const $newBlankBranchBtn = document.getElementById("new-blank-branch-btn");
 const $branchTreeBtn = document.getElementById("branch-tree-btn");
-const $promoteBtn = document.getElementById("promote-branch-btn");
 const $branchIndicator = document.getElementById("branch-indicator");
 const $createSaveBtn = document.getElementById("create-save-btn");
 const $storyModal = document.getElementById("new-story-modal");
@@ -790,8 +787,6 @@ async function loadBranches() {
   const result = await API.branches();
   branches = result.branches || {};
   currentBranchId = result.active_branch_id || currentBranchId;
-  // Show/hide promote button
-  $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
   updateBranchIndicator();
 }
 
@@ -948,6 +943,29 @@ function _btRenderTree(container, modal) {
         }
       });
       actions.appendChild(heartBtn);
+
+      // Promote button
+      const promoteBtn = document.createElement("span");
+      promoteBtn.className = "bt-action-btn bt-action-promote";
+      promoteBtn.textContent = "\u2B06";
+      promoteBtn.title = "設為主時間線";
+      promoteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!(await showConfirm(`確定要將分支「${branch.name || branch.id}」設為主時間線嗎？`))) return;
+        const res = await API.promoteBranch(branch.id);
+        if (res.ok) {
+          currentBranchId = "main";
+          await loadBranches();
+          await loadMessages("main");
+          const status = await API.status("main");
+          renderCharacterStatus(status);
+          _btRenderTree(container, modal);
+          scrollToBottom();
+        } else {
+          alert(res.error || "設為主時間線失敗");
+        }
+      });
+      actions.appendChild(promoteBtn);
 
       if (!branch.blank) {
         const mergeBtn = document.createElement("span");
@@ -1230,7 +1248,6 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
   await API.switchBranch(branchId);
   currentBranchId = branchId;
-  $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
   updateBranchIndicator();
 
   if (scrollToIndex != null || preserveScroll) {
@@ -3077,16 +3094,6 @@ $input.addEventListener("input", () => {
   $input.style.height = Math.min($input.scrollHeight, 120) + "px";
 });
 
-// New branch button — branch from the last message
-$newBranchBtn.addEventListener("click", () => {
-  if (allMessages.length === 0) {
-    showAlert("沒有訊息可以分支");
-    return;
-  }
-  const lastIndex = allMessages[allMessages.length - 1].index;
-  createBranchFromIndex(lastIndex);
-});
-
 // Branch tree modal
 $branchTreeBtn.addEventListener("click", () => openBranchTreeModal());
 document.getElementById("branch-tree-modal-close").addEventListener("click", closeBranchTreeModal);
@@ -3136,33 +3143,6 @@ $newBlankBranchBtn.addEventListener("click", async () => {
   }
 });
 
-// Promote branch button
-$promoteBtn.addEventListener("click", async () => {
-  if (currentBranchId === "main") return;
-  closeSummaryModal();
-  const branch = branches[currentBranchId];
-  const name = branch ? branch.name : currentBranchId;
-  if (!(await showConfirm(`確定要將分支「${name}」的內容設為主時間線嗎？`))) return;
-
-  $promoteBtn.disabled = true;
-  try {
-    const res = await API.promoteBranch(currentBranchId);
-    if (res.ok) {
-      currentBranchId = "main";
-      await loadBranches();
-      await loadMessages("main");
-      const status = await API.status("main");
-      renderCharacterStatus(status);
-      scrollToBottom();
-    } else {
-      showAlert(res.error || "設為主時間線失敗");
-    }
-  } catch (err) {
-    showAlert("網路錯誤：" + err.message);
-  }
-  $promoteBtn.disabled = false;
-});
-
 // New story button
 $newStoryBtn.addEventListener("click", () => {
   closeDrawer();
@@ -3197,7 +3177,7 @@ document.addEventListener("keydown", (e) => {
     }
   }
   // Cmd+B (Mac) / Ctrl+B (Win) — toggle branch tree modal
-  if ((e.metaKey || e.ctrlKey) && e.key === "b" && document.activeElement?.tagName !== "TEXTAREA") {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "b" && document.activeElement?.tagName !== "TEXTAREA") {
     e.preventDefault();
     const modal = document.getElementById("branch-tree-modal");
     if (modal.classList.contains("hidden")) {
@@ -3206,8 +3186,8 @@ document.addEventListener("keydown", (e) => {
       closeBranchTreeModal();
     }
   }
-  // Cmd+\ (Mac) / Ctrl+\ (Win) — toggle drawer
-  if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+  // Cmd+Shift+B (Mac) / Ctrl+Shift+B (Win) — toggle drawer
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "b") {
     e.preventDefault();
     if ($drawer.classList.contains("closed")) {
       openDrawer();
