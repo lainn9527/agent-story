@@ -175,30 +175,6 @@ body {
   background: rgba(255, 170, 0, 0.25);
 }
 
-.auto-branch-badge {
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  background: rgba(255, 68, 68, 0.1);
-  color: #ff6b6b;
-  margin-left: 6px;
-}
-.auto-play-section-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  cursor: pointer;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
-.auto-play-section-header:hover {
-  color: var(--text);
-}
-
 /* ---------- Drawer Overlay ---------- */
 #drawer-overlay {
   position: fixed;
@@ -314,6 +290,11 @@ body {
   border-color: var(--gold);
 }
 
+.drawer-btn-group {
+  display: flex;
+  gap: 6px;
+}
+
 /* Drawer list items */
 .drawer-list {
   display: flex;
@@ -351,21 +332,7 @@ body {
   white-space: nowrap;
 }
 
-.branch-id-tag {
-  width: 100%;
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  opacity: 0.6;
-  margin-top: 2px;
-  font-family: monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.drawer-item-rename,
-.drawer-item-delete,
-.drawer-item-merge {
+.drawer-item-delete {
   opacity: 0;
   color: var(--text-dim);
   font-size: 0.75rem;
@@ -374,93 +341,8 @@ body {
   border-radius: 4px;
   transition: opacity 0.15s, color 0.15s;
 }
-
-.drawer-item:hover .drawer-item-rename,
-.drawer-item:hover .drawer-item-delete,
-.drawer-item:hover .drawer-item-merge {
-  opacity: 1;
-}
-
-.drawer-item-rename:hover {
-  color: #b8860b;
-  background: rgba(184, 134, 11, 0.1);
-}
-
-.drawer-item-delete:hover {
-  color: var(--accent);
-  background: rgba(217, 48, 37, 0.1);
-}
-
-.drawer-item-merge:hover {
-  color: #2e7d32;
-  background: rgba(46, 125, 50, 0.1);
-}
-
-/* Branch tree accordion */
-.branch-toggle-arrow {
-  display: inline-block;
-  font-size: 0.6rem;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 2px 4px;
-  margin-right: 2px;
-  transition: transform 0.2s;
-  flex-shrink: 0;
-}
-
-.branch-toggle-arrow.expanded {
-  transform: rotate(90deg);
-}
-
-.branch-group-children {
-  overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.2s ease;
-  max-height: 5000px;
-  opacity: 1;
-}
-
-.branch-group-children.collapsed {
-  max-height: 0;
-  opacity: 0;
-}
-
-.branch-rename-input {
-  flex: 1;
-  font-size: 0.85rem;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  outline: none;
-  background: var(--bg);
-  color: var(--text);
-  min-width: 0;
-}
-
-/* Promote button inside drawer */
-.drawer-promote-btn {
-  display: block;
-  margin-top: 10px;
-  width: 100%;
-  background: transparent;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 6px 14px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-
-.drawer-promote-btn:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.drawer-promote-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.drawer-item:hover .drawer-item-delete { opacity: 1; }
+.drawer-item-delete:hover { color: var(--accent); background: rgba(217, 48, 37, 0.1); }
 
 /* ---------- Layout ---------- */
 #app {
@@ -2073,6 +1955,8 @@ body {
 .bt-action-del:hover { color: var(--accent); }
 .bt-action-heart { font-size: 0.85rem; }
 .bt-action-heart:hover { color: #ff6b9d; background: rgba(255,107,157,0.1); }
+.bt-action-promote { font-size: 0.75rem; }
+.bt-action-promote:hover { color: #4fc3f7; background: rgba(79,195,247,0.1); }
 .bt-protected-badge { font-size: 0.65rem; color: #ff6b9d; margin-left: 2px; }
 
 /* ---------- Message index label (#5) ---------- */
