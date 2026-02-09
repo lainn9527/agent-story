@@ -120,8 +120,13 @@ def get_event_by_id(story_id: str, event_id: int) -> dict | None:
 # Search (CJK bigram scoring — same pattern as lore_db.py)
 # ---------------------------------------------------------------------------
 
-def search_events(story_id: str, query: str, branch_id: str | None = None, limit: int = 5) -> list[dict]:
-    """Search events using CJK bigram keyword scoring."""
+def search_events(story_id: str, query: str, branch_id: str | None = None, limit: int = 5, active_only: bool = False) -> list[dict]:
+    """Search events using CJK bigram keyword scoring.
+
+    active_only: if True, only return planted/triggered events (for GM context
+    injection). Resolved/abandoned events are excluded to prevent the GM from
+    re-issuing rewards or repeating completed events.
+    """
     conn = _get_conn(story_id)
     _ensure_tables(conn)
 
@@ -136,12 +141,13 @@ def search_events(story_id: str, query: str, branch_id: str | None = None, limit
     if not keywords:
         keywords = {query}
 
+    active_filter = "AND status IN ('planted', 'triggered')" if active_only else ""
     if branch_id:
         rows = conn.execute(
-            "SELECT * FROM events WHERE branch_id = ?", (branch_id,)
+            f"SELECT * FROM events WHERE branch_id = ? {active_filter}", (branch_id,)
         ).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM events").fetchall()
+        rows = conn.execute(f"SELECT * FROM events WHERE 1=1 {active_filter}").fetchall()
 
     scored = []
     for row in rows:
@@ -165,7 +171,7 @@ def search_events(story_id: str, query: str, branch_id: str | None = None, limit
 
 def search_relevant_events(story_id: str, user_message: str, branch_id: str, limit: int = 3) -> str:
     """Search for events relevant to a user message. Returns formatted text for injection."""
-    results = search_events(story_id, user_message, branch_id=branch_id, limit=limit)
+    results = search_events(story_id, user_message, branch_id=branch_id, limit=limit, active_only=True)
     if not results:
         return ""
 
