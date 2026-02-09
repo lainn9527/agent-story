@@ -368,7 +368,7 @@ function updateBranchIndicator() {
   const branch = branches[currentBranchId];
   const rawId = currentBranchId === "main" ? "main" : currentBranchId;
   const displayId = rawId.replace(/^branch_/, "");
-  const tooltip = branch && branch.name ? `${displayId} — ${branch.name}` : displayId;
+  const tooltip = branch && branch.name ? `${rawId} — ${branch.name}` : rawId;
   $branchIndicator.textContent = displayId;
   $branchIndicator.title = tooltip;
 }
