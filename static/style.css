@@ -1306,6 +1306,16 @@ body {
   cursor: default;
 }
 
+.save-edit {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  transition: color 0.15s;
+}
+.save-edit:hover {
+  color: var(--gold);
+}
 .save-delete {
   cursor: pointer;
   color: var(--text-dim);
@@ -1315,7 +1325,7 @@ body {
   transition: color 0.15s;
 }
 .save-delete:hover {
-  color: #ff6b6b;
+  color: var(--accent);
 }
 
 .save-info {
