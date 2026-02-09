@@ -5,6 +5,15 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.4] - 2026-02-10
+
+### Changed
+- Git Workflow: enforce user-gated e2e testing before PR merge ([#59])
+- Git Workflow: add e2e test setup steps (copy data, random port, start server) ([#59])
+- Git Workflow: integrate version bump + changelog into merge checklist ([#59])
+
+[#59]: https://github.com/lainn9527/agent-story/pull/59
+
 ## [0.12.3] - 2026-02-10
 
 ### Added
