@@ -109,8 +109,24 @@ def generate_summary_async(
                 '"key_events": ["事件1", "事件2", ...]}\n'
             )
 
-            from llm_bridge import call_oneshot
+            from llm_bridge import call_oneshot, get_last_usage
+            import usage_db
+            t0 = time.time()
             response_text = call_oneshot(prompt)
+            _summary_elapsed = time.time() - t0
+            usage = get_last_usage()
+            if usage:
+                try:
+                    usage_db.log_usage(
+                        story_id=story_id, provider=usage.get("provider", ""),
+                        model=usage.get("model", ""), call_type="auto_summary",
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        output_tokens=usage.get("output_tokens"),
+                        total_tokens=usage.get("total_tokens"),
+                        branch_id=branch_id, elapsed_ms=int(_summary_elapsed * 1000),
+                    )
+                except Exception:
+                    pass
             if not response_text:
                 log.warning("    auto_summary: LLM returned empty response")
                 return

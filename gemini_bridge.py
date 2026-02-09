@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -11,6 +12,9 @@ import urllib.request
 from gemini_key_manager import get_available_keys, mark_rate_limited
 
 log = logging.getLogger("rpg")
+
+# Thread-local storage for last usage metadata
+_tls = threading.local()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -105,6 +109,23 @@ def _extract_text(response_data: dict) -> str:
 
     parts = candidate.get("content", {}).get("parts", [])
     return "".join(p.get("text", "") for p in parts)
+
+
+def _extract_usage(response_data: dict) -> dict | None:
+    """Extract usageMetadata from a Gemini response into a normalized dict."""
+    meta = response_data.get("usageMetadata")
+    if not meta:
+        return None
+    return {
+        "prompt_tokens": meta.get("promptTokenCount"),
+        "output_tokens": meta.get("candidatesTokenCount"),
+        "total_tokens": meta.get("totalTokenCount"),
+    }
+
+
+def get_last_usage() -> dict | None:
+    """Return usage metadata from the most recent non-streaming call on this thread."""
+    return getattr(_tls, "last_usage", None)
 
 
 # ---------------------------------------------------------------------------
@@ -226,11 +247,13 @@ def call_gemini_gm(
             return json.loads(resp.read().decode("utf-8"))
 
     result, err = _with_key_fallback(gemini_cfg, _do)
+    _tls.last_usage = None
 
     if err:
         return f"【系統錯誤】{err}", None
 
     elapsed = time.time() - t0
+    _tls.last_usage = _extract_usage(result)
     text = _extract_text(result).strip()
     log.info("    gemini_bridge: OK in %.1fs response_len=%d", elapsed, len(text))
 
@@ -319,6 +342,7 @@ def call_gemini_gm_stream(
     accumulated = ""
     truncated = False
     grounding_metadata = None
+    usage_metadata = None
     try:
         while True:
             raw_line = resp.readline()
@@ -346,6 +370,11 @@ def call_gemini_gm_stream(
                 accumulated += text
                 yield ("text", text)
 
+            # Track usage metadata (typically in the last SSE event)
+            u = _extract_usage(event_data)
+            if u:
+                usage_metadata = u
+
             # Check for MAX_TOKENS truncation and grounding metadata
             candidates = event_data.get("candidates", [])
             if candidates:
@@ -370,7 +399,7 @@ def call_gemini_gm_stream(
             accumulated += suffix
             yield ("text", suffix)
 
-        done_payload = {"response": accumulated, "session_id": None}
+        done_payload = {"response": accumulated, "session_id": None, "usage": usage_metadata}
         grounding = _format_grounding(grounding_metadata)
         if grounding:
             done_payload["grounding"] = grounding
@@ -435,10 +464,12 @@ def call_gemini_grounded_search(
             return json.loads(resp.read().decode("utf-8"))
 
     result, err = _with_key_fallback(gemini_cfg, _do)
+    _tls.last_usage = None
     if err:
         log.info("    gemini_grounded_search: %s", err)
         return ""
 
+    _tls.last_usage = _extract_usage(result)
     text = _extract_text(result).strip()
     log.info("    gemini_grounded_search: OK query_len=%d response_len=%d", len(query), len(text))
     return text
@@ -468,10 +499,12 @@ def call_gemini_oneshot(
             return json.loads(resp.read().decode("utf-8"))
 
     result, err = _with_key_fallback(gemini_cfg, _do)
+    _tls.last_usage = None
     if err:
         log.info("    gemini_oneshot: %s", err)
         return ""
 
+    _tls.last_usage = _extract_usage(result)
     return _extract_text(result).strip()
 
 

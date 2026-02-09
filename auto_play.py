@@ -66,7 +66,8 @@ from app import (
     _IMG_RE,
 )
 from compaction import get_recap_text, load_recap, should_compact, compact_async
-from llm_bridge import call_claude_gm, call_oneshot, set_provider, web_search
+from llm_bridge import call_claude_gm, call_oneshot, set_provider, web_search, get_last_usage
+import usage_db
 from npc_evolution import should_run_evolution, run_npc_evolution_async
 from auto_summary import should_generate_summary, generate_summary_async, _load_summaries
 
@@ -177,7 +178,22 @@ def generate_random_character(story_id: str) -> dict:
     Returns the character data dict (same format as lin_hao.json).
     """
     log.info("Generating random character via LLM...")
+    t0_char = time.time()
     raw = call_oneshot(_CHAR_GEN_PROMPT)
+    _char_elapsed = time.time() - t0_char
+    usage = get_last_usage()
+    if usage:
+        try:
+            usage_db.log_usage(
+                story_id=story_id, provider=usage.get("provider", ""),
+                model=usage.get("model", ""), call_type="auto_play_chargen",
+                prompt_tokens=usage.get("prompt_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                elapsed_ms=int(_char_elapsed * 1000),
+            )
+        except Exception:
+            pass
 
     # Extract JSON from response (handle markdown code blocks)
     text = raw.strip()
@@ -393,9 +409,24 @@ def execute_turn(
         augmented_text = web_search_context + "\n" + augmented_text
 
     # 5. Call GM (stateless)
+    t0_gm = time.time()
     gm_response, _ = call_claude_gm(
         augmented_text, system_prompt, recent, session_id=None
     )
+    _gm_elapsed = time.time() - t0_gm
+    usage = get_last_usage()
+    if usage:
+        try:
+            usage_db.log_usage(
+                story_id=story_id, provider=usage.get("provider", ""),
+                model=usage.get("model", ""), call_type="gm",
+                prompt_tokens=usage.get("prompt_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                branch_id=branch_id, elapsed_ms=int(_gm_elapsed * 1000),
+            )
+        except Exception:
+            pass
 
     # 5b. If GM returned a system error, rollback player message and raise
     if gm_response.startswith("【系統錯誤】"):
@@ -542,7 +573,22 @@ def generate_player_action(
         recent_context="\n\n".join(context_lines) if context_lines else "(開局)",
     )
 
+    t0_player = time.time()
     response = call_oneshot(turn_prompt, system_prompt=system_prompt)
+    _player_elapsed = time.time() - t0_player
+    usage = get_last_usage()
+    if usage:
+        try:
+            usage_db.log_usage(
+                story_id=story_id, provider=usage.get("provider", ""),
+                model=usage.get("model", ""), call_type="auto_play_player",
+                prompt_tokens=usage.get("prompt_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                branch_id=branch_id, elapsed_ms=int(_player_elapsed * 1000),
+            )
+        except Exception:
+            pass
     if not response:
         return "我觀察周圍的環境，思考下一步該怎麼做。"
     return response.strip()

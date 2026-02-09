@@ -8,8 +8,12 @@ import json
 import logging
 import os
 import subprocess
+import threading
 
 log = logging.getLogger("rpg")
+
+# Thread-local storage for last usage metadata (populated after each call)
+_tls = threading.local()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
@@ -51,6 +55,28 @@ def get_provider() -> str:
     return _get_config().get("provider", "claude_cli")
 
 
+def get_last_usage() -> dict | None:
+    """Return usage metadata from the most recent LLM call on this thread.
+
+    Returns dict with keys: provider, model, prompt_tokens, output_tokens, total_tokens.
+    Returns None if no usage data is available (e.g. Claude CLI).
+    """
+    return getattr(_tls, "last_usage", None)
+
+
+def _capture_usage(provider: str, model: str):
+    """Read usage from the bridge module and store in our thread-local."""
+    _tls.last_usage = None
+    if provider == "gemini":
+        from gemini_bridge import get_last_usage as _gemini_usage
+        usage = _gemini_usage()
+    else:
+        from claude_bridge import get_last_usage as _claude_usage
+        usage = _claude_usage()
+    if usage:
+        _tls.last_usage = {**usage, "provider": provider, "model": model}
+
+
 # ---------------------------------------------------------------------------
 # GM call — non-streaming
 # ---------------------------------------------------------------------------
@@ -68,15 +94,21 @@ def call_claude_gm(
     if provider == "gemini":
         from gemini_bridge import call_gemini_gm
         g = cfg.get("gemini", {})
-        return call_gemini_gm(
+        model = g.get("model", "gemini-2.0-flash")
+        result = call_gemini_gm(
             user_message, system_prompt, recent_messages,
-            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=model,
             session_id=session_id,
         )
+        _capture_usage(provider, model)
+        return result
 
     # Default: Claude CLI
+    model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     from claude_bridge import call_claude_gm as _claude
-    return _claude(user_message, system_prompt, recent_messages, session_id=session_id)
+    result = _claude(user_message, system_prompt, recent_messages, session_id=session_id)
+    _capture_usage(provider, model)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -90,23 +122,34 @@ def call_claude_gm_stream(
     session_id: str | None = None,
     tools: list[dict] | None = None,
 ):
-    """Unified streaming GM call. Yields ("text"|"done"|"error", payload)."""
+    """Unified streaming GM call. Yields ("text"|"done"|"error", payload).
+
+    The "done" payload includes a "usage" key with provider/model/token info
+    (or None if unavailable).
+    """
     cfg = _get_config()
     provider = get_provider()
 
     if provider == "gemini":
         from gemini_bridge import call_gemini_gm_stream
         g = cfg.get("gemini", {})
-        yield from call_gemini_gm_stream(
+        model = g.get("model", "gemini-2.0-flash")
+        for event_type, payload in call_gemini_gm_stream(
             user_message, system_prompt, recent_messages,
-            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=model,
             session_id=session_id, tools=tools,
-        )
+        ):
+            if event_type == "done" and isinstance(payload, dict):
+                usage = payload.get("usage")
+                if usage:
+                    payload["usage"] = {**usage, "provider": provider, "model": model}
+            yield (event_type, payload)
         return
 
     # Default: Claude CLI (tools not supported)
     if tools:
         log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
+    model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     from claude_bridge import call_claude_gm_stream as _stream
     yield from _stream(user_message, system_prompt, recent_messages, session_id=session_id)
 
@@ -149,13 +192,17 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
     if provider == "gemini":
         from gemini_bridge import call_gemini_oneshot
         g = cfg.get("gemini", {})
-        return call_gemini_oneshot(
+        model = g.get("model", "gemini-2.0-flash")
+        result = call_gemini_oneshot(
             prompt,
-            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=model,
             system_prompt=system_prompt,
         )
+        _capture_usage(provider, model)
+        return result
 
     # Claude CLI one-shot
+    _tls.last_usage = None
     from claude_bridge import CLAUDE_BIN
     model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     cmd = [CLAUDE_BIN, "-p", "--output-format", "json", "--model", model]
@@ -190,6 +237,7 @@ def web_search(query: str) -> str:
         log.info("llm_bridge: web_search skipped — no Gemini API keys configured")
         return ""
     from gemini_bridge import call_gemini_grounded_search
-    return call_gemini_grounded_search(
-        query, gemini_cfg=g, model=g.get("model", "gemini-2.5-flash"),
-    )
+    model = g.get("model", "gemini-2.5-flash")
+    result = call_gemini_grounded_search(query, gemini_cfg=g, model=model)
+    _capture_usage("gemini", model)
+    return result

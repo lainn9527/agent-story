@@ -15,6 +15,11 @@ CLEAN_CWD = "/tmp"    # avoid loading project CLAUDE.md into context
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/Users/eddylai/.local/bin/claude")
 
 
+def get_last_usage() -> dict | None:
+    """Claude CLI does not provide token usage data. Always returns None."""
+    return None
+
+
 # ---------------------------------------------------------------------------
 # GM call — persistent session (per-branch)
 # ---------------------------------------------------------------------------
@@ -235,7 +240,7 @@ def call_claude_gm_stream(
             yield ("error", "Claude 回傳空白回應")
             return
 
-        yield ("done", {"response": accumulated, "session_id": None})
+        yield ("done", {"response": accumulated, "session_id": None, "usage": None})
 
     except Exception as e:
         log.info("    claude_bridge_stream: EXCEPTION %s", e)
@@ -244,7 +249,7 @@ def call_claude_gm_stream(
         except Exception:
             pass
         if accumulated:
-            yield ("done", {"response": accumulated, "session_id": None})
+            yield ("done", {"response": accumulated, "session_id": None, "usage": None})
         else:
             yield ("error", str(e))
 
