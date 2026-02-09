@@ -229,6 +229,17 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
   git worktree remove ../story-<branch-name>
   ```
 
+## Versioning & Changelog
+- **Version file**: `VERSION` (single source of truth, read by `app.py` as `__version__`)
+- **Changelog**: `CHANGELOG.md` — [Keep a Changelog](https://keepachangelog.com/) format, [Semantic Versioning](https://semver.org/)
+- **API**: `GET /api/config` returns `version` field
+- **Bump workflow**: When releasing a new version:
+  1. Update `VERSION` with the new version number
+  2. Add a new `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`
+  3. Each entry should link to its PR: `([#N])` with reference-style links at the bottom
+  4. Categories: `Added`, `Changed`, `Fixed`, `Removed`
+  5. Tag the commit: `git tag vX.Y.Z`
+
 ## Code Style
 - Python: standard Flask patterns, all helpers take `story_id`
 - JS: vanilla, no framework, no build step
