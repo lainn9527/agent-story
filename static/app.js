@@ -1265,6 +1265,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   loadNpcs();
   loadEvents();
   loadSummaries();
+  loadDiceCheatStatus();
 
   // Show/hide "load earlier" button for auto branches with truncated messages
   if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
@@ -2558,19 +2559,22 @@ async function loadConfigPanel() {
   loadDiceCheatStatus();
 }
 
+function updateCheatBadge(active) {
+  const badge = document.getElementById("cheat-badge");
+  if (badge) badge.classList.toggle("visible", active);
+}
+
 async function loadDiceCheatStatus() {
   try {
     const res = await fetch(`/api/cheats/dice?branch_id=${currentBranchId}`);
     const data = await res.json();
     const btn = document.getElementById("dice-cheat-btn");
-    if (!btn) return;
-    if (data.always_success) {
-      btn.textContent = "ON";
-      btn.classList.add("active");
-    } else {
-      btn.textContent = "OFF";
-      btn.classList.remove("active");
+    const active = !!data.always_success;
+    if (btn) {
+      btn.textContent = active ? "ON" : "OFF";
+      btn.classList.toggle("active", active);
     }
+    updateCheatBadge(active);
   } catch (e) {
     console.error("loadDiceCheatStatus error:", e);
   }
@@ -2589,6 +2593,7 @@ async function toggleDiceCheat() {
     });
     btn.textContent = newState ? "ON" : "OFF";
     btn.classList.toggle("active", newState);
+    updateCheatBadge(newState);
   } catch (e) {
     console.error("toggleDiceCheat error:", e);
   }

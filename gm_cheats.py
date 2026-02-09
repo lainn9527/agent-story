@@ -20,10 +20,11 @@ def _cheats_path(story_dir: str, branch_id: str) -> str:
 
 def load_cheats(story_dir: str, branch_id: str) -> dict:
     path = _cheats_path(story_dir, branch_id)
-    if os.path.exists(path):
+    try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
 
 
 def save_cheats(story_dir: str, branch_id: str, cheats: dict) -> None:
