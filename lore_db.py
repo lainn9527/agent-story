@@ -107,6 +107,8 @@ def rebuild_index(story_id: str):
     conn.execute("DELETE FROM lore")
     for entry in lore_entries:
         content = entry.get("content", "")
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False)
         if content.startswith("（待建立）"):
             continue
         tags = extract_tags(content)
