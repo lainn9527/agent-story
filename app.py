@@ -36,7 +36,7 @@ from compaction import (
     load_recap, save_recap, get_recap_text, should_compact, compact_async,
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
 )
-from world_timer import process_time_tags, get_world_day, copy_world_day
+from world_timer import process_time_tags, get_world_day, copy_world_day, advance_world_day, TIME_RE
 
 # ---------------------------------------------------------------------------
 # Config
@@ -630,8 +630,8 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
     t.start()
 
 
-def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: int, skip_state: bool = False):
-    """Background: use LLM to extract structured tags (lore/event/npc/state) from GM response."""
+def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: int, skip_state: bool = False, skip_time: bool = False):
+    """Background: use LLM to extract structured tags (lore/event/npc/state/time) from GM response."""
     if len(gm_text) < 200:
         return
 
@@ -700,9 +700,14 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
                 "格式：只填有變化的欄位。\n\n"
+                "## 5. 時間流逝（time）\n"
+                "分析 GM 敘事中是否有時間流逝。只計算明確的時間跳躍，不要猜測。\n"
+                "例如：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15、「幾個小時後」→ hours:3\n"
+                "如果敘事只是場景內連續行動（走路、戰鬥、對話），沒有時間跳躍，則不要輸出。\n"
+                '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}}\n'
+                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}, "time": {"days": N}}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
@@ -768,11 +773,22 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 _apply_state_update(story_id, branch_id, state_update)
                 saved_counts["state"] = True
 
+            # Time — advance world_day (skip if regex already found TIME tags)
+            time_data = data.get("time", {})
+            if time_data and isinstance(time_data, dict) and not skip_time:
+                days = time_data.get("days", 0)
+                hours = time_data.get("hours", 0)
+                total_days = float(days) + float(hours) / 24
+                if total_days > 0:
+                    advance_world_day(story_id, branch_id, total_days)
+                    saved_counts["time"] = total_days
+
             log.info(
-                "    extract_tags: saved %d lore, %d events, %d npcs, state %s",
+                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s",
                 saved_counts["lore"], saved_counts["events"],
                 saved_counts["npcs"],
                 "updated" if saved_counts["state"] else "no change",
+                f"+{saved_counts['time']:.1f}d" if saved_counts.get("time") else "no change",
             )
 
         except json.JSONDecodeError as e:
@@ -1262,12 +1278,14 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         image_info = {"filename": filename, "ready": False}
 
     # Extract TIME tags and advance world_day
+    had_time_tags = bool(TIME_RE.search(gm_response))
     gm_response = process_time_tags(gm_response, story_id, branch_id)
 
     # Async post-processing: extract structured data via separate LLM call
-    # Skip state extraction if regex already found STATE tags (avoid delta double-apply)
+    # Skip state/time extraction if regex already found those tags (avoid double-apply)
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
-                        skip_state=bool(state_updates))
+                        skip_state=bool(state_updates),
+                        skip_time=had_time_tags)
 
     # Build snapshots for branch forking accuracy
     snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
