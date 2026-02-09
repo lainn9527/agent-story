@@ -1377,7 +1377,6 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     gm_response = process_time_tags(gm_response, story_id, branch_id)
 
     # Async post-processing: extract structured data via separate LLM call
-    # Time fallback (+30min) is handled inside _extract_tags_async when LLM also finds nothing
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
                         skip_state=bool(state_updates),
                         skip_time=had_time_tags)
