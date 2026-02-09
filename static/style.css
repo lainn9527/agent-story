@@ -357,6 +357,37 @@ body {
   white-space: nowrap;
 }
 
+.auto-play-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.auto-play-section-header:hover { color: var(--text); }
+
+.branch-toggle-arrow {
+  display: inline-block;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  padding: 2px 4px;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.branch-toggle-arrow.expanded { transform: rotate(90deg); }
+
+.branch-group-children {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+  max-height: 5000px;
+  opacity: 1;
+}
+.branch-group-children.collapsed { max-height: 0; opacity: 0; }
+
 .auto-branch-badge {
   padding: 1px 6px;
   border-radius: 4px;
