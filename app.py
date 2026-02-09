@@ -37,6 +37,10 @@ from compaction import (
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
 )
 from world_timer import process_time_tags, get_world_day, copy_world_day, advance_world_day, TIME_RE
+from lore_organizer import (
+    get_lore_lock, try_classify_topic, build_prefix_registry, invalidate_prefix_cache,
+    should_organize, organize_lore_async,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -113,8 +117,10 @@ def _load_json(path, default=None):
 
 def _save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -505,27 +511,42 @@ def _find_similar_topic(new_topic: str, new_category: str,
     return best_topic if best_sim >= threshold else None
 
 
-def _save_lore_entry(story_id: str, entry: dict):
-    """Save a lore entry. If same topic exists, update it. Also updates search index."""
-    lore = _load_lore(story_id)
+def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = None):
+    """Save a lore entry. If same topic exists, update it. Also updates search index.
+
+    Uses lore lock for thread safety + auto-classifies orphan topics.
+    """
     topic = entry.get("topic", "").strip()
     if not topic:
         return
-    # Update existing topic or append new
-    for i, existing in enumerate(lore):
-        if existing.get("topic") == topic:
-            # Preserve category if not provided in new entry
-            if "category" not in entry and "category" in existing:
-                entry["category"] = existing["category"]
-            # Preserve source provenance if not provided in new entry
-            if "source" not in entry and "source" in existing:
-                entry["source"] = existing["source"]
-            lore[i] = entry
-            _save_json(_story_lore_path(story_id), lore)
-            upsert_lore_entry(story_id, entry)
-            return
-    lore.append(entry)
-    _save_json(_story_lore_path(story_id), lore)
+
+    # Auto-classify orphan topic before saving
+    category = entry.get("category", "")
+    if "：" not in topic and category:
+        organized = try_classify_topic(topic, category, story_id, prefix_registry=prefix_registry)
+        if organized:
+            log.info("    lore auto-classify: '%s' → '%s'", topic, organized)
+            topic = organized
+            entry["topic"] = topic
+
+    lock = get_lore_lock(story_id)
+    with lock:
+        lore = _load_lore(story_id)
+        # Update existing topic or append new
+        for i, existing in enumerate(lore):
+            if existing.get("topic") == topic:
+                # Preserve category if not provided in new entry
+                if "category" not in entry and "category" in existing:
+                    entry["category"] = existing["category"]
+                # Preserve source provenance if not provided in new entry
+                if "source" not in entry and "source" in existing:
+                    entry["source"] = existing["source"]
+                lore[i] = entry
+                _save_json(_story_lore_path(story_id), lore)
+                upsert_lore_entry(story_id, entry)
+                return
+        lore.append(entry)
+        _save_json(_story_lore_path(story_id), lore)
     upsert_lore_entry(story_id, entry)
 
 
@@ -735,6 +756,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
             saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False}
 
+            # Build prefix registry once for the batch (avoids per-entry rebuild)
+            prefix_reg = build_prefix_registry(story_id)
+
             # Lore — similarity guard to prevent fragmentation
             for entry in data.get("lore", []):
                 topic = entry.get("topic", "").strip()
@@ -748,9 +772,13 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     if similar:
                         log.info("    lore merge: '%s' → '%s'", topic, similar)
                         entry["topic"] = similar
-                _save_lore_entry(story_id, entry)
+                _save_lore_entry(story_id, entry, prefix_registry=prefix_reg)
                 topic_categories[entry.get("topic", topic)] = category
                 saved_counts["lore"] += 1
+
+            # Invalidate prefix cache if new lore was saved
+            if saved_counts["lore"]:
+                invalidate_prefix_cache(story_id)
 
             # Events — dedup by title
             for event in data.get("events", []):
@@ -790,6 +818,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "updated" if saved_counts["state"] else "no change",
                 f"+{saved_counts['time']:.1f}d" if saved_counts.get("time") else "no change",
             )
+
+            # Trigger periodic lore organization if orphans have accumulated
+            if should_organize(story_id):
+                organize_lore_async(story_id)
 
         except json.JSONDecodeError as e:
             log.warning("    extract_tags: JSON parse failed (%s), skipping", e)

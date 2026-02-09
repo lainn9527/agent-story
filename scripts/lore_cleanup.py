@@ -437,18 +437,219 @@ def validate_and_save(story_id: str, lore: list[dict], dry_run: bool = False):
 
 
 # ---------------------------------------------------------------------------
+# Phase 6: Organize orphan topics (rule-based + LLM)
+# ---------------------------------------------------------------------------
+
+def organize_orphans(story_id: str, delay: float = 3.0, dry_run: bool = False):
+    """Organize orphan topics (no `：`) into hierarchical prefixed form.
+
+    Phase 1: Rule-based matching (starts-with / exact prefix match)
+    Phase 2: LLM classification (closed-option, batched)
+    """
+    from lore_organizer import (
+        build_prefix_registry, try_classify_topic, find_orphans,
+        get_lore_lock, rename_lore_topic, invalidate_prefix_cache,
+    )
+    from llm_bridge import call_oneshot
+
+    orphans = find_orphans(story_id)
+    log.info("Phase 6: Organize orphans — %d orphan topics found", len(orphans))
+    if not orphans:
+        return
+
+    registry = build_prefix_registry(story_id)
+
+    # Phase 6a: Rule-based
+    rule_classified = []
+    remaining = []
+    for orphan in orphans:
+        topic = orphan.get("topic", "")
+        category = orphan.get("category", "")
+        new_topic = try_classify_topic(topic, category, story_id, prefix_registry=registry)
+        if new_topic:
+            rule_classified.append((topic, new_topic))
+        else:
+            remaining.append(orphan)
+
+    log.info("  Phase 6a (rules): %d classified, %d remaining", len(rule_classified), len(remaining))
+    for old, new in rule_classified:
+        log.info("    %s → %s", old, new)
+
+    if not dry_run and rule_classified:
+        lock = get_lore_lock(story_id)
+        for old, new in rule_classified:
+            with lock:
+                rename_lore_topic(story_id, old, new)
+        invalidate_prefix_cache(story_id)
+        registry = build_prefix_registry(story_id)
+
+    # Phase 6b: LLM classification
+    if not remaining:
+        log.info("  Phase 6b (LLM): no remaining orphans")
+        return
+
+    # Build prefix list by category for LLM prompt
+    prefix_lines = []
+    for cat, prefixes in sorted(registry.get("by_category", {}).items()):
+        if prefixes:
+            prefix_lines.append(f"[{cat}] {', '.join(sorted(prefixes))}")
+
+    if not prefix_lines:
+        log.info("  Phase 6b (LLM): no prefixes available, skipping")
+        return
+
+    all_prefixes = registry.get("all", set())
+    llm_classified = []
+    skipped = []
+
+    # Process in batches of 20
+    for batch_start in range(0, len(remaining), 20):
+        batch = remaining[batch_start:batch_start + 20]
+        batch_num = batch_start // 20 + 1
+        total_batches = (len(remaining) + 19) // 20
+
+        orphan_lines = []
+        for i, o in enumerate(batch, 1):
+            orphan_lines.append(f"{i}. [{o.get('category', '')}] {o.get('topic', '')}")
+
+        prompt = (
+            "你是分類工具。將以下 orphan 主題歸入已知前綴，或回答 \"none\"。\n"
+            "注意：即使主題名稱不以前綴開頭，只要語意上屬於該前綴的範疇就應歸入。\n\n"
+            "可用前綴（按分類）：\n"
+            f"{chr(10).join(prefix_lines)}\n\n"
+            "待分類：\n"
+            f"{chr(10).join(orphan_lines)}\n\n"
+            '只輸出 JSON 陣列：[{"topic": "原始主題", "prefix": "匹配的前綴" 或 "none"}]\n'
+            "只輸出 JSON。"
+        )
+
+        log.info("  Phase 6b (LLM): batch %d/%d (%d orphans)", batch_num, total_batches, len(batch))
+
+        if dry_run:
+            for o in batch:
+                log.info("    Would classify via LLM: [%s] %s", o.get("category", ""), o.get("topic", ""))
+            continue
+
+        result = call_oneshot(prompt)
+        if not result:
+            log.warning("    LLM returned empty response, skipping batch")
+            skipped.extend(o.get("topic", "") for o in batch)
+            continue
+
+        result = result.strip()
+        if result.startswith("```"):
+            lines = result.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            result = "\n".join(lines)
+
+        try:
+            classifications = json.loads(result)
+        except json.JSONDecodeError:
+            m = re.search(r'\[[\s\S]*\]', result)
+            if not m:
+                log.warning("    LLM response not parseable, skipping batch")
+                skipped.extend(o.get("topic", "") for o in batch)
+                continue
+            try:
+                classifications = json.loads(m.group())
+            except json.JSONDecodeError:
+                log.warning("    LLM JSON parse failed, skipping batch")
+                skipped.extend(o.get("topic", "") for o in batch)
+                continue
+
+        if not isinstance(classifications, list):
+            log.warning("    LLM returned non-list, skipping batch")
+            skipped.extend(o.get("topic", "") for o in batch)
+            continue
+
+        orphan_cats = {o.get("topic", ""): o.get("category", "") for o in batch}
+        lock = get_lore_lock(story_id)
+
+        for item in classifications:
+            if not isinstance(item, dict):
+                continue
+            topic = item.get("topic", "").strip()
+            prefix = item.get("prefix", "").strip()
+
+            if not topic or topic not in orphan_cats:
+                continue
+
+            if prefix == "none" or not prefix:
+                skipped.append(topic)
+                log.info("    LLM: '%s' → none (skipped)", topic)
+                continue
+
+            # Validation: prefix must exist in known prefixes
+            orphan_cat = orphan_cats[topic]
+            cat_prefixes = registry.get("by_category", {}).get(orphan_cat, set())
+            if prefix not in cat_prefixes and prefix not in all_prefixes:
+                log.info("    LLM: invalid prefix '%s' for '%s', skipping", prefix, topic)
+                skipped.append(topic)
+                continue
+
+            new_topic = f"{prefix}：{topic}"
+            with lock:
+                rename_lore_topic(story_id, topic, new_topic)
+            llm_classified.append((topic, new_topic))
+            log.info("    LLM: %s → %s", topic, new_topic)
+
+        if batch_start + 20 < len(remaining):
+            time.sleep(delay)
+
+    log.info("  Phase 6b (LLM): %d classified, %d skipped", len(llm_classified), len(skipped))
+
+    if not dry_run and llm_classified:
+        invalidate_prefix_cache(story_id)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Lore cleanup: dedup + split long entries")
+    parser = argparse.ArgumentParser(description="Lore cleanup: dedup + split long entries + organize orphans")
     parser.add_argument("--story-id", default="story_original", help="Story ID (default: story_original)")
     parser.add_argument("--dry-run", action="store_true", help="Analyze only, no mutations")
     parser.add_argument("--skip-split", action="store_true", help="Dedup + remap only, no LLM calls")
+    parser.add_argument("--organize-orphans", action="store_true", help="Organize orphan topics (rule-based + LLM)")
+    parser.add_argument("--apply", action="store_true", help="Apply changes (with --organize-orphans, default is dry-run)")
     parser.add_argument("--delay", type=float, default=3.0, help="Delay between LLM calls (default: 3s)")
     args = parser.parse_args()
 
     story_id = args.story_id
+
+    if args.organize_orphans:
+        # Organize-orphans mode: focus on orphan topic classification
+        effective_dry_run = not args.apply
+        log.info("=" * 60)
+        log.info("Lore Cleanup: Organize Orphan Topics")
+        log.info("Story: %s  |  dry_run=%s", story_id, effective_dry_run)
+        log.info("=" * 60)
+
+        lore = _load_lore(story_id)
+        orphan_count = sum(1 for e in lore if "：" not in e.get("topic", ""))
+        log.info("Loaded %d entries (%d orphans)", len(lore), orphan_count)
+
+        if not effective_dry_run:
+            backup(story_id)
+
+        organize_orphans(story_id, delay=args.delay, dry_run=effective_dry_run)
+
+        if not effective_dry_run:
+            # Rebuild SQLite index after renames
+            from lore_db import rebuild_index
+            rebuild_index(story_id)
+            log.info("Rebuilt SQLite FTS index")
+
+        # Final stats
+        lore = _load_lore(story_id)
+        final_orphans = sum(1 for e in lore if "：" not in e.get("topic", ""))
+        log.info("Final: %d entries, %d orphans (was %d)", len(lore), final_orphans, orphan_count)
+
+        log.info("=" * 60)
+        log.info("Done!")
+        log.info("=" * 60)
+        return
 
     log.info("=" * 60)
     log.info("Lore Cleanup: Dedup + Split Long Entries")
