@@ -1809,9 +1809,19 @@ function renderMessages(messages) {
     roleTag.className = "role-tag";
     roleTag.textContent = msg.role === "user" ? "玩家" : "GM";
 
+    // Message index label for bug reporting (#5)
+    const indexLabel = document.createElement("span");
+    indexLabel.className = "msg-index";
+    indexLabel.textContent = `#${msg.index}`;
+
     const content = document.createElement("div");
     content.className = "content";
     content.innerHTML = markdownToHtml(msg.content);
+
+    // Make GM numbered options clickable (#8)
+    if (msg.role === "gm") {
+      makeGmOptionsClickable(content);
+    }
 
     const actionBtn = document.createElement("button");
     actionBtn.className = "msg-action-btn";
@@ -1831,7 +1841,18 @@ function renderMessages(messages) {
       });
     }
 
+    // Bug report button (#6)
+    const reportBtn = document.createElement("button");
+    reportBtn.className = "msg-report-btn";
+    reportBtn.textContent = "\uD83D\uDEA9";
+    reportBtn.title = "回報問題";
+    reportBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showReportModal(msg);
+    });
+
     el.appendChild(roleTag);
+    el.appendChild(indexLabel);
     el.appendChild(content);
 
     // Render image if present
@@ -1840,6 +1861,7 @@ function renderMessages(messages) {
     }
 
     el.appendChild(actionBtn);
+    el.appendChild(reportBtn);
 
     if (hasSwitcher) {
       const group = siblingGroups[sibKey];
@@ -1914,6 +1936,33 @@ function renderMessages(messages) {
         switcher.appendChild(delBtn);
       }
 
+      // Prune siblings button — keep only current, delete all others (#7)
+      if (group.total >= 2) {
+        const pruneBtn = document.createElement("button");
+        pruneBtn.className = "sw-prune";
+        pruneBtn.textContent = "\u2702";
+        pruneBtn.title = "只保留當前版本，刪除其他分支";
+        pruneBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const keepId = currentVariant ? currentVariant.branch_id : currentBranchId;
+          const others = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main");
+          if (others.length === 0) return;
+          if (!(await showConfirm(`刪除其他 ${others.length} 個版本，只保留當前？`))) return;
+          let failed = 0;
+          for (const v of others) {
+            try {
+              const res = await API.deleteBranch(v.branch_id);
+              if (!res.ok) failed++;
+            } catch { failed++; }
+          }
+          await loadBranches();
+          await switchToBranch(keepId, { preserveScroll: true });
+          renderBranchList();
+          if (failed > 0) alert(`${failed} 個分支刪除失敗`);
+        });
+        switcher.appendChild(pruneBtn);
+      }
+
       el.appendChild(switcher);
     }
 
@@ -1944,6 +1993,140 @@ function stripHiddenTags(text) {
 // ---------------------------------------------------------------------------
 // Markdown → HTML (basic)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GM clickable options (#8)
+// ---------------------------------------------------------------------------
+function makeGmOptionsClickable(contentEl) {
+  // Match numbered options like "1. 選項文字" or "**1.** 選項文字" at line start
+  // Works on the rendered HTML (after markdown conversion)
+  const listItems = contentEl.querySelectorAll("li");
+  if (listItems.length > 0) {
+    // Ordered list — wrap each li content in a clickable button
+    listItems.forEach(li => {
+      const text = li.textContent.trim();
+      if (text.length > 0 && text.length < 200) {
+        li.classList.add("gm-option-li");
+        li.addEventListener("click", () => fillInputWithOption(text));
+      }
+    });
+    return;
+  }
+  // Fallback: detect "N. text" or "N、text" patterns in plain text paragraphs
+  const paragraphs = contentEl.querySelectorAll("p");
+  paragraphs.forEach(p => {
+    const html = p.innerHTML;
+    // Match lines starting with a number + period/dot
+    const optionRe = /^(<strong>)?(\d+)[.、）)]\s*(<\/strong>)?\s*(.+)/;
+    if (optionRe.test(p.textContent.trim()) && p.textContent.trim().length < 200) {
+      p.classList.add("gm-option-p");
+      p.addEventListener("click", () => {
+        // Strip the number prefix, just send the option text
+        const match = p.textContent.trim().match(/^\d+[.、）)]\s*(.*)/);
+        fillInputWithOption(match ? match[1] : p.textContent.trim());
+      });
+    }
+  });
+}
+
+function fillInputWithOption(text) {
+  const $input = document.getElementById("user-input");
+  if (!$input || $input.disabled) return;
+  $input.value = text;
+  $input.focus();
+  // Auto-resize textarea
+  $input.style.height = "auto";
+  $input.style.height = $input.scrollHeight + "px";
+}
+
+// ---------------------------------------------------------------------------
+// Bug report modal (#6)
+// ---------------------------------------------------------------------------
+function showReportModal(msg) {
+  // Create modal overlay
+  const overlay = document.createElement("div");
+  overlay.className = "report-modal-overlay";
+
+  const modal = document.createElement("div");
+  modal.className = "report-modal";
+
+  const title = document.createElement("h3");
+  title.textContent = `回報問題 — 訊息 #${msg.index}`;
+  title.style.marginBottom = "12px";
+
+  const info = document.createElement("div");
+  info.className = "report-info";
+  info.textContent = `分支: ${currentBranchId} | 角色: ${msg.role} | 索引: ${msg.index}`;
+
+  const preview = document.createElement("div");
+  preview.className = "report-preview";
+  preview.textContent = (msg.content || "").slice(0, 200) + ((msg.content || "").length > 200 ? "..." : "");
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "report-textarea";
+  textarea.placeholder = "描述問題...";
+  textarea.rows = 4;
+
+  const actions = document.createElement("div");
+  actions.className = "report-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "edit-cancel-btn";
+  cancelBtn.textContent = "取消";
+
+  const submitBtn = document.createElement("button");
+  submitBtn.className = "edit-save-btn";
+  submitBtn.textContent = "送出";
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(submitBtn);
+
+  modal.appendChild(title);
+  modal.appendChild(info);
+  modal.appendChild(preview);
+  modal.appendChild(textarea);
+  modal.appendChild(actions);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  textarea.focus();
+
+  function close() { overlay.remove(); }
+  cancelBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  submitBtn.addEventListener("click", async () => {
+    const description = textarea.value.trim();
+    if (!description) { textarea.focus(); return; }
+    submitBtn.disabled = true;
+    submitBtn.textContent = "送出中...";
+    try {
+      const res = await fetch("/api/bug-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          branch_id: currentBranchId,
+          message_index: msg.index,
+          role: msg.role,
+          content_preview: (msg.content || "").slice(0, 500),
+          description,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        close();
+      } else {
+        alert(data.error || "送出失敗");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "送出";
+      }
+    } catch (err) {
+      alert("網路錯誤：" + err.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = "送出";
+    }
+  });
+}
+
 function markdownToHtml(text) {
   if (!text) return "";
   let html = escapeHtml(text);
@@ -2548,7 +2731,12 @@ async function sendMessage() {
   contentEl.className = "content";
   contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
 
+  const gmIndexLabel = document.createElement("span");
+  gmIndexLabel.className = "msg-index";
+  gmIndexLabel.textContent = `#${gmMsgIndex}`;
+
   gmEl.appendChild(roleTag);
+  gmEl.appendChild(gmIndexLabel);
   gmEl.appendChild(contentEl);
 
   // Capture scroll position BEFORE appending/scrolling so the check is meaningful
@@ -2593,6 +2781,10 @@ async function sendMessage() {
 
         // Replace streamed text with final markdown-rendered content
         contentEl.innerHTML = markdownToHtml(gmMsg.content);
+        makeGmOptionsClickable(contentEl);
+
+        // Update index label with actual index
+        gmIndexLabel.textContent = `#${gmMsg.index}`;
 
         // Add image if present
         if (gmMsg.image && currentStoryId) {
@@ -2609,6 +2801,17 @@ async function sendMessage() {
           regenerateGmMessage(gmMsg, gmEl);
         });
         gmEl.appendChild(actionBtn);
+
+        // Add report button
+        const reportBtn = document.createElement("button");
+        reportBtn.className = "msg-report-btn";
+        reportBtn.textContent = "\uD83D\uDEA9";
+        reportBtn.title = "回報問題";
+        reportBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          showReportModal(gmMsg);
+        });
+        gmEl.appendChild(reportBtn);
 
         // Only auto-scroll at the end if user was following along
         if (wasAtBottom && !userScrolledDuringStream) {
@@ -2659,9 +2862,17 @@ function appendMessage(msg) {
   roleTag.className = "role-tag";
   roleTag.textContent = msg.role === "user" ? "玩家" : "GM";
 
+  const indexLabel = document.createElement("span");
+  indexLabel.className = "msg-index";
+  indexLabel.textContent = `#${msg.index}`;
+
   const content = document.createElement("div");
   content.className = "content";
   content.innerHTML = markdownToHtml(msg.content);
+
+  if (msg.role === "gm") {
+    makeGmOptionsClickable(content);
+  }
 
   const actionBtn = document.createElement("button");
   actionBtn.className = "msg-action-btn";
@@ -2681,7 +2892,17 @@ function appendMessage(msg) {
     });
   }
 
+  const reportBtn = document.createElement("button");
+  reportBtn.className = "msg-report-btn";
+  reportBtn.textContent = "\uD83D\uDEA9";
+  reportBtn.title = "回報問題";
+  reportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showReportModal(msg);
+  });
+
   el.appendChild(roleTag);
+  el.appendChild(indexLabel);
   el.appendChild(content);
 
   // Render image if present
@@ -2690,6 +2911,7 @@ function appendMessage(msg) {
   }
 
   el.appendChild(actionBtn);
+  el.appendChild(reportBtn);
   $messages.appendChild(el);
 }
 

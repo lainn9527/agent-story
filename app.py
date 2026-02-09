@@ -904,18 +904,30 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         if isinstance(val, (int, float)):
             state["reward_points"] = int(val)
 
-    # reward_points_delta
-    if "reward_points_delta" in update:
-        state["reward_points"] = state.get("reward_points", 0) + update["reward_points_delta"]
+    # Generic *_delta handling: apply as addition to base field
+    for key in list(update.keys()):
+        if key.endswith("_delta") and isinstance(update[key], (int, float)):
+            base_key = key[:-6]  # strip "_delta"
+            current = state.get(base_key)
+            if isinstance(current, (int, float)):
+                state[base_key] = current + update[key]
+            elif base_key == "reward_points":
+                state[base_key] = state.get(base_key, 0) + update[key]
+            # else: base field is not numeric or doesn't exist — skip delta
+
+    # If GM sets reward_points directly (no delta), accept it
+    if "reward_points" in update and "reward_points_delta" not in update:
+        val = update["reward_points"]
+        if isinstance(val, (int, float)):
+            state["reward_points"] = int(val)
 
     # Direct overwrite fields from schema
     for key in schema.get("direct_overwrite_keys", []):
         if key in update:
             state[key] = update[key]
 
-    # Save extra keys not handled above
+    # Build handled_keys set
     handled_keys = set()
-    handled_keys.add("reward_points_delta")
     handled_keys.add("reward_points")
     for list_def in schema.get("lists", []):
         handled_keys.add(list_def["key"])
@@ -925,6 +937,12 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
             handled_keys.add(list_def["state_remove_key"])
     for key in schema.get("direct_overwrite_keys", []):
         handled_keys.add(key)
+    # Mark all *_delta keys as handled (already processed above)
+    for key in update:
+        if key.endswith("_delta"):
+            handled_keys.add(key)
+
+    # Save extra keys — only non-delta, non-handled, string/number fields
     for key, val in update.items():
         if key not in handled_keys and isinstance(val, (str, int, float, bool)):
             state[key] = val
@@ -1306,12 +1324,24 @@ _CONTEXT_ECHO_RE = re.compile(
 )
 
 
+_REWARD_HINT_RE = re.compile(r"【主神提示[:：].*?獎勵點.*?】")
+
+
 def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_index: int) -> tuple[str, dict | None, dict]:
     """Extract all hidden tags from GM response. Returns (clean_text, image_info, snapshots)."""
     # Strip context injection sections that the GM may have echoed back
     gm_response = _CONTEXT_ECHO_RE.sub("", gm_response).strip()
     gm_response = re.sub(r"^---\s*", "", gm_response).strip()
     gm_response = re.sub(r"\n---\n", "\n", gm_response).strip()
+
+    # Deduplicate reward point hints — keep only the last occurrence
+    reward_hints = list(_REWARD_HINT_RE.finditer(gm_response))
+    if len(reward_hints) > 1:
+        for m in reward_hints[:-1]:
+            gm_response = gm_response[:m.start()] + gm_response[m.end():]
+        # Re-find last one in case offsets shifted; just do a clean pass
+        gm_response = _REWARD_HINT_RE.sub("", gm_response) + "\n\n" + reward_hints[-1].group()
+        gm_response = re.sub(r"\n{3,}", "\n\n", gm_response).strip()
 
     gm_response, state_updates = _extract_state_tag(gm_response)
     for state_update in state_updates:
@@ -1347,6 +1377,11 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     # Extract TIME tags and advance world_day
     had_time_tags = bool(TIME_RE.search(gm_response))
     gm_response = process_time_tags(gm_response, story_id, branch_id)
+
+    # Default minimum time advance: +2 hours per GM turn if no TIME tag found.
+    # _extract_tags_async may also detect time; skip_time=False lets it supplement.
+    if not had_time_tags:
+        advance_world_day(story_id, branch_id, 2 / 24)  # +2 hours
 
     # Async post-processing: extract structured data via separate LLM call
     # Skip state/time extraction if regex already found those tags (avoid double-apply)
@@ -3296,6 +3331,32 @@ def api_auto_play_summaries():
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Bug Report API (#6)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/bug-report", methods=["POST"])
+def api_bug_report():
+    """Save a bug report for a specific message."""
+    data = request.get_json(force=True)
+    story_id = _active_story_id()
+    report = {
+        "story_id": story_id,
+        "branch_id": data.get("branch_id", ""),
+        "message_index": data.get("message_index"),
+        "role": data.get("role", ""),
+        "content_preview": data.get("content_preview", ""),
+        "description": data.get("description", ""),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    reports_path = os.path.join(_story_dir(story_id), "bug_reports.json")
+    reports = _load_json(reports_path, [])
+    reports.append(report)
+    _save_json(reports_path, reports)
+    log.info("Bug report saved: branch=%s msg=%s", report["branch_id"], report["message_index"])
+    return jsonify({"ok": True})
+
+
 # LLM Config API (provider / model switcher)
 # ---------------------------------------------------------------------------
 
