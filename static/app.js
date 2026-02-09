@@ -185,6 +185,25 @@ const API = {
   autoPlaySummaries: (branchId) =>
     fetch(`/api/auto-play/summaries?branch_id=${branchId || "main"}`).then(r => r.json()),
 
+  // Game Saves
+  listSaves: () => fetch("/api/saves").then(r => r.json()),
+  createSave: (name) =>
+    fetch("/api/saves", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name || "" }),
+    }).then(r => r.json()),
+  loadSave: (saveId) =>
+    fetch(`/api/saves/${saveId}/load`, { method: "POST" }).then(r => r.json()),
+  deleteSave: (saveId) =>
+    fetch(`/api/saves/${saveId}`, { method: "DELETE" }).then(r => r.json()),
+  renameSave: (saveId, name) =>
+    fetch(`/api/saves/${saveId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then(r => r.json()),
+
   // LLM Config
   getConfig: () => fetch("/api/config").then(r => r.json()),
   setConfig: (data) =>
@@ -501,6 +520,7 @@ const $newBlankBranchBtn = document.getElementById("new-blank-branch-btn");
 const $branchTreeBtn = document.getElementById("branch-tree-btn");
 const $promoteBtn = document.getElementById("promote-branch-btn");
 const $branchIndicator = document.getElementById("branch-indicator");
+const $createSaveBtn = document.getElementById("create-save-btn");
 const $storyModal = document.getElementById("new-story-modal");
 
 // ---------------------------------------------------------------------------
@@ -562,9 +582,9 @@ async function init() {
     renderCharacterStatus(status);
     updateWorldDayDisplay(status.world_day);
 
-    // 6. Load NPCs, events, and summaries
+    // 6. Load NPCs, events, summaries, and saves
     updateInitStatus("載入角色與事件…");
-    await Promise.all([loadNpcs(), loadEvents(), loadSummaries()]);
+    await Promise.all([loadNpcs(), loadEvents(), loadSummaries(), loadSaves()]);
 
     // Handle URL params: ?branch=BRANCH_ID&msg=MSG_INDEX (from lore console)
     const urlParams = new URLSearchParams(window.location.search);
@@ -689,7 +709,7 @@ async function switchToStory(storyId) {
     await loadMessages(currentBranchId);
     const status = await API.status(currentBranchId);
     renderCharacterStatus(status);
-    await Promise.all([loadNpcs(), loadEvents(), loadSummaries()]);
+    await Promise.all([loadNpcs(), loadEvents(), loadSummaries(), loadSaves()]);
     scrollToBottom();
   } catch (err) {
     alert("切換故事錯誤：" + err.message);
@@ -817,7 +837,8 @@ function createBranchItem(branch, depth, hasChildren, isExpanded) {
 
   const label = document.createElement("span");
   label.className = "drawer-item-label";
-  label.textContent = branch.name;
+  label.textContent = branch.title || branch.name;
+  label.title = branch.name;  // hover tooltip shows original name
   item.appendChild(label);
 
   if (branch.id.startsWith("auto_")) {
@@ -1097,7 +1118,8 @@ function _btRenderTree(container, modal) {
 
     const name = document.createElement("span");
     name.className = "bt-name";
-    name.textContent = branch.name || branch.id;
+    name.textContent = branch.title || branch.name || branch.id;
+    name.title = branch.name || branch.id;
     item.appendChild(name);
 
     if (branch.id.startsWith("auto_")) {
@@ -2416,6 +2438,118 @@ async function loadNpcActivities(npcs) {
 }
 
 // ---------------------------------------------------------------------------
+// Game Saves Panel
+// ---------------------------------------------------------------------------
+async function loadSaves() {
+  try {
+    const result = await API.listSaves();
+    renderSavesList(result.saves || []);
+  } catch (e) { /* ignore */ }
+}
+
+function renderSavesList(saves) {
+  const list = document.getElementById("saves-list");
+  list.innerHTML = "";
+
+  if (!saves.length) {
+    const empty = document.createElement("div");
+    empty.className = "save-empty";
+    empty.textContent = "尚無存檔";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const save of saves) {
+    const card = document.createElement("div");
+    card.className = "save-card";
+
+    // Header: name + delete button
+    const header = document.createElement("div");
+    header.className = "save-card-header";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "save-name";
+    nameEl.textContent = save.name;
+    nameEl.title = "雙擊重新命名";
+    nameEl.addEventListener("dblclick", async () => {
+      const newName = prompt("重新命名存檔：", save.name);
+      if (newName && newName.trim() && newName.trim() !== save.name) {
+        await API.renameSave(save.id, newName.trim());
+        loadSaves();
+      }
+    });
+
+    const delBtn = document.createElement("span");
+    delBtn.className = "save-delete";
+    delBtn.textContent = "\u2715";
+    delBtn.title = "刪除存檔";
+    delBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = await showConfirm(`確定要刪除存檔「${save.name}」？`);
+      if (ok) {
+        await API.deleteSave(save.id);
+        loadSaves();
+      }
+    });
+
+    header.appendChild(nameEl);
+    header.appendChild(delBtn);
+    card.appendChild(header);
+
+    // Info line: world day + timestamp
+    const info = document.createElement("div");
+    info.className = "save-info";
+    const wd = save.world_day || {};
+    const dayText = wd.day ? `第 ${wd.day} 天` : "";
+    const dateText = save.created_at ? new Date(save.created_at).toLocaleDateString("zh-TW", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+    info.textContent = [dayText, dateText].filter(Boolean).join(" · ");
+    card.appendChild(info);
+
+    // Preview text
+    if (save.preview) {
+      const preview = document.createElement("div");
+      preview.className = "save-preview";
+      preview.textContent = save.preview.slice(0, 60) + (save.preview.length > 60 ? "…" : "");
+      card.appendChild(preview);
+    }
+
+    // Load button
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "save-load-btn";
+    loadBtn.textContent = "讀取存檔";
+    loadBtn.addEventListener("click", async () => {
+      loadBtn.disabled = true;
+      loadBtn.textContent = "讀取中…";
+      try {
+        const res = await API.loadSave(save.id);
+        if (res.ok) {
+          currentBranchId = res.branch_id;
+          await loadBranches();
+          renderBranchList();
+          await loadMessages(currentBranchId);
+          const status = await API.status(currentBranchId);
+          renderCharacterStatus(status);
+          updateWorldDayDisplay(status.world_day);
+          updateBranchIndicator();
+          await Promise.all([loadNpcs(), loadEvents()]);
+          scrollToBottom();
+          closeDrawer();
+        } else {
+          alert(res.error || "讀取存檔失敗");
+        }
+      } catch (err) {
+        alert("網路錯誤：" + err.message);
+      }
+      loadBtn.disabled = false;
+      loadBtn.textContent = "讀取存檔";
+    });
+    card.appendChild(loadBtn);
+
+    list.appendChild(card);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Events Panel
 // ---------------------------------------------------------------------------
 async function loadEvents() {
@@ -3092,6 +3226,24 @@ document.getElementById("branch-tree-modal").addEventListener("click", (e) => {
 document.getElementById("bt-select-toggle").addEventListener("click", _btToggleSelectMode);
 document.getElementById("bt-delete-selected").addEventListener("click", _btDeleteSelected);
 document.getElementById("bt-merge-selected").addEventListener("click", _btMergeSelected);
+
+// Create save button
+$createSaveBtn.addEventListener("click", async () => {
+  const name = prompt("存檔名稱（留空自動命名）：", "");
+  if (name === null) return;  // cancelled
+  $createSaveBtn.disabled = true;
+  try {
+    const res = await API.createSave(name.trim());
+    if (res.ok) {
+      loadSaves();
+    } else {
+      alert(res.error || "建立存檔失敗");
+    }
+  } catch (err) {
+    alert("網路錯誤：" + err.message);
+  }
+  $createSaveBtn.disabled = false;
+});
 
 // Blank branch button — start a fresh game from scratch
 $newBlankBranchBtn.addEventListener("click", async () => {

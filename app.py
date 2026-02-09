@@ -503,6 +503,10 @@ def _story_lore_path(story_id: str) -> str:
     return os.path.join(_story_dir(story_id), "world_lore.json")
 
 
+def _story_saves_path(story_id: str) -> str:
+    return os.path.join(_story_dir(story_id), "saves.json")
+
+
 def _load_lore(story_id: str) -> list[dict]:
     return _load_json(_story_lore_path(story_id), [])
 
@@ -760,9 +764,14 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 隱含流逝參考：一場小戰鬥 → hours:1、大型戰役/Boss戰 → hours:3、探索建築/區域 → hours:2、長途移動/趕路 → hours:4、休息/過夜 → hours:8、訓練/修煉 → days:1\n"
                 "- 純對話/短暫互動/思考/角色創建/主神空間閒聊不需要輸出。只有場景中有實際行動推進才估算。\n"
                 '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
+                "## 6. 分支標題（branch_title）\n"
+                "用 4-8 個中文字總結這段 GM 回覆中**玩家的核心行動或場景轉折**。\n"
+                "例如：「七首殺屍測試」「巷道右側突圍」「自省之眼覺醒」「進入蜀山副本」「商城兌換裝備」\n"
+                "要求：動作導向、簡潔、不帶標點符號。\n"
+                '格式：字串\n\n'
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}, "time": {"days": N}}\n'
+                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}, "time": {"days": N}, "branch_title": "..."}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
@@ -847,12 +856,24 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     advance_world_day(story_id, branch_id, total_days)
                     saved_counts["time"] = total_days
 
+            # Branch title — save to timeline_tree
+            branch_title = data.get("branch_title", "")
+            if branch_title and isinstance(branch_title, str):
+                branch_title = branch_title.strip()[:20]  # cap at 20 chars
+                tree = _load_tree(story_id)
+                branch_meta = tree.get("branches", {}).get(branch_id)
+                if branch_meta:
+                    branch_meta["title"] = branch_title
+                    _save_tree(story_id, tree)
+                    saved_counts["title"] = branch_title
+
             log.info(
-                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s",
+                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s, title %s",
                 saved_counts["lore"], saved_counts["events"],
                 saved_counts["npcs"],
                 "updated" if saved_counts["state"] else "no change",
                 f"+{saved_counts['time']:.1f}d" if saved_counts.get("time") else "no change",
+                repr(saved_counts.get("title", "—")),
             )
 
             # Trigger periodic lore organization if orphans have accumulated
@@ -3339,6 +3360,152 @@ def api_npc_activities():
     branch_id = request.args.get("branch_id", "main")
     activities = get_all_activities(story_id, branch_id)
     return jsonify({"ok": True, "activities": activities})
+
+
+# ---------------------------------------------------------------------------
+# Game Save API (遊戲存檔)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/saves")
+def api_saves_list():
+    """Return all saves for the active story."""
+    story_id = _active_story_id()
+    saves = _load_json(_story_saves_path(story_id), [])
+    return jsonify({"ok": True, "saves": saves})
+
+
+@app.route("/api/saves", methods=["POST"])
+def api_saves_create():
+    """Create a save (snapshot current state)."""
+    body = request.get_json(force=True)
+    story_id = _active_story_id()
+    tree = _load_tree(story_id)
+    branch_id = tree.get("active_branch_id", "main")
+
+    # Get current message count for message_index
+    timeline = get_full_timeline(story_id, branch_id)
+    last_index = timeline[-1].get("index", len(timeline) - 1) if timeline else 0
+
+    # Snapshot current state
+    character_state = _load_character_state(story_id, branch_id)
+    npcs = _load_json(_story_npcs_path(story_id, branch_id), [])
+    world_day = get_world_day(story_id, branch_id)
+
+    # Build preview from last GM message
+    last_gm = ""
+    for m in reversed(timeline):
+        if m.get("role") == "gm":
+            last_gm = m.get("content", "")[:100]
+            break
+
+    save_id = f"save_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Branch title/name for display
+    branch_meta = tree.get("branches", {}).get(branch_id, {})
+    branch_name = branch_meta.get("title") or branch_meta.get("name") or branch_id
+
+    save_entry = {
+        "id": save_id,
+        "name": body.get("name", "").strip() or f"{branch_name} — 第{world_day.get('day', 1)}天",
+        "branch_id": branch_id,
+        "message_index": last_index,
+        "created_at": now,
+        "world_day": world_day,
+        "character_snapshot": character_state,
+        "npc_snapshot": npcs,
+        "preview": last_gm,
+    }
+
+    saves = _load_json(_story_saves_path(story_id), [])
+    saves.insert(0, save_entry)  # newest first
+    _save_json(_story_saves_path(story_id), saves)
+
+    log.info("save created: %s on branch %s at index %d", save_id, branch_id, last_index)
+    return jsonify({"ok": True, "save": save_entry})
+
+
+@app.route("/api/saves/<save_id>/load", methods=["POST"])
+def api_saves_load(save_id):
+    """Load a save: create new branch from saved state and switch to it."""
+    story_id = _active_story_id()
+    saves = _load_json(_story_saves_path(story_id), [])
+    save = next((s for s in saves if s["id"] == save_id), None)
+    if not save:
+        return jsonify({"ok": False, "error": "save not found"}), 404
+
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+    parent_branch_id = save["branch_id"]
+    branch_point_index = save["message_index"]
+
+    # Resolve parent (handle deleted branches gracefully)
+    if parent_branch_id != "main" and parent_branch_id not in branches:
+        return jsonify({"ok": False, "error": "original branch no longer exists"}), 404
+
+    branch_id = f"branch_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Restore snapshots
+    _save_json(_story_character_state_path(story_id, branch_id), save.get("character_snapshot", {}))
+    _save_json(_story_npcs_path(story_id, branch_id), save.get("npc_snapshot", []))
+    _save_json(_story_messages_path(story_id, branch_id), [])
+
+    # Restore world day
+    wd = save.get("world_day", {"day": 1, "hour": 0})
+    _save_json(os.path.join(_branch_dir(story_id, branch_id), "world_day.json"), wd)
+
+    # Copy recap from parent
+    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+
+    save_name = save.get("name", "存檔")
+    branches[branch_id] = {
+        "id": branch_id,
+        "name": f"[存檔] {save_name}",
+        "title": save_name,
+        "parent_branch_id": parent_branch_id,
+        "branch_point_index": branch_point_index,
+        "created_at": now,
+        "session_id": None,
+        "character_state_file": f"character_state_{branch_id}.json",
+    }
+    tree["active_branch_id"] = branch_id
+    _save_tree(story_id, tree)
+
+    log.info("save loaded: %s → new branch %s", save_id, branch_id)
+    return jsonify({"ok": True, "branch_id": branch_id, "branch": branches[branch_id]})
+
+
+@app.route("/api/saves/<save_id>", methods=["DELETE"])
+def api_saves_delete(save_id):
+    """Delete a save."""
+    story_id = _active_story_id()
+    saves = _load_json(_story_saves_path(story_id), [])
+    new_saves = [s for s in saves if s["id"] != save_id]
+    if len(new_saves) == len(saves):
+        return jsonify({"ok": False, "error": "save not found"}), 404
+    _save_json(_story_saves_path(story_id), new_saves)
+    log.info("save deleted: %s", save_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/saves/<save_id>", methods=["PUT"])
+def api_saves_rename(save_id):
+    """Rename a save."""
+    body = request.get_json(force=True)
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        return jsonify({"ok": False, "error": "name required"}), 400
+
+    story_id = _active_story_id()
+    saves = _load_json(_story_saves_path(story_id), [])
+    for s in saves:
+        if s["id"] == save_id:
+            s["name"] = new_name
+            _save_json(_story_saves_path(story_id), saves)
+            return jsonify({"ok": True, "save": s})
+    return jsonify({"ok": False, "error": "save not found"}), 404
 
 
 # ---------------------------------------------------------------------------
