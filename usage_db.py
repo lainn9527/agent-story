@@ -123,8 +123,8 @@ def log_from_bridge(
             branch_id=branch_id,
             elapsed_ms=int(elapsed_s * 1000) if elapsed_s else None,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("usage_db: log_from_bridge failed — %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -219,22 +219,24 @@ def get_total_usage() -> dict:
             continue
         try:
             conn = sqlite3.connect(db)
-            conn.row_factory = sqlite3.Row
-            _ensure_tables(conn, story_id)
-            row = conn.execute(
-                """SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                          COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                          COUNT(*) AS calls
-                   FROM usage_log"""
-            ).fetchone()
-            d = dict(row)
-            grand["prompt_tokens"] += d["prompt_tokens"]
-            grand["output_tokens"] += d["output_tokens"]
-            grand["total_tokens"] += d["total_tokens"]
-            grand["calls"] += d["calls"]
-            by_story.append({"story_id": story_id, **d})
-            conn.close()
+            try:
+                conn.row_factory = sqlite3.Row
+                _ensure_tables(conn, story_id)
+                row = conn.execute(
+                    """SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                              COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                              COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                              COUNT(*) AS calls
+                       FROM usage_log"""
+                ).fetchone()
+                d = dict(row)
+                grand["prompt_tokens"] += d["prompt_tokens"]
+                grand["output_tokens"] += d["output_tokens"]
+                grand["total_tokens"] += d["total_tokens"]
+                grand["calls"] += d["calls"]
+                by_story.append({"story_id": story_id, **d})
+            finally:
+                conn.close()
         except Exception as e:
             log.debug("usage_db: failed to read %s — %s", story_id, e)
             continue
