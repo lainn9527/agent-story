@@ -1485,7 +1485,9 @@ def api_init():
         def _gen_summary():
             with open(CONVERSATION_PATH, "r", encoding="utf-8") as f:
                 full_text = f.read()
+            t0 = time.time()
             generate_story_summary(full_text, summary_path)
+            _log_llm_usage(story_id, "summary", time.time() - t0)
         threading.Thread(target=_gen_summary, daemon=True).start()
 
     # 6. Ensure main messages file exists
@@ -3441,7 +3443,10 @@ def api_usage():
         return jsonify(usage_db.get_total_usage())
 
     story_id = request.args.get("story_id") or _active_story_id()
-    days = int(request.args.get("days", 7))
+    try:
+        days = int(request.args.get("days", 7))
+    except (ValueError, TypeError):
+        days = 7
     return jsonify(usage_db.get_usage_summary(story_id, days=days))
 
 
