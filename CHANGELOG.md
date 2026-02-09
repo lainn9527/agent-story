@@ -5,6 +5,15 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-02-10
+
+### Fixed
+- Mobile header: flex-wrap two-row layout, short title "無限輪迴" on mobile, ellipsis truncation ([#53])
+- Mobile branch indicator: strip `branch_` prefix for display, widen to 120px, tooltip shows full ID ([#53])
+- Mobile GM regen button: 4px left offset to avoid flush-edge placement ([#53])
+
+[#53]: https://github.com/lainn9527/agent-story/pull/53
+
 ## [0.12.0] - 2026-02-10
 
 ### Added
