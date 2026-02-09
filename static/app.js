@@ -2411,7 +2411,6 @@ function renderSavesList(saves) {
           renderCharacterStatus(status);
           updateWorldDayDisplay(status.world_day);
           updateBranchIndicator();
-          $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
           await Promise.all([loadNpcs(), loadEvents(), loadSummaries(), loadSaves()]);
           scrollToBottom();
           closeDrawer();
