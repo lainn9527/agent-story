@@ -5,6 +5,26 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-02-10
+
+### Added
+- Auto-prune abandoned sibling branches: silently marks siblings as pruned when player moves 5+ steps ahead and sibling has ≤2 delta messages ([#54])
+- Heart protection toggle (♥) in branch tree modal and sibling switcher to exempt branches from auto-pruning ([#54])
+- Promote (⬆) action in branch tree modal ([#54])
+- Toast notification for auto-prune and scissors prune failures ([#54])
+
+### Changed
+- Drawer branch section stripped to 🌳 (branch tree) and ⊕ (new blank) buttons only — branch list removed in favor of branch tree modal ([#54])
+- Branch tree: single-child chains flattened with dashed left border connector ([#54])
+- Drawer toggle shortcut changed from Cmd+T to Cmd+Shift+B (avoids Chrome conflict) ([#54])
+- Mobile: branch tree action buttons always visible (no hover required), increased touch targets ([#54])
+
+### Removed
+- Drawer branch list, promote button, and new-branch button (replaced by branch tree modal) ([#54])
+- Delete-previous-version button from messages ([#54])
+
+[#54]: https://github.com/lainn9527/agent-story/pull/54
+
 ## [0.12.4] - 2026-02-10
 
 ### Changed
