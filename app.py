@@ -550,10 +550,11 @@ def _find_similar_topic(new_topic: str, new_category: str,
     return best_topic if best_sim >= threshold else None
 
 
-def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = None):
+def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = None, embed: bool = True):
     """Save a lore entry. If same topic exists, update it. Also updates search index.
 
     Uses lore lock for thread safety + auto-classifies orphan topics.
+    Set embed=False to skip background embedding (e.g. during auto-play).
     """
     topic = entry.get("topic", "").strip()
     if not topic:
@@ -585,11 +586,11 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
                     entry["edited_by"] = existing["edited_by"]
                 lore[i] = entry
                 _save_json(_story_lore_path(story_id), lore)
-                upsert_lore_entry(story_id, entry)
+                upsert_lore_entry(story_id, entry, embed=embed)
                 return
         lore.append(entry)
         _save_json(_story_lore_path(story_id), lore)
-        upsert_lore_entry(story_id, entry)
+        upsert_lore_entry(story_id, entry, embed=embed)
 
 
 def _build_lore_text(story_id: str) -> str:

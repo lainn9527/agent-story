@@ -246,8 +246,12 @@ def rebuild_index(story_id: str):
     _embed_all_if_needed(story_id)
 
 
-def upsert_entry(story_id: str, entry: dict):
-    """Insert or update a single lore entry in the index."""
+def upsert_entry(story_id: str, entry: dict, embed: bool = True):
+    """Insert or update a single lore entry in the index.
+
+    Set embed=False to skip background embedding (e.g. during auto-play).
+    Missing embeddings are backfilled on next server startup.
+    """
     conn = _get_conn(story_id)
     _ensure_tables(conn)
 
@@ -281,7 +285,8 @@ def upsert_entry(story_id: str, entry: dict):
 
     if hash_changed:
         _invalidate_cache(story_id)
-        _embed_single_async(story_id, topic, content)
+        if embed:
+            _embed_single_async(story_id, topic, content)
 
 
 # ---------------------------------------------------------------------------
