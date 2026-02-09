@@ -2053,7 +2053,9 @@ function makeGmOptionsClickable(contentEl) {
 function fillInputWithOption(text) {
   const $input = document.getElementById("user-input");
   if (!$input || $input.disabled) return;
-  $input.value = text;
+  // Append to existing text (allows combining multiple options)
+  const existing = $input.value.trim();
+  $input.value = existing ? existing + "，" + text : text;
   $input.focus();
   $input.style.height = "auto";
   $input.style.height = $input.scrollHeight + "px";

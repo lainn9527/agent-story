@@ -1113,6 +1113,10 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
             })
 
         for child in children:
+            # Skip orphan branches (empty messages from interrupted stream)
+            child_msgs = _load_json(_story_messages_path(story_id, child["id"]), [])
+            if not child_msgs:
+                continue
             variants.append({
                 "branch_id": child["id"],
                 "label": child.get("name", child["id"]),
@@ -1825,7 +1829,7 @@ def api_send_stream():
                         "branch": tree["branches"][branch_id],
                     })
         except Exception as e:
-            log.info("/api/send/stream EXCEPTION %s", e)
+            import traceback; log.info("/api/send/stream EXCEPTION %s\n%s", e, traceback.format_exc())
             yield _sse_event({"type": "error", "message": str(e)})
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
@@ -2246,9 +2250,16 @@ def api_branches_edit_stream():
                         "gm_msg": gm_msg,
                     })
         except Exception as e:
-            log.info("/api/branches/edit/stream EXCEPTION %s", e)
+            import traceback; log.info("/api/branches/edit/stream EXCEPTION %s\n%s", e, traceback.format_exc())
             _cleanup_branch(story_id, branch_id)
             yield _sse_event({"type": "error", "message": str(e)})
+        finally:
+            # If generator is GC'd mid-stream (client disconnect), clean up empty branch
+            delta_now = _load_json(_story_messages_path(story_id, branch_id), [])
+            has_gm = any(m.get("role") == "gm" for m in delta_now)
+            if not has_gm:
+                log.info("/api/branches/edit/stream cleanup orphan branch %s", branch_id)
+                _cleanup_branch(story_id, branch_id)
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
@@ -2482,9 +2493,15 @@ def api_branches_regenerate_stream():
                         "gm_msg": gm_msg,
                     })
         except Exception as e:
-            log.info("/api/branches/regenerate/stream EXCEPTION %s", e)
+            import traceback; log.info("/api/branches/regenerate/stream EXCEPTION %s\n%s", e, traceback.format_exc())
             _cleanup_branch(story_id, branch_id)
             yield _sse_event({"type": "error", "message": str(e)})
+        finally:
+            # If generator is GC'd mid-stream (client disconnect), clean up empty branch
+            msgs = _load_json(_story_messages_path(story_id, branch_id), [])
+            if not msgs:
+                log.info("/api/branches/regenerate/stream cleanup orphan branch %s", branch_id)
+                _cleanup_branch(story_id, branch_id)
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
