@@ -587,7 +587,12 @@ def organize_orphans(story_id: str, delay: float = 3.0, dry_run: bool = False):
                 skipped.append(topic)
                 continue
 
-            new_topic = f"{prefix}：{topic}"
+            # Strip prefix from topic if it starts with it (avoid redundancy)
+            if topic.startswith(prefix):
+                suffix = topic[len(prefix):].lstrip("與和及的之")
+                new_topic = f"{prefix}：{suffix}" if suffix else f"{prefix}：概述"
+            else:
+                new_topic = f"{prefix}：{topic}"
             with lock:
                 rename_lore_topic(story_id, topic, new_topic)
             llm_classified.append((topic, new_topic))
