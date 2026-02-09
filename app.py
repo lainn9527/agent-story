@@ -778,7 +778,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             if time_data and isinstance(time_data, dict) and not skip_time:
                 days = time_data.get("days") or 0
                 hours = time_data.get("hours") or 0
-                total_days = float(days) + float(hours) / 24
+                total_days = min(float(days) + float(hours) / 24, 30)
                 if total_days > 0:
                     advance_world_day(story_id, branch_id, total_days)
                     saved_counts["time"] = total_days
