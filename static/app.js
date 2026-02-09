@@ -2931,6 +2931,15 @@ document.addEventListener("keydown", (e) => {
       closeBranchTreeModal();
     }
   }
+  // Cmd+T (Mac) / Ctrl+T (Win) — toggle drawer
+  if ((e.metaKey || e.ctrlKey) && e.key === "t") {
+    e.preventDefault();
+    if ($drawer.classList.contains("closed")) {
+      openDrawer();
+    } else {
+      closeDrawer();
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
