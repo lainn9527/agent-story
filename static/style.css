@@ -1949,13 +1949,8 @@ body {
   cursor: pointer;
   font-size: 0.75rem;
   color: var(--text-dim);
-  padding: 6px 8px;
+  padding: 4px 5px;
   border-radius: 3px;
-  min-width: 28px;
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 .bt-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
 .bt-action-del:hover { color: var(--accent); }
