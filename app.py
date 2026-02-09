@@ -130,52 +130,6 @@ DEFAULT_CHARACTER_SCHEMA = {
 
 VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}
 
-VALID_LORE_CATEGORIES = {
-    "主神設定與規則", "體系", "商城", "副本世界觀",
-    "場景", "NPC", "故事追蹤",
-}
-
-# Fuzzy remap for common LLM hallucinated categories → valid category
-_LORE_CATEGORY_REMAP = {
-    "商城道具": "商城",
-    "成長系統": "體系",
-    "心靈屬性": "體系",
-    "戰鬥系統": "體系",
-    "戰鬥機制": "體系",
-    "技能": "體系",
-    "角色": "NPC",
-    "人物": "NPC",
-    "劇情": "故事追蹤",
-    "主線": "故事追蹤",
-    "伏筆": "故事追蹤",
-    "設定": "主神設定與規則",
-    "規則": "主神設定與規則",
-    "副本": "副本世界觀",
-    "世界觀": "副本世界觀",
-}
-
-
-def _validate_lore_category(category: str) -> str:
-    """Validate and fix lore category. Returns a valid category string."""
-    if not category:
-        return "其他"
-    # Strip 【】 brackets
-    category = category.strip().strip("【】").strip()
-    if category in VALID_LORE_CATEGORIES:
-        return category
-    # Try fuzzy remap
-    remapped = _LORE_CATEGORY_REMAP.get(category)
-    if remapped:
-        log.info("    lore_category_fix: '%s' → '%s' (remap)", category, remapped)
-        return remapped
-    # Try substring match (e.g. "主神設定" → "主神設定與規則")
-    for valid in VALID_LORE_CATEGORIES:
-        if category in valid or valid in category:
-            log.info("    lore_category_fix: '%s' → '%s' (substring)", category, valid)
-            return valid
-    log.warning("    lore_category_fix: unknown category '%s', defaulting to '其他'", category)
-    return "其他"
-
 
 # ---------------------------------------------------------------------------
 # Helpers — generic
@@ -598,17 +552,8 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
     Uses lore lock for thread safety + auto-classifies orphan topics.
     """
     topic = entry.get("topic", "").strip()
-    # Strip bracket prefixes from topic (e.g. "【商城】：消耗品" → "消耗品")
-    topic = re.sub(r'^【[^】]*】[：:\s]*', '', topic).strip()
     if not topic:
         return
-    entry["topic"] = topic
-    # Validate category — skip entry if category is unresolvable
-    validated_cat = _validate_lore_category(entry.get("category", ""))
-    if validated_cat is None:
-        log.warning("    _save_lore_entry: skipping '%s' (invalid category '%s')", topic, entry.get("category", ""))
-        return
-    entry["category"] = validated_cat
 
     # Auto-classify orphan topic before saving
     category = entry.get("category", "")
@@ -779,9 +724,6 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
             titles_str = ", ".join(sorted(existing_titles)) if existing_titles else "（無）"
 
-            # Strip 【】 brackets from TOC to prevent LLM from copying them
-            clean_toc = re.sub(r'【|】', '', toc)
-
             prompt = (
                 "你是一個 RPG 結構化資料擷取工具。分析以下 GM 回覆，提取結構化資訊。\n\n"
                 f"## GM 回覆\n{gm_text}\n\n"
@@ -790,12 +732,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "**重要：**\n"
                 "- 如果已有設定中有密切相關的主題，**更新該條目**（使用完全相同的 topic 名稱）\n"
                 "- 每個條目只涵蓋一個具體概念，content 控制在 200-800 字\n"
-                "- **category 必須是以下 7 個值之一**：主神設定與規則、體系、商城、副本世界觀、場景、NPC、故事追蹤。"
-                "不要使用主題前綴（如「黃衣系譜」）作為分類，也不要加【】括號。\n"
-                "- topic 使用全形冒號「：」分層（如「基因鎖：第一階」），不要用半形冒號或 ` - ` 破折號\n"
-                f"已有設定（優先更新而非新建）：\n{clean_toc}\n"
+                f"已有設定（優先更新而非新建）：\n{toc}\n"
                 '格式：[{{"category": "分類", "topic": "主題", "content": "完整描述"}}]\n'
-                "可用分類（**只能用這 7 個**）：主神設定與規則/體系/商城/副本世界觀/場景/NPC/故事追蹤\n\n"
+                "可用分類：主神設定與規則/體系/商城/副本世界觀/場景/NPC/故事追蹤\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
                 f"已有事件標題（避免重複）：{titles_str}\n"
