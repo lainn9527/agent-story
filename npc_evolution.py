@@ -68,14 +68,32 @@ def run_npc_evolution_async(
 
     def _run():
         try:
+            # Get last round's activities to prevent repetition
+            prev_activities = _load_activities(story_id, branch_id)
+            prev_summary = ""
+            if prev_activities:
+                last_entry = prev_activities[-1]
+                prev_lines = []
+                for act in last_entry.get("activities", []):
+                    prev_lines.append(f"- {act.get('npc_name', '?')}：{act.get('activity', '')}，地點：{act.get('location', '')}")
+                if prev_lines:
+                    prev_summary = "\n## 上一輪活動（不要重複）\n" + "\n".join(prev_lines) + "\n"
+
             prompt = (
                 "你是主神空間 RPG 的 NPC 行為模擬器。根據以下 NPC 資料和最近劇情，"
                 "模擬每個 NPC 在當前時間段的自主活動。\n\n"
                 f"## NPC 資料\n{npc_profiles}\n\n"
                 f"## 最近劇情\n{recent_context}\n\n"
+                f"{prev_summary}"
+                "## 規則\n"
+                "1. 活動要反映角色性格（勇敢的人去訓練場、謹慎的人去研究資料等）\n"
+                "2. 不要所有人在同一地點做同一件事\n"
+                "3. inner_thought 用角色自己的語氣寫一句內心獨白（帶口語特色）\n"
+                "4. 不要重複上一輪的活動內容\n\n"
                 "請為每個 NPC 生成一條簡短的自主活動描述，格式為 JSON 陣列：\n"
                 '```json\n[\n  {"npc_name": "名字", "activity": "正在做什麼", '
-                '"mood": "情緒", "location": "地點"}\n]\n```\n'
+                '"mood": "情緒", "location": "地點", '
+                '"inner_thought": "用角色語氣的一句內心獨白"}\n]\n```\n'
                 "只輸出 JSON，不要其他文字。"
             )
 
@@ -133,12 +151,16 @@ def get_recent_activities(story_id: str, branch_id: str, limit: int = 2) -> str:
             activity = act.get("activity", "")
             mood = act.get("mood", "")
             location = act.get("location", "")
+            inner = act.get("inner_thought", "")
             parts = [f"{name}：{activity}"]
             if mood:
                 parts.append(f"情緒：{mood}")
             if location:
                 parts.append(f"地點：{location}")
-            lines.append("- " + "，".join(parts))
+            line = "- " + "，".join(parts)
+            if inner:
+                line += f"\n  *（{name}心想：{inner}）*"
+            lines.append(line)
 
     return "\n".join(lines)
 
