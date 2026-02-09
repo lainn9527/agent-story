@@ -181,6 +181,26 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }).then(r => r.json()),
+
+  // Agent APIs
+  agents: () => fetch("/api/agents").then(r => r.json()),
+  createAgent: (name, characterConfig, autoPlayConfig) =>
+    fetch("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, character_config: characterConfig, auto_play_config: autoPlayConfig }),
+    }).then(r => r.json()),
+  agentAction: (agentId, action) =>
+    fetch(`/api/agents/${agentId}/${action}`, { method: "POST" }).then(r => r.json()),
+  deleteAgent: (agentId) =>
+    fetch(`/api/agents/${agentId}`, { method: "DELETE" }).then(r => r.json()),
+  leaderboard: () => fetch("/api/leaderboard").then(r => r.json()),
+  generateCharacter: (prompt) =>
+    fetch("/api/agents/generate-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    }).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -394,6 +414,8 @@ const $newBranchBtn = document.getElementById("new-branch-btn");
 const $newBlankBranchBtn = document.getElementById("new-blank-branch-btn");
 const $promoteBtn = document.getElementById("promote-branch-btn");
 const $storyModal = document.getElementById("new-story-modal");
+const $newAgentBtn = document.getElementById("new-agent-btn");
+if ($newAgentBtn) $newAgentBtn.addEventListener("click", openAgentCreationModal);
 
 // ---------------------------------------------------------------------------
 // Drawer open/close
@@ -407,6 +429,7 @@ function openDrawer() {
   loadEvents();
   loadSummaries();
   loadConfigPanel();
+  loadAgents();
 }
 
 function closeDrawer() {
@@ -836,6 +859,8 @@ function buildBranchTree() {
 
 async function switchToBranch(branchId, { scrollToIndex, preserveScroll, forcePreserve } = {}) {
   closeSummaryModal();
+  // Clear agent poll timer when switching branches
+  if (_agentPollTimer) { clearTimeout(_agentPollTimer); _agentPollTimer = null; }
   const container = document.getElementById("messages");
   let savedScrollTop = 0;
   let isAtBottom = false;
@@ -1734,6 +1759,255 @@ async function loadConfigPanel() {
   } catch (e) {
     console.error("loadConfigPanel error:", e);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent Panel
+// ---------------------------------------------------------------------------
+let _agentPollTimer = null;
+
+const AGENT_STATUS_LABELS = {
+  created: "待啟動", running: "運行中", paused: "已暫停",
+  stopped: "已停止", error: "錯誤",
+};
+const AGENT_STATUS_COLORS = {
+  created: "agent-status-created", running: "agent-status-running",
+  paused: "agent-status-paused", stopped: "agent-status-stopped",
+  error: "agent-status-error",
+};
+
+async function loadAgents() {
+  const panel = document.getElementById("agent-panel");
+  if (!panel) return;
+
+  try {
+    const data = await API.agents();
+    const agents = data.agents || [];
+    renderAgentPanel(panel, agents);
+
+    // Auto-poll if any agent is running (single fetch per cycle via loadAgents)
+    const hasRunning = agents.some(a => a.status === "running");
+    if (hasRunning && !_agentPollTimer) {
+      _agentPollTimer = setTimeout(function poll() {
+        loadAgents();  // loadAgents re-evaluates hasRunning and re-schedules if needed
+      }, 5000);
+    } else if (!hasRunning) {
+      if (_agentPollTimer) { clearTimeout(_agentPollTimer); _agentPollTimer = null; }
+    }
+
+    // Load leaderboard
+    loadLeaderboard();
+  } catch (e) {
+    panel.innerHTML = '<div class="agent-empty">載入失敗</div>';
+  }
+}
+
+function renderAgentPanel(panel, agents) {
+  if (!agents.length) {
+    panel.innerHTML = '<div class="agent-empty">尚無輪迴者</div>';
+    return;
+  }
+
+  panel.innerHTML = agents.map(a => {
+    const statusCls = AGENT_STATUS_COLORS[a.status] || "agent-status-stopped";
+    const statusLabel = AGENT_STATUS_LABELS[a.status] || a.status;
+    const charName = escapeHtml(a.character_config?.character_state?.name || a.name);
+
+    let controls = "";
+    if (a.status === "created" || a.status === "paused" || a.status === "stopped" || a.status === "error") {
+      controls += `<button class="agent-ctrl-btn agent-start-btn" data-id="${a.id}" title="啟動">▶</button>`;
+    }
+    if (a.status === "running") {
+      controls += `<button class="agent-ctrl-btn agent-pause-btn" data-id="${a.id}" title="暫停">⏸</button>`;
+      controls += `<button class="agent-ctrl-btn agent-stop-btn" data-id="${a.id}" title="停止">⏹</button>`;
+    }
+    if (a.branch_id) {
+      controls += `<button class="agent-ctrl-btn agent-view-btn" data-id="${a.id}" data-branch="${a.branch_id}" title="查看">👁</button>`;
+    }
+    controls += `<button class="agent-ctrl-btn agent-delete-btn" data-id="${a.id}" title="刪除">✕</button>`;
+
+    return `<div class="agent-card">
+      <div class="agent-card-header">
+        <span class="agent-name">${charName}</span>
+        <span class="agent-status ${statusCls}">${statusLabel}</span>
+      </div>
+      <div class="agent-card-controls">${controls}</div>
+    </div>`;
+  }).join("");
+
+  // Bind control buttons with error handling and disable-during-request
+  async function agentAction(btn, action) {
+    btn.disabled = true;
+    try {
+      const res = await API.agentAction(btn.dataset.id, action);
+      if (!res.ok) alert(res.error || `${action} 失敗`);
+    } catch (e) { alert("網路錯誤：" + e.message); }
+    loadAgents();
+  }
+  panel.querySelectorAll(".agent-start-btn").forEach(btn => {
+    btn.addEventListener("click", () => agentAction(btn, "start"));
+  });
+  panel.querySelectorAll(".agent-pause-btn").forEach(btn => {
+    btn.addEventListener("click", () => agentAction(btn, "pause"));
+  });
+  panel.querySelectorAll(".agent-stop-btn").forEach(btn => {
+    btn.addEventListener("click", () => agentAction(btn, "stop"));
+  });
+  panel.querySelectorAll(".agent-view-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      await switchToBranch(btn.dataset.branch);
+      closeDrawer();
+    });
+  });
+  panel.querySelectorAll(".agent-delete-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const ok = await showConfirm("確定刪除此輪迴者？（分支資料保留）");
+      if (!ok) return;
+      btn.disabled = true;
+      try {
+        const res = await API.deleteAgent(btn.dataset.id);
+        if (!res.ok) alert(res.error || "刪除失敗");
+      } catch (e) { alert("網路錯誤：" + e.message); }
+      loadAgents();
+    });
+  });
+}
+
+async function loadLeaderboard() {
+  const panel = document.getElementById("leaderboard-panel");
+  if (!panel) return;
+
+  try {
+    const data = await API.leaderboard();
+    const lb = data.leaderboard || [];
+    if (!lb.length) {
+      panel.innerHTML = '<div class="agent-empty">尚無排行資料</div>';
+      return;
+    }
+    panel.innerHTML = '<div class="leaderboard-list">' + lb.map((e, i) => {
+      const rank = i + 1;
+      const badge = rank <= 3 ? `<span class="rank-badge rank-${rank}">${rank}</span>` : `<span class="rank-num">${rank}</span>`;
+      return `<div class="leaderboard-row">
+        ${badge}
+        <span class="lb-name">${escapeHtml(e.name)}</span>
+        <span class="lb-points">${e.reward_points} 點</span>
+      </div>`;
+    }).join("") + '</div>';
+  } catch (e) {
+    panel.innerHTML = '';
+  }
+}
+
+// Agent creation flow
+function openAgentCreationModal() {
+  const modal = document.getElementById("agent-creation-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+
+  const textarea = document.getElementById("agent-concept-input");
+  const genBtn = document.getElementById("agent-gen-btn");
+  const preview = document.getElementById("agent-preview");
+  const confirmBtn = document.getElementById("agent-confirm-btn");
+  const cancelBtn = document.getElementById("agent-cancel-btn");
+  const spinner = document.getElementById("agent-gen-spinner");
+
+  textarea.value = "";
+  preview.innerHTML = "";
+  preview.style.display = "none";
+  confirmBtn.style.display = "none";
+  confirmBtn._charData = null;
+
+  genBtn.onclick = async () => {
+    const concept = textarea.value.trim();
+    if (!concept) return;
+
+    genBtn.disabled = true;
+    spinner.style.display = "inline-block";
+    preview.innerHTML = "";
+    preview.style.display = "none";
+    confirmBtn.style.display = "none";
+
+    try {
+      const res = await API.generateCharacter(concept);
+      if (!res.ok) {
+        preview.innerHTML = `<div class="agent-gen-error">生成失敗：${escapeHtml(res.error || "未知錯誤")}</div>`;
+        preview.style.display = "block";
+        return;
+      }
+
+      const ch = res.character;
+      confirmBtn._charData = ch;
+
+      preview.innerHTML = `
+        <div class="agent-preview-card">
+          <div class="preview-field"><label>名字</label><input type="text" id="preview-name" value="${escapeHtml(ch.name || "")}"></div>
+          <div class="preview-field"><label>性格</label><textarea id="preview-personality" rows="4"></textarea></div>
+          <div class="preview-field"><label>開場白</label><textarea id="preview-opening" rows="2"></textarea></div>
+          <div class="preview-field"><label>體質</label><input type="text" id="preview-physique" value="${escapeHtml(ch.physique || "")}"></div>
+          <div class="preview-field"><label>精神力</label><input type="text" id="preview-spirit" value="${escapeHtml(ch.spirit || "")}"></div>
+        </div>
+      `;
+      // Set textarea values via DOM to prevent </textarea> injection
+      document.getElementById("preview-personality").value = ch.personality || "";
+      document.getElementById("preview-opening").value = ch.opening_message || "";
+      preview.style.display = "block";
+      confirmBtn.style.display = "inline-block";
+    } catch (e) {
+      preview.innerHTML = `<div class="agent-gen-error">網路錯誤：${escapeHtml(e.message)}</div>`;
+      preview.style.display = "block";
+    } finally {
+      genBtn.disabled = false;
+      spinner.style.display = "none";
+    }
+  };
+
+  confirmBtn.onclick = async () => {
+    const ch = confirmBtn._charData;
+    if (!ch) return;
+
+    // Read edited values from preview
+    const name = document.getElementById("preview-name")?.value || ch.name;
+    const personality = document.getElementById("preview-personality")?.value || ch.personality;
+    const opening = document.getElementById("preview-opening")?.value || ch.opening_message;
+    const physique = document.getElementById("preview-physique")?.value || ch.physique;
+    const spirit = document.getElementById("preview-spirit")?.value || ch.spirit;
+
+    const charState = ch.character_state || {};
+    charState.name = name;
+    charState.physique = physique;
+    charState.spirit = spirit;
+
+    const characterConfig = {
+      personality,
+      opening_message: opening,
+      character_state: charState,
+    };
+
+    confirmBtn.disabled = true;
+    try {
+      const res = await API.createAgent(name, characterConfig);
+      if (res.ok) {
+        modal.classList.add("hidden");
+        loadAgents();
+      } else {
+        alert(res.error || "建立失敗");
+      }
+    } finally {
+      confirmBtn.disabled = false;
+    }
+  };
+
+  cancelBtn.onclick = () => modal.classList.add("hidden");
+
+  // Close on overlay click or Escape
+  modal.onclick = (e) => { if (e.target === modal) modal.classList.add("hidden"); };
+  const escHandler = (e) => {
+    if (e.key === "Escape" && !modal.classList.contains("hidden")) {
+      modal.classList.add("hidden");
+      document.removeEventListener("keydown", escHandler);
+    }
+  };
+  document.addEventListener("keydown", escHandler);
 }
 
 // ---------------------------------------------------------------------------
