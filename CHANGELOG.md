@@ -5,6 +5,28 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-02-09
+
+### Added
+- Clickable GM options: tap to append action to input, supports multi-select with newline separator ([#47])
+- Always-visible message index labels (no hover required) ([#47])
+- Bug report button on each message, saves to per-story `bug_reports.json` with auto-cap at 500 ([#47])
+- Sibling prune button to batch-delete variant branches ([#47])
+- Toast notification system (`showToast()`) for prune and bug report feedback ([#47])
+- `scripts/clean_state.py` migration script to remove `*_delta` / `*_add` garbage from character state ([#47])
+- Mobile tap-to-reveal edit/regen controls via `touchstart` handler ([#47])
+
+### Changed
+- Time estimation prompt enriched with RPG scenario references (combat, exploration, travel durations) ([#47])
+- Reward hint dedup: system prompt instruction as root cause fix, regex as safety net ([#47])
+- Removed +30min time fallback — time advances only via regex TIME tags or LLM estimation ([#47])
+
+### Fixed
+- Orphan branch cleanup: `finally` blocks in edit/regen stream generators detect client disconnect ([#47])
+- Filter empty branches in `_get_sibling_groups()` to prevent broken sibling switcher ([#47])
+- Character state delta garbage: generic `*_delta` / `*_add` suffix handler prevents accumulation ([#47])
+- Mobile CSS: `text-indent: 0` on GM options, touch target spacing for report button ([#47])
+
 ## [0.10.1] - 2026-02-09
 
 ### Fixed
@@ -169,4 +191,5 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#41]: https://github.com/lainn9527/agent-story/pull/41
 [#42]: https://github.com/lainn9527/agent-story/pull/42
 [#46]: https://github.com/lainn9527/agent-story/pull/46
+[#47]: https://github.com/lainn9527/agent-story/pull/47
 [#49]: https://github.com/lainn9527/agent-story/pull/49
