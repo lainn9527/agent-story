@@ -1064,7 +1064,7 @@ def _get_fork_points(story_id: str, branch_id: str) -> dict:
         cur = branch.get("parent_branch_id")
 
     for bid, branch in branches.items():
-        if bid == branch_id or branch.get("deleted") or branch.get("blank") or branch.get("merged"):
+        if bid == branch_id or branch.get("deleted") or branch.get("blank") or branch.get("merged") or branch.get("pruned"):
             continue
         parent = branch.get("parent_branch_id")
         bp_index = branch.get("branch_point_index")
@@ -1101,7 +1101,7 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
 
     fork_map = {}
     for bid, b in branches.items():
-        if b.get("deleted") or b.get("blank") or b.get("merged"):
+        if b.get("deleted") or b.get("blank") or b.get("merged") or b.get("pruned"):
             continue
         parent_id = b.get("parent_branch_id")
         bp_index = b.get("branch_point_index")
@@ -1159,6 +1159,83 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
             }
 
     return sibling_groups
+
+
+# ---------------------------------------------------------------------------
+# Auto-prune abandoned sibling branches
+# ---------------------------------------------------------------------------
+
+PRUNE_DEPTH_THRESHOLD = 5
+PRUNE_MAX_DELTA_MSGS = 2
+
+
+def _auto_prune_siblings(story_id: str, branch_id: str, current_msg_index: int) -> list[str]:
+    """Auto-prune abandoned sibling branches that the player has moved past.
+
+    A branch is pruned when ALL of these conditions are met:
+    - Its parent is in the current branch's ancestor chain (it's a sibling)
+    - It is NOT in the ancestor chain itself (not an ancestor)
+    - No pruned/deleted/merged/blank/protected flags
+    - Not main, not auto_ prefix
+    - Player has moved ≥ PRUNE_DEPTH_THRESHOLD steps past the branch point
+    - Branch has ≤ PRUNE_MAX_DELTA_MSGS delta messages (abandoned attempt)
+    - Branch has no active children (nobody forked from it)
+
+    Returns list of pruned branch IDs.
+    """
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+
+    # Build ancestor chain for current branch
+    ancestor_set = set()
+    cur = branch_id
+    while cur is not None:
+        ancestor_set.add(cur)
+        b = branches.get(cur)
+        if not b:
+            break
+        cur = b.get("parent_branch_id")
+
+    # Build set of branches that have active children (not pruned/deleted/merged)
+    has_active_children = set()
+    for b in branches.values():
+        pid = b.get("parent_branch_id")
+        if pid and not b.get("pruned") and not b.get("deleted") and not b.get("merged"):
+            has_active_children.add(pid)
+
+    pruned = []
+    for bid, b in branches.items():
+        # Skip if already handled or special
+        if bid == "main" or bid.startswith("auto_"):
+            continue
+        if b.get("pruned") or b.get("deleted") or b.get("merged") or b.get("blank") or b.get("protected"):
+            continue
+        # Must be a sibling (parent in ancestor chain) but not an ancestor itself
+        parent_id = b.get("parent_branch_id")
+        if parent_id not in ancestor_set or bid in ancestor_set:
+            continue
+        # Player must have moved past the branch point
+        bp_index = b.get("branch_point_index")
+        if bp_index is None or (current_msg_index - bp_index) < PRUNE_DEPTH_THRESHOLD:
+            continue
+        # Must be a short/abandoned branch
+        delta_msgs = _load_json(_story_messages_path(story_id, bid), [])
+        if len(delta_msgs) > PRUNE_MAX_DELTA_MSGS:
+            continue
+        # Must not have active children
+        if bid in has_active_children:
+            continue
+
+        # All conditions met — prune it
+        b["pruned"] = True
+        b["pruned_at"] = datetime.now(timezone.utc).isoformat()
+        pruned.append(bid)
+
+    if pruned:
+        _save_tree(story_id, tree)
+        log.info("Auto-pruned %d sibling branches: %s", len(pruned), pruned)
+
+    return pruned
 
 
 # ---------------------------------------------------------------------------
@@ -1855,11 +1932,17 @@ def api_send_stream():
                         tl = list(full_timeline) + [gm_msg]
                         compact_async(story_id, branch_id, tl)
 
+                    # Auto-prune abandoned siblings
+                    pruned = _auto_prune_siblings(story_id, branch_id, gm_msg_index)
+                    if pruned:
+                        tree = _load_tree(story_id)
+
                     log.info("/api/send/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
                         "type": "done",
                         "gm_msg": gm_msg,
                         "branch": tree["branches"][branch_id],
+                        "pruned_branches": pruned,
                     })
         except Exception as e:
             import traceback; log.info("/api/send/stream EXCEPTION %s\n%s", e, traceback.format_exc())
@@ -1888,7 +1971,7 @@ def api_branches():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     visible = {bid: b for bid, b in tree.get("branches", {}).items()
-               if not b.get("deleted") and not b.get("merged")}
+               if not b.get("deleted") and not b.get("merged") and not b.get("pruned")}
     return jsonify({
         "active_branch_id": tree.get("active_branch_id", "main"),
         "branches": visible,
@@ -2729,10 +2812,10 @@ def api_branches_delete(branch_id):
         if b.get("parent_branch_id") == branch_id
     ]
 
-    # Only materialize messages for active (non-deleted, non-merged) children
+    # Only materialize messages for active (non-deleted, non-merged, non-pruned) children
     active_children = [
         b for b in all_children
-        if not b.get("deleted") and not b.get("merged")
+        if not b.get("deleted") and not b.get("merged") and not b.get("pruned")
     ]
 
     if active_children:
@@ -2780,6 +2863,28 @@ def api_branches_delete(branch_id):
     _save_tree(story_id, tree)
 
     return jsonify({"ok": True, "switch_to": deleted_parent})
+
+
+@app.route("/api/branches/<branch_id>/protect", methods=["POST"])
+def api_branches_protect(branch_id):
+    """Toggle protected flag on a branch (prevents auto-prune)."""
+    story_id = _active_story_id()
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+
+    if branch_id not in branches:
+        return jsonify({"ok": False, "error": "branch not found"}), 404
+
+    branch = branches[branch_id]
+    if branch.get("protected"):
+        branch.pop("protected", None)
+        protected = False
+    else:
+        branch["protected"] = True
+        protected = True
+
+    _save_tree(story_id, tree)
+    return jsonify({"ok": True, "protected": protected})
 
 
 # ---------------------------------------------------------------------------

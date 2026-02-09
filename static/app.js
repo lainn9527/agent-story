@@ -159,6 +159,9 @@ const API = {
   deleteBranch: (branchId) =>
     fetch(`/api/branches/${branchId}`, { method: "DELETE" }).then(r => r.json()),
 
+  protectBranch: (branchId) =>
+    fetch(`/api/branches/${branchId}/protect`, { method: "POST" }).then(r => r.json()),
+
   editBranch: (parentBranchId, branchPointIndex, editedMessage) =>
     fetch("/api/branches/edit", {
       method: "POST",
@@ -1210,6 +1213,13 @@ function _btRenderTree(container, modal) {
       item.appendChild(badge);
     }
 
+    if (branch.protected) {
+      const badge = document.createElement("span");
+      badge.className = "bt-protected-badge";
+      badge.textContent = "\u2665";
+      item.appendChild(badge);
+    }
+
     const idLabel = document.createElement("span");
     idLabel.className = "bt-id";
     const shortId = branch.id.replace(/^branch_/, "");
@@ -1220,6 +1230,32 @@ function _btRenderTree(container, modal) {
     if (branch.id !== "main") {
       const actions = document.createElement("span");
       actions.className = "bt-actions" + (_btSelectMode ? " hidden" : "");
+
+      // Heart protect button
+      const heartBtn = document.createElement("span");
+      heartBtn.className = "bt-action-btn bt-action-heart";
+      heartBtn.textContent = branch.protected ? "\u2665" : "\u2661";
+      heartBtn.title = branch.protected ? "取消保護" : "保護（防止自動清理）";
+      heartBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const res = await API.protectBranch(branch.id);
+        if (res.ok) {
+          branch.protected = res.protected;
+          heartBtn.textContent = res.protected ? "\u2665" : "\u2661";
+          heartBtn.title = res.protected ? "取消保護" : "保護（防止自動清理）";
+          // Update badge
+          const existingBadge = item.querySelector(".bt-protected-badge");
+          if (res.protected && !existingBadge) {
+            const badge = document.createElement("span");
+            badge.className = "bt-protected-badge";
+            badge.textContent = "\u2665";
+            name.after(badge);
+          } else if (!res.protected && existingBadge) {
+            existingBadge.remove();
+          }
+        }
+      });
+      actions.appendChild(heartBtn);
 
       if (!branch.blank) {
         const mergeBtn = document.createElement("span");
@@ -2089,6 +2125,27 @@ function renderMessages(messages) {
           }
         });
         switcher.appendChild(pruneBtn);
+      }
+
+      // Heart protect button for current variant
+      if (currentVariant && currentVariant.branch_id !== "main") {
+        const isProtected = branches[currentVariant.branch_id]?.protected;
+        const heartBtn = document.createElement("button");
+        heartBtn.className = "sw-heart";
+        heartBtn.textContent = isProtected ? "\u2665" : "\u2661";
+        heartBtn.title = isProtected ? "取消保護" : "保護（防止自動清理）";
+        heartBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const res = await API.protectBranch(currentVariant.branch_id);
+          if (res.ok) {
+            if (branches[currentVariant.branch_id]) {
+              branches[currentVariant.branch_id].protected = res.protected;
+            }
+            heartBtn.textContent = res.protected ? "\u2665" : "\u2661";
+            heartBtn.title = res.protected ? "取消保護" : "保護（防止自動清理）";
+          }
+        });
+        switcher.appendChild(heartBtn);
       }
 
       el.appendChild(switcher);
@@ -3092,6 +3149,13 @@ async function sendMessage() {
 
         // Refresh branch list after background tag extraction (title generation)
         pollForBranchTitle(currentBranchId);
+
+        // Auto-prune notification
+        if (data.pruned_branches && data.pruned_branches.length > 0) {
+          showToast(`自動清理了 ${data.pruned_branches.length} 個廢棄分支`);
+          await loadBranches();
+          renderBranchList();
+        }
       },
       // onError
       (msg) => {
@@ -3444,8 +3508,8 @@ document.addEventListener("keydown", (e) => {
       closeBranchTreeModal();
     }
   }
-  // Cmd+T (Mac) / Ctrl+T (Win) — toggle drawer
-  if ((e.metaKey || e.ctrlKey) && e.key === "t") {
+  // Cmd+\ (Mac) / Ctrl+\ (Win) — toggle drawer
+  if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
     e.preventDefault();
     if ($drawer.classList.contains("closed")) {
       openDrawer();
