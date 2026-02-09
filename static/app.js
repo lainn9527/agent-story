@@ -721,7 +721,7 @@ function renderStoryList() {
     // Delete button (only if more than 1 story)
     if (Object.keys(stories).length > 1) {
       const del = document.createElement("span");
-      del.className = "drawer-item-delete";
+      del.className = "drawer-item-action drawer-item-action-del";
       del.textContent = "\u2715";
       del.title = "刪除故事";
       del.addEventListener("click", async (e) => {
@@ -829,8 +829,8 @@ function renderBranchList() {
 
     const label = document.createElement("span");
     label.className = "drawer-item-label";
-    label.textContent = branch.title || branch.name;
-    label.title = branch.name;
+    label.textContent = branch.title || branch.name || branch.id;
+    label.title = branch.name || branch.id;
     item.appendChild(label);
 
     if (branch.id.startsWith("auto_")) {
@@ -878,11 +878,13 @@ function renderBranchList() {
       item.appendChild(del);
     }
 
-    // Branch ID tag
-    const idTag = document.createElement("div");
-    idTag.className = "branch-id-tag";
-    idTag.textContent = branch.id;
-    item.appendChild(idTag);
+    // Branch ID tag (skip for main — redundant)
+    if (branch.id !== "main") {
+      const idTag = document.createElement("div");
+      idTag.className = "branch-id-tag";
+      idTag.textContent = branch.id;
+      item.appendChild(idTag);
+    }
 
     item.addEventListener("click", () => {
       if (branch.id !== currentBranchId) {
@@ -931,7 +933,7 @@ function startRenamingBranch(item, branch) {
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); save(); }
-    if (e.key === "Escape") { e.preventDefault(); renderBranchList(); }
+    if (e.key === "Escape") { e.preventDefault(); saved = true; renderBranchList(); }
   });
   input.addEventListener("blur", save);
 }
