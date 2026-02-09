@@ -1,9 +1,17 @@
 """SQLite FTS5 search engine for world_lore — supports CJK full-text + tag search."""
 
 import json
+import logging
 import os
 import re
 import sqlite3
+
+log = logging.getLogger("rpg")
+
+VALID_LORE_CATEGORIES = {
+    "主神設定與規則", "體系", "商城", "副本世界觀",
+    "場景", "NPC", "故事追蹤",
+}
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -105,22 +113,31 @@ def rebuild_index(story_id: str):
 
     # Clear and rebuild
     conn.execute("DELETE FROM lore")
+    skipped = 0
     for entry in lore_entries:
         content = entry.get("content", "")
         if not isinstance(content, str):
             content = json.dumps(content, ensure_ascii=False)
         if content.startswith("（待建立）"):
             continue
+        category = entry.get("category", "其他").strip().strip("【】").strip()
+        if category not in VALID_LORE_CATEGORIES:
+            skipped += 1
+            log.warning("    lore_rebuild: skipping entry with invalid category '%s' (topic: %s)",
+                        category, entry.get("topic", "?")[:40])
+            continue
         tags = extract_tags(content)
         conn.execute(
             "INSERT OR REPLACE INTO lore (category, topic, content, tags) VALUES (?, ?, ?, ?)",
             (
-                entry.get("category", "其他"),
+                category,
                 entry.get("topic", ""),
                 content,
                 ",".join(tags),
             ),
         )
+    if skipped:
+        log.info("    lore_rebuild: skipped %d entries with invalid categories", skipped)
     conn.commit()
     conn.close()
 
