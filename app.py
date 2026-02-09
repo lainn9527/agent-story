@@ -494,6 +494,23 @@ def _copy_npcs_to_branch(story_id: str, from_branch_id: str, to_branch_id: str):
     _save_json(_story_npcs_path(story_id, to_branch_id), npcs)
 
 
+# Role keywords for NPC classification.
+# Active NPCs get rich format in system prompt; offscreen-eligible NPCs get adventures.
+# Uses substring matching to handle compound roles like "隊友/智囊" or "輪迴者/隊友".
+_ACTIVE_ROLE_KEYWORDS = {"隊友", "重要NPC", "敵人", "boss", "夥伴", "盟友"}
+_OFFSCREEN_ROLE_KEYWORDS = {"隊友", "重要NPC", "夥伴", "盟友"}  # exclude 敵人/boss
+
+
+def _is_active_npc(role: str) -> bool:
+    """Check if a role qualifies as an active NPC (rich format in system prompt)."""
+    return any(keyword in role for keyword in _ACTIVE_ROLE_KEYWORDS)
+
+
+def _is_offscreen_eligible(role: str) -> bool:
+    """Check if a role qualifies for offscreen adventures (friendly NPCs only)."""
+    return any(keyword in role for keyword in _OFFSCREEN_ROLE_KEYWORDS)
+
+
 def _big5_to_behavioral_hints(personality: dict) -> list[str]:
     """Convert extreme Big5 scores (<=3 or >=8) to actionable behavioral hints for the GM."""
     hints = []
@@ -545,7 +562,6 @@ def _build_npc_text(story_id: str, branch_id: str = "main") -> str:
     if not npcs:
         return "（尚無已記錄的 NPC）"
 
-    ACTIVE_ROLES = {"隊友", "重要NPC", "敵人", "boss", "夥伴", "盟友"}
     active_lines = []
     background_npcs = []
 
@@ -553,7 +569,7 @@ def _build_npc_text(story_id: str, branch_id: str = "main") -> str:
         role = npc.get("role", "?")
         name = npc.get("name", "?")
 
-        if role in ACTIVE_ROLES:
+        if _is_active_npc(role):
             lines = [f"### {name}（{role}）"]
             if npc.get("appearance"):
                 lines.append(f"- 外觀：{npc['appearance']}")
@@ -997,6 +1013,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
 # Per-branch debounce: prevent duplicate triggers on the same return-to-hub
 _offscreen_triggered: set[tuple[str, str]] = set()
+_offscreen_lock = threading.Lock()
 
 
 def _dungeon_enter_day_path(story_id: str, branch_id: str) -> str:
@@ -1014,9 +1031,10 @@ def _record_dungeon_enter_day(story_id: str, branch_id: str):
 def _trigger_offscreen_adventures_debounced(story_id: str, branch_id: str):
     """Debounced trigger for offscreen adventures on return to hub."""
     key = (story_id, branch_id)
-    if key in _offscreen_triggered:
-        return
-    _offscreen_triggered.add(key)
+    with _offscreen_lock:
+        if key in _offscreen_triggered:
+            return
+        _offscreen_triggered.add(key)
     _trigger_offscreen_adventures(story_id, branch_id)
 
 
@@ -1026,20 +1044,24 @@ def _trigger_offscreen_adventures(story_id: str, branch_id: str):
     Runs in a background thread via call_oneshot().
     """
     npcs = _load_npcs(story_id, branch_id)
-    # Filter to active NPC roles
-    active_roles = {"隊友", "重要NPC", "夥伴", "盟友"}
-    candidates = [n for n in npcs if n.get("role") in active_roles]
+    # Filter to offscreen-eligible NPC roles (friendly NPCs only, not enemies)
+    candidates = [n for n in npcs if _is_offscreen_eligible(n.get("role", ""))]
     if not candidates:
         log.info("    offscreen: no active NPCs to generate adventures for")
         # Clear debounce flag since nothing to do
         _offscreen_triggered.discard((story_id, branch_id))
         return
 
-    # Calculate elapsed days
+    # Calculate elapsed days (guard against missing dungeon_enter_day.json on edit/regen branches)
     enter_path = _dungeon_enter_day_path(story_id, branch_id)
     enter_day = _load_json(enter_path, {})
-    current_wd = get_world_day(story_id, branch_id)
-    elapsed_days = max(1, (current_wd.get("day", 1) - enter_day.get("day", 1)))
+    if not enter_day:
+        # No entry record (e.g. edit/regen branch) — use conservative default
+        elapsed_days = 3
+        log.info("    offscreen: no dungeon_enter_day.json found, using default %d days", elapsed_days)
+    else:
+        current_wd = get_world_day(story_id, branch_id)
+        elapsed_days = max(1, min(30, current_wd.get("day", 1) - enter_day.get("day", 1)))
 
     # Build NPC descriptions
     npc_descs = []
@@ -1093,8 +1115,7 @@ def _trigger_offscreen_adventures(story_id: str, branch_id: str):
                 log.warning("    offscreen: LLM returned empty response")
                 return
 
-            import re as _re
-            json_match = _re.search(r'\[.*\]', result, _re.DOTALL)
+            json_match = re.search(r'\[.*\]', result, re.DOTALL)
             if not json_match:
                 log.warning("    offscreen: no JSON array found in response")
                 return
