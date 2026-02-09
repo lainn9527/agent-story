@@ -235,12 +235,27 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - **PR Review process**: Spawn 4 subagents (BE, FE, UI/UX, Game Director) to review the PR and leave comments via `gh pr review` / `gh pr comment`.
   - If any reviewer leaves actionable comments, address them and reply on the same comment thread.
   - Repeat until all reviewers have no remaining issues.
-- **Merge process**: Once all reviews pass, rebase onto `main`, merge the PR, and clean up the worktree.
+- **E2E testing (user-gated).** After all reviews pass, set up e2e testing for the user:
+  1. Copy production data and config into the worktree (never symlink — avoids data pollution):
+     ```bash
+     cp -r /Users/eddylai/story/data ../story-<branch-name>/data
+     cp /Users/eddylai/story/llm_config.json ../story-<branch-name>/llm_config.json
+     ```
+  2. Find a random available port and start the server:
+     ```bash
+     PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()") && echo "Test server on port $PORT" && cd ../story-<branch-name> && PORT=$PORT python app.py
+     ```
+  3. Tell the user the URL (`http://localhost:<port>`) and ask them to test.
+  **Do NOT merge until the user explicitly confirms the PR is ready to merge.**
+- **Merge process**: Once the user confirms e2e testing passed:
+  1. Bump `VERSION` and add a new section to `CHANGELOG.md` (see Versioning & Changelog below).
+  2. Commit the version bump, then rebase onto `main` and merge:
   ```bash
   git rebase main
   gh pr merge <pr-number> --rebase --delete-branch
   git worktree remove ../story-<branch-name>
   ```
+  **Never merge without user confirmation and version bump.**
 
 ## Versioning & Changelog
 - **Version file**: `VERSION` (single source of truth, read by `app.py` as `__version__`)
