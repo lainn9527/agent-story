@@ -755,9 +755,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
                 "格式：只填有變化的欄位。\n\n"
                 "## 5. 時間流逝（time）\n"
-                "分析 GM 敘事中是否有時間流逝。只計算明確的時間跳躍，不要猜測。\n"
-                "例如：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15、「幾個小時後」→ hours:3\n"
-                "如果敘事只是場景內連續行動（走路、戰鬥、對話），沒有時間跳躍，則不要輸出。\n"
+                "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
+                "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
+                "- 隱含流逝：一場戰鬥 → hours:1、探索一棟建築 → hours:2、一段對話 → hours:0（不輸出）\n"
+                "- 純對話/短暫互動/思考不需要輸出。只有場景中有實際行動推進才估算。\n"
                 '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
@@ -837,6 +838,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 saved_counts["state"] = True
 
             # Time — advance world_day (skip if regex already found TIME tags)
+            time_applied = False
             time_data = data.get("time", {})
             if time_data and isinstance(time_data, dict) and not skip_time:
                 days = time_data.get("days") or 0
@@ -845,6 +847,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 if total_days > 0:
                     advance_world_day(story_id, branch_id, total_days)
                     saved_counts["time"] = total_days
+                    time_applied = True
+
+            # Fallback: if neither regex TIME tags nor LLM detected time, apply +30min
+            if not skip_time and not time_applied:
+                advance_world_day(story_id, branch_id, 0.5 / 24)  # +30 minutes
+                saved_counts["time"] = 0.5 / 24
 
             log.info(
                 "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s",
@@ -1371,16 +1379,11 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     had_time_tags = bool(TIME_RE.search(gm_response))
     gm_response = process_time_tags(gm_response, story_id, branch_id)
 
-    # Default minimum time advance: +30 min per GM turn if no TIME tag found.
-    # Always skip async time extraction when default fires to prevent double-counting.
-    if not had_time_tags:
-        advance_world_day(story_id, branch_id, 0.5 / 24)  # +30 minutes
-
     # Async post-processing: extract structured data via separate LLM call
-    # Skip state if regex already found STATE tag; skip time if regex or default already applied
+    # Time fallback (+30min) is handled inside _extract_tags_async when LLM also finds nothing
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
                         skip_state=bool(state_updates),
-                        skip_time=True)
+                        skip_time=had_time_tags)
 
     # Build snapshots for branch forking accuracy
     snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
