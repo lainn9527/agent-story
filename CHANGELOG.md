@@ -5,6 +5,18 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-02-10
+
+### Changed
+- Lore TOC in system prompt rendered as hierarchical indented tree instead of flat list ([#38])
+- Dropped `[tags]` from TOC output — tags are for search scoring, not LLM context ([#38])
+- TOC size reduced from ~21K to ~11K chars (~47% token savings) ([#38])
+
+### Fixed
+- Handle non-string lore content in `rebuild_index` (dirty data guard) ([#38])
+
+[#38]: https://github.com/lainn9527/agent-story/pull/38
+
 ## [0.12.1] - 2026-02-10
 
 ### Fixed
