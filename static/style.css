@@ -1122,6 +1122,22 @@ body {
   background: #b71c1c;
 }
 
+.prompt-modal-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 1rem;
+  margin: 12px 0 16px;
+  outline: none;
+  box-sizing: border-box;
+}
+.prompt-modal-input:focus {
+  border-color: var(--gold);
+}
+
 /* ---------- Init loading overlay ---------- */
 #init-overlay {
   position: fixed;
