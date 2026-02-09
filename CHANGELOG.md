@@ -5,6 +5,16 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-02-09
+
+### Fixed
+- Fix branch fork (edit/regen) using parent's current world_day instead of value at branch point ([#49])
+- Fix `npcs_snapshot` only saved on NPC-tag messages, causing NPC loss on fork ([#49])
+
+### Added
+- `world_day_snapshot` saved on every GM message for accurate fork restoration ([#49])
+- `scripts/backfill_snapshots.py` to patch historical messages with missing snapshots ([#49])
+
 ## [0.10.0] - 2026-02-09
 
 ### Added
@@ -159,3 +169,4 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#41]: https://github.com/lainn9527/agent-story/pull/41
 [#42]: https://github.com/lainn9527/agent-story/pull/42
 [#46]: https://github.com/lainn9527/agent-story/pull/46
+[#49]: https://github.com/lainn9527/agent-story/pull/49
