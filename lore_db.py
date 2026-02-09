@@ -637,24 +637,37 @@ def get_entry_count(story_id: str) -> int:
     return count
 
 
-def get_category_summary(story_id: str) -> str:
-    """Return a compact category summary for system prompt (~100 tokens).
+_MIN_CATEGORY_SIZE = 5  # categories with fewer entries are grouped as 其他
 
-    Format: 「分類名(N條)」per category, one line.
-    Gives the GM a mental map of knowledge structure without full TOC.
+
+def get_category_summary(story_id: str) -> str:
+    """Return a compact category summary for system prompt (~50 tokens).
+
+    Only lists major categories (>= 5 entries). Smaller ones are lumped
+    into 「其他(N條)」to keep the summary short.
     """
     conn = _get_conn(story_id)
     _ensure_tables(conn)
     rows = conn.execute(
-        "SELECT category, COUNT(*) as cnt FROM lore GROUP BY category ORDER BY MIN(id)"
+        "SELECT category, COUNT(*) as cnt FROM lore GROUP BY category ORDER BY COUNT(*) DESC"
     ).fetchall()
     conn.close()
 
     if not rows:
         return ""
 
-    parts = [f"{r['category']}({r['cnt']})" for r in rows]
-    return "、".join(parts)
+    major = []
+    minor_total = 0
+    for r in rows:
+        if r["cnt"] >= _MIN_CATEGORY_SIZE:
+            major.append(f"{r['category']}({r['cnt']})")
+        else:
+            minor_total += r["cnt"]
+
+    if minor_total > 0:
+        major.append(f"其他({minor_total})")
+
+    return "、".join(major)
 
 
 def get_toc(story_id: str) -> str:
