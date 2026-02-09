@@ -1770,8 +1770,23 @@ body {
     background: var(--bg-dark);
   }
 
+  #header {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 8px 12px;
+  }
+
+  .header-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1rem;
+  }
+
   .branch-indicator {
-    max-width: 100px;
+    max-width: 80px;
     padding: 2px 8px;
     font-size: 0.7rem;
   }
@@ -1866,6 +1881,14 @@ body {
   .msg-action-btn {
     font-size: 0.9rem;
     padding: 4px 8px;
+  }
+
+  .message.gm .msg-action-btn {
+    left: 4px;
+  }
+
+  .message.gm .delete-prev-btn {
+    left: 44px !important;
   }
 
   .summary-modal-header {
