@@ -14,23 +14,6 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 [#59]: https://github.com/lainn9527/agent-story/pull/59
 
-## [0.12.3] - 2026-02-10
-
-### Added
-- Lore category validation: `VALID_LORE_CATEGORIES` whitelist + fuzzy remap for LLM-hallucinated categories ([#40])
-- `_validate_lore_category()` strips brackets, remaps common hallucinations, falls back to skip ([#40])
-- Category validation in `api_lore_entry_update` — returns 400 for invalid categories ([#40])
-- One-time cleanup script `scripts/cleanup_lore_data.py` (754 → 738 entries) ([#40])
-
-### Changed
-- `_extract_tags_async()` prompt: explicit 7-category constraint, bracket-free TOC, full-width colon instruction ([#40])
-- `rebuild_index()` skips entries with invalid categories (safety net) ([#40])
-
-### Fixed
-- Ghost entry bug: entries with unmappable categories no longer saved to JSON but dropped from search index ([#40])
-
-[#40]: https://github.com/lainn9527/agent-story/pull/40
-
 ## [0.12.2] - 2026-02-10
 
 ### Changed
