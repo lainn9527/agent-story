@@ -1200,7 +1200,7 @@ def _auto_prune_siblings(story_id: str, branch_id: str, current_msg_index: int) 
     has_active_children = set()
     for b in branches.values():
         pid = b.get("parent_branch_id")
-        if pid and not b.get("pruned") and not b.get("deleted") and not b.get("merged"):
+        if pid and not b.get("pruned") and not b.get("deleted") and not b.get("merged") and not b.get("blank"):
             has_active_children.add(pid)
 
     pruned = []
@@ -1825,8 +1825,11 @@ def api_send():
         tl = list(full_timeline) + [gm_msg]
         compact_async(story_id, branch_id, tl)
 
+    # 9. Auto-prune abandoned siblings
+    pruned = _auto_prune_siblings(story_id, branch_id, gm_msg_index)
+
     log.info("/api/send DONE   total=%.1fs", time.time() - t_start)
-    return jsonify({"ok": True, "player": player_msg, "gm": gm_msg})
+    return jsonify({"ok": True, "player": player_msg, "gm": gm_msg, "pruned_branches": pruned})
 
 
 def _sse_event(data: dict) -> str:
@@ -2876,6 +2879,9 @@ def api_branches_protect(branch_id):
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
     branch = branches[branch_id]
+    if branch.get("deleted") or branch.get("pruned") or branch.get("merged"):
+        return jsonify({"ok": False, "error": "cannot protect inactive branch"}), 400
+
     if branch.get("protected"):
         branch.pop("protected", None)
         protected = False
