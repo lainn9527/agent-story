@@ -35,7 +35,7 @@ from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_sum
 import usage_db
 from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
 from image_gen import generate_image_async, get_image_status, get_image_path
-from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry
+from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry, VALID_LORE_CATEGORIES
 from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
 from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
@@ -130,11 +130,6 @@ DEFAULT_CHARACTER_SCHEMA = {
 
 VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}
 
-VALID_LORE_CATEGORIES = {
-    "主神設定與規則", "體系", "商城", "副本世界觀",
-    "場景", "NPC", "故事追蹤",
-}
-
 # Fuzzy remap for common LLM hallucinated categories → valid category
 _LORE_CATEGORY_REMAP = {
     "商城道具": "商城",
@@ -152,13 +147,16 @@ _LORE_CATEGORY_REMAP = {
     "規則": "主神設定與規則",
     "副本": "副本世界觀",
     "世界觀": "副本世界觀",
+    "道具": "商城",
+    "能力": "體系",
+    "場所": "場景",
 }
 
 
-def _validate_lore_category(category: str) -> str:
-    """Validate and fix lore category. Returns a valid category string."""
+def _validate_lore_category(category: str) -> str | None:
+    """Validate and fix lore category. Returns a valid category or None to skip."""
     if not category:
-        return "其他"
+        return None
     # Strip 【】 brackets
     category = category.strip().strip("【】").strip()
     if category in VALID_LORE_CATEGORIES:
@@ -168,13 +166,13 @@ def _validate_lore_category(category: str) -> str:
     if remapped:
         log.info("    lore_category_fix: '%s' → '%s' (remap)", category, remapped)
         return remapped
-    # Try substring match (e.g. "主神設定" → "主神設定與規則")
-    for valid in VALID_LORE_CATEGORIES:
+    # Try substring match — sort by length (longest first) for determinism
+    for valid in sorted(VALID_LORE_CATEGORIES, key=len, reverse=True):
         if category in valid or valid in category:
             log.info("    lore_category_fix: '%s' → '%s' (substring)", category, valid)
             return valid
-    log.warning("    lore_category_fix: unknown category '%s', defaulting to '其他'", category)
-    return "其他"
+    log.warning("    lore_category_fix: unknown category '%s', skipping entry", category)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -3114,14 +3112,17 @@ def api_lore_entry_update():
             if e.get("topic") == topic:
                 found = True
                 new_topic = body.get("new_topic", topic).strip()
-                new_category = body.get("category", e.get("category", "其他")).strip()
+                raw_category = body.get("category", e.get("category", "其他")).strip()
+                validated_cat = _validate_lore_category(raw_category)
+                if validated_cat is None:
+                    return jsonify({"ok": False, "error": f"invalid category '{raw_category}'"}), 400
                 new_content = body.get("content", e.get("content", "")).strip()
                 # If renaming, check for collision with existing topic
                 if new_topic != topic:
                     if any(x.get("topic") == new_topic for x in lore):
                         return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
                     delete_lore_entry(story_id, topic)
-                updated = {"category": new_category, "topic": new_topic, "content": new_content}
+                updated = {"category": validated_cat, "topic": new_topic, "content": new_content}
                 if "source" in e:
                     updated["source"] = e["source"]
                 lore[i] = updated
