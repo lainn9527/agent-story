@@ -898,12 +898,6 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                     lst = [x for x in lst if x.split(" — ")[0].strip() != rm_name]
                 state[key] = lst
 
-    # If GM sets reward_points directly instead of using delta, accept it
-    if "reward_points" in update and "reward_points_delta" not in update:
-        val = update["reward_points"]
-        if isinstance(val, (int, float)):
-            state["reward_points"] = int(val)
-
     # Generic *_delta handling: apply as addition to base field
     for key in list(update.keys()):
         if key.endswith("_delta") and isinstance(update[key], (int, float)):
@@ -915,7 +909,8 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 state[base_key] = state.get(base_key, 0) + update[key]
             # else: base field is not numeric or doesn't exist — skip delta
 
-    # If GM sets reward_points directly (no delta), accept it
+    # If GM sets reward_points directly (no delta), accept it — placed after
+    # delta loop so direct value takes precedence when both are present
     if "reward_points" in update and "reward_points_delta" not in update:
         val = update["reward_points"]
         if isinstance(val, (int, float)):
@@ -1337,10 +1332,8 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     # Deduplicate reward point hints — keep only the last occurrence
     reward_hints = list(_REWARD_HINT_RE.finditer(gm_response))
     if len(reward_hints) > 1:
-        for m in reward_hints[:-1]:
-            gm_response = gm_response[:m.start()] + gm_response[m.end():]
-        # Re-find last one in case offsets shifted; just do a clean pass
-        gm_response = _REWARD_HINT_RE.sub("", gm_response) + "\n\n" + reward_hints[-1].group()
+        last_hint = reward_hints[-1].group()
+        gm_response = _REWARD_HINT_RE.sub("", gm_response) + "\n\n" + last_hint
         gm_response = re.sub(r"\n{3,}", "\n\n", gm_response).strip()
 
     gm_response, state_updates = _extract_state_tag(gm_response)
@@ -1378,16 +1371,16 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     had_time_tags = bool(TIME_RE.search(gm_response))
     gm_response = process_time_tags(gm_response, story_id, branch_id)
 
-    # Default minimum time advance: +2 hours per GM turn if no TIME tag found.
-    # _extract_tags_async may also detect time; skip_time=False lets it supplement.
+    # Default minimum time advance: +30 min per GM turn if no TIME tag found.
+    # Always skip async time extraction when default fires to prevent double-counting.
     if not had_time_tags:
-        advance_world_day(story_id, branch_id, 2 / 24)  # +2 hours
+        advance_world_day(story_id, branch_id, 0.5 / 24)  # +30 minutes
 
     # Async post-processing: extract structured data via separate LLM call
-    # Skip state/time extraction if regex already found those tags (avoid double-apply)
+    # Skip state if regex already found STATE tag; skip time if regex or default already applied
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
                         skip_state=bool(state_updates),
-                        skip_time=had_time_tags)
+                        skip_time=True)
 
     # Build snapshots for branch forking accuracy
     snapshots = {"state_snapshot": _load_character_state(story_id, branch_id)}
@@ -3345,8 +3338,8 @@ def api_bug_report():
         "branch_id": data.get("branch_id", ""),
         "message_index": data.get("message_index"),
         "role": data.get("role", ""),
-        "content_preview": data.get("content_preview", ""),
-        "description": data.get("description", ""),
+        "content_preview": data.get("content_preview", "")[:500],
+        "description": data.get("description", "")[:2000],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     reports_path = os.path.join(_story_dir(story_id), "bug_reports.json")

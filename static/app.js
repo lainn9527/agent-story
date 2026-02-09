@@ -1999,9 +1999,9 @@ function stripHiddenTags(text) {
 function makeGmOptionsClickable(contentEl) {
   // Match numbered options like "1. 選項文字" or "**1.** 選項文字" at line start
   // Works on the rendered HTML (after markdown conversion)
-  const listItems = contentEl.querySelectorAll("li");
+  const listItems = contentEl.querySelectorAll("ol > li");
   if (listItems.length > 0) {
-    // Ordered list — wrap each li content in a clickable button
+    // Ordered list items — make clickable
     listItems.forEach(li => {
       const text = li.textContent.trim();
       if (text.length > 0 && text.length < 200) {
@@ -2014,7 +2014,6 @@ function makeGmOptionsClickable(contentEl) {
   // Fallback: detect "N. text" or "N、text" patterns in plain text paragraphs
   const paragraphs = contentEl.querySelectorAll("p");
   paragraphs.forEach(p => {
-    const html = p.innerHTML;
     // Match lines starting with a number + period/dot
     const optionRe = /^(<strong>)?(\d+)[.、）)]\s*(<\/strong>)?\s*(.+)/;
     if (optionRe.test(p.textContent.trim()) && p.textContent.trim().length < 200) {
@@ -2090,9 +2089,11 @@ function showReportModal(msg) {
 
   textarea.focus();
 
-  function close() { overlay.remove(); }
+  function close() { document.removeEventListener("keydown", onEsc); overlay.remove(); }
+  function onEsc(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
   cancelBtn.addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onEsc);
 
   submitBtn.addEventListener("click", async () => {
     const description = textarea.value.trim();
