@@ -35,7 +35,7 @@ from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_sum
 import usage_db
 from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
 from image_gen import generate_image_async, get_image_status, get_image_path
-from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry
+from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry, get_entry_count, get_embedding_stats, find_duplicates
 from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
 from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
@@ -593,36 +593,15 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
 
 
 def _build_lore_text(story_id: str) -> str:
-    """Build lore TOC for system prompt. Full content is injected per-turn via search."""
-    toc = get_lore_toc(story_id)
-    if toc == "（尚無已確立的世界設定）":
-        # Fallback: try building from JSON directly (before index is built)
+    """Build lore note for system prompt. Full content is injected per-turn via hybrid search."""
+    count = get_entry_count(story_id)
+    if count == 0:
+        # Fallback: check JSON directly (before index is built)
         lore = _load_lore(story_id)
         if not lore:
             return "（尚無已確立的世界設定）"
-        from collections import OrderedDict
-        groups = OrderedDict()
-        for entry in lore:
-            cat = entry.get("category", "其他")
-            if cat not in groups:
-                groups[cat] = []
-            groups[cat].append(entry)
-        lines = []
-        for cat, entries in groups.items():
-            lines.append(f"### 【{cat}】")
-            for entry in entries:
-                content = entry.get("content", "（待建立）")
-                if content == "（待建立）":
-                    lines.append(f"- {entry['topic']}：（待建立）")
-                else:
-                    lines.append(f"#### {entry['topic']}\n{content}")
-            lines.append("")
-        return "\n".join(lines).strip()
-
-    return (
-        "以下為世界設定目錄（完整內容會在每次對話中根據相關性自動附加）：\n\n"
-        + toc
-    )
+        count = len(lore)
+    return f"（世界設定共 {count} 條，會根據每回合對話內容自動檢索並注入相關條目。）"
 
 
 def _get_schema_known_keys(schema: dict) -> set[str]:
@@ -1555,8 +1534,16 @@ def _build_augmented_message(
     tree = _load_tree(story_id)
     is_blank = tree.get("branches", {}).get(branch_id, {}).get("blank", False)
 
+    # Build location context for category boosting
+    lore_context = None
+    if character_state:
+        lore_context = {
+            "phase": character_state.get("current_phase", ""),
+            "status": character_state.get("current_status", ""),
+        }
+
     parts = []
-    lore = search_relevant_lore(story_id, user_text, limit=5)
+    lore = search_relevant_lore(story_id, user_text, context=lore_context)
     if lore:
         parts.append(lore)
     if not is_blank:
@@ -3162,6 +3149,24 @@ def api_lore_rebuild():
     story_id = _active_story_id()
     rebuild_lore_index(story_id)
     return jsonify({"ok": True, "message": "lore index rebuilt"})
+
+
+@app.route("/api/lore/duplicates")
+def api_lore_duplicates():
+    """Find near-duplicate lore entries via embedding similarity."""
+    story_id = request.args.get("story_id") or _active_story_id()
+    threshold = float(request.args.get("threshold", "0.90"))
+    threshold = max(0.5, min(1.0, threshold))  # clamp to [0.5, 1.0]
+    pairs = find_duplicates(story_id, threshold=threshold)
+    return jsonify({"ok": True, "pairs": pairs, "count": len(pairs), "threshold": threshold})
+
+
+@app.route("/api/lore/embedding-stats")
+def api_lore_embedding_stats():
+    """Return embedding coverage stats for the active story."""
+    story_id = request.args.get("story_id") or _active_story_id()
+    stats = get_embedding_stats(story_id)
+    return jsonify({"ok": True, **stats})
 
 
 # ---------------------------------------------------------------------------
