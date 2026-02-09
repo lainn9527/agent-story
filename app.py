@@ -50,7 +50,10 @@ from lore_organizer import (
     get_lore_lock, try_classify_topic, build_prefix_registry, invalidate_prefix_cache,
     should_organize, organize_lore_async,
 )
-from gm_cheats import is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats
+from gm_cheats import (
+    is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats,
+    get_dice_always_success, set_dice_always_success,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -1557,7 +1560,9 @@ def _build_augmented_message(
     if character_state and not is_gm_command(user_text):
         story_dir = _story_dir(story_id)
         cheat_mod = get_dice_modifier(story_dir, branch_id)
-        dice_result = roll_fate(character_state, cheat_modifier=cheat_mod)
+        always_win = get_dice_always_success(story_dir, branch_id)
+        dice_result = roll_fate(character_state, cheat_modifier=cheat_mod,
+                                always_success=always_win)
         parts.append(format_dice_context(dice_result))
 
     if parts:
@@ -3769,6 +3774,38 @@ def api_config_set():
 
     log.info("api_config_set: updated — provider=%s", cfg.get("provider"))
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Cheats API (金手指)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/cheats/dice", methods=["GET"])
+def api_cheats_dice_get():
+    """Get dice cheat status for current branch."""
+    story_id = _active_story_id()
+    branch_id = request.args.get("branch_id", "main")
+    story_dir = _story_dir(story_id)
+    return jsonify({
+        "always_success": get_dice_always_success(story_dir, branch_id),
+        "dice_modifier": get_dice_modifier(story_dir, branch_id),
+    })
+
+
+@app.route("/api/cheats/dice", methods=["POST"])
+def api_cheats_dice_set():
+    """Toggle dice always-success mode."""
+    body = request.get_json(force=True)
+    story_id = _active_story_id()
+    branch_id = body.get("branch_id", "main")
+    story_dir = _story_dir(story_id)
+
+    if "always_success" in body:
+        enabled = bool(body["always_success"])
+        set_dice_always_success(story_dir, branch_id, enabled)
+        log.info("cheats/dice: always_success=%s branch=%s", enabled, branch_id)
+
+    return jsonify({"ok": True, "always_success": get_dice_always_success(story_dir, branch_id)})
 
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,19 @@ def get_dice_modifier(story_dir: str, branch_id: str) -> int:
     return cheats.get("dice_modifier", 0)
 
 
+def get_dice_always_success(story_dir: str, branch_id: str) -> bool:
+    """Get the always-success dice mode for a branch."""
+    cheats = load_cheats(story_dir, branch_id)
+    return cheats.get("dice_always_success", False)
+
+
+def set_dice_always_success(story_dir: str, branch_id: str, enabled: bool) -> None:
+    """Toggle always-success dice mode."""
+    cheats = load_cheats(story_dir, branch_id)
+    cheats["dice_always_success"] = enabled
+    save_cheats(story_dir, branch_id, cheats)
+
+
 def is_gm_command(text: str) -> bool:
     """Check if a message is a /gm command."""
     return text.strip().startswith("/gm")

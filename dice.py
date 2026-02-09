@@ -68,12 +68,14 @@ _OUTCOMES = {
 }
 
 
-def roll_fate(state: dict, cheat_modifier: int = 0) -> dict:
+def roll_fate(state: dict, cheat_modifier: int = 0,
+              always_success: bool = False) -> dict:
     """Roll a d100 fate die with attribute modifiers.
 
     Args:
         state: Character state dict for attribute-based modifiers.
         cheat_modifier: Extra modifier from /gm dice command (金手指).
+        always_success: When True, outcomes are always positive (金手指).
 
     Returns a dict with all dice info for storage and display.
     """
@@ -83,19 +85,29 @@ def roll_fate(state: dict, cheat_modifier: int = 0) -> dict:
     raw = random.randint(1, 100)
     effective = raw + attr_bonus + cheat_modifier
 
-    # Determine outcome
-    if raw >= 96:
-        outcome = "大成功"
-    elif raw <= 5:
-        outcome = "大失敗"
-    elif effective >= 80:
-        outcome = "成功"
-    elif effective >= 50:
-        outcome = "勉強成功"
-    elif effective >= 30:
-        outcome = "失敗"
+    if always_success:
+        # 金手指模式: 只出正面結果
+        # 大成功 30% | 成功 50% | 勉強成功 20%
+        if raw >= 71:
+            outcome = "大成功"
+        elif raw >= 21:
+            outcome = "成功"
+        else:
+            outcome = "勉強成功"
     else:
-        outcome = "嚴重失敗"
+        # 正常模式
+        if raw >= 96:
+            outcome = "大成功"
+        elif raw <= 5:
+            outcome = "大失敗"
+        elif effective >= 80:
+            outcome = "成功"
+        elif effective >= 50:
+            outcome = "勉強成功"
+        elif effective >= 30:
+            outcome = "失敗"
+        else:
+            outcome = "嚴重失敗"
 
     result = {
         "raw": raw,
@@ -108,6 +120,8 @@ def roll_fate(state: dict, cheat_modifier: int = 0) -> dict:
     }
     if cheat_modifier:
         result["cheat_modifier"] = cheat_modifier
+    if always_success:
+        result["always_success"] = True
     return result
 
 

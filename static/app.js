@@ -2553,6 +2553,45 @@ async function loadConfigPanel() {
   } catch (e) {
     console.error("loadConfigPanel error:", e);
   }
+
+  // Load dice cheat status
+  loadDiceCheatStatus();
+}
+
+async function loadDiceCheatStatus() {
+  try {
+    const res = await fetch(`/api/cheats/dice?branch_id=${currentBranchId}`);
+    const data = await res.json();
+    const btn = document.getElementById("dice-cheat-btn");
+    if (!btn) return;
+    if (data.always_success) {
+      btn.textContent = "ON";
+      btn.classList.add("active");
+    } else {
+      btn.textContent = "OFF";
+      btn.classList.remove("active");
+    }
+  } catch (e) {
+    console.error("loadDiceCheatStatus error:", e);
+  }
+}
+
+async function toggleDiceCheat() {
+  const btn = document.getElementById("dice-cheat-btn");
+  if (!btn) return;
+  const isActive = btn.classList.contains("active");
+  const newState = !isActive;
+  try {
+    await fetch("/api/cheats/dice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId, always_success: newState }),
+    });
+    btn.textContent = newState ? "ON" : "OFF";
+    btn.classList.toggle("active", newState);
+  } catch (e) {
+    console.error("toggleDiceCheat error:", e);
+  }
 }
 
 // ---------------------------------------------------------------------------

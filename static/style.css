@@ -1625,6 +1625,23 @@ body {
   border-color: var(--gold);
 }
 
+/* Cheat toggle button */
+.cheat-toggle {
+  padding: 4px 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-dark);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+.cheat-toggle.active {
+  background: #2a4a2a;
+  border-color: #4a8;
+  color: #6fc;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 768px) {
   :root {
