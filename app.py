@@ -1983,9 +1983,8 @@ def api_status():
     branch_id = request.args.get("branch_id", "main")
     state = dict(_load_character_state(story_id, branch_id))
     state["world_day"] = get_world_day(story_id, branch_id)
-    dm = get_dice_modifier(_story_dir(story_id), branch_id)
-    if dm:
-        state["dice_modifier"] = dm
+    state["dice_modifier"] = get_dice_modifier(_story_dir(story_id), branch_id)
+    state["dice_always_success"] = get_dice_always_success(_story_dir(story_id), branch_id)
     return jsonify(state)
 
 
