@@ -13,6 +13,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Force `claude_cli` for background/script LLM calls to preserve Gemini quota ([#41])
 
 ### Fixed
+- Fix Gemini SSE stream hanging forever on server-side stall ([#42])
 - Fix event injection feedback loop causing repeated GM reward notifications ([#39])
 - Fix `float(None)` crash when LLM returns null time values ([#39])
 - Cap extracted time advance at 30 days per GM response ([#39])
@@ -146,3 +147,4 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#36]: https://github.com/lainn9527/agent-story/pull/36
 [#39]: https://github.com/lainn9527/agent-story/pull/39
 [#41]: https://github.com/lainn9527/agent-story/pull/41
+[#42]: https://github.com/lainn9527/agent-story/pull/42
