@@ -1,0 +1,148 @@
+# Changelog
+
+All notable changes to the Story RPG project will be documented in this file.
+
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.9.0] - 2026-02-09
+
+### Added
+- Lore topic organization system for orphan classification ([#41])
+- TIME extraction in `_extract_tags_async` for reliable world timer tracking ([#39])
+- Force `claude_cli` for background/script LLM calls to preserve Gemini quota ([#41])
+
+### Fixed
+- Fix event injection feedback loop causing repeated GM reward notifications ([#39])
+- Fix `float(None)` crash when LLM returns null time values ([#39])
+- Cap extracted time advance at 30 days per GM response ([#39])
+- Fix orphaned branches from crashed/interrupted edit/regen operations ([#36])
+- Reparent children on branch delete instead of cascade deleting ([#29])
+- Scope similarity guard to same category to prevent cross-category lore merges ([#34])
+- Fix false positive merge: require ≥2 shared bigrams in similarity guard ([#34])
+
+## [0.8.0] - 2026-02-09
+
+### Added
+- Lore semantic merge script and similarity guard for insertion ([#34])
+- Google Search grounding for lore chat (Gemini provider) ([#35])
+- Lore source provenance with deep-link to original message ([#25], [#27])
+- Lore cleanup script and fix extraction prompt to prevent duplication ([#28])
+- Auto-cleanup failed branches + sibling switcher delete button ([#26])
+
+### Changed
+- Improve lore page UX: batch delete, markdown chat, streaming controls ([#30])
+- Move checkbox next to edit pencil, dim to match dark background ([#31])
+
+### Fixed
+- Abort split on chunk failure to prevent partial data loss ([#28])
+- Fix Gemini streaming truncation: raise maxOutputTokens to 65536 and detect MAX_TOKENS ([#28])
+- Fix PUT `/api/lore/entry` dropping source provenance on update ([#25])
+- Fix lore batch delete: add loading state + stop button aria-label ([#31])
+
+## [0.7.0] - 2026-02-08
+
+### Added
+- Lore console page with CRUD and LLM chat ([#22])
+- Sub-groups, alpha sort, and toggle-all collapse to lore console ([#22])
+- `current_phase` field + sync STATE tag for reliable scene tracking ([#24])
+
+### Fixed
+- Fix dead retry button: use event delegation for proposal accept ([#22])
+- Fix batch delete: check `res.ok` for server-side errors ([#23])
+- UX fixes: loading indicator, scroll position, paragraph spacing ([#25])
+
+## [0.6.0] - 2026-02-08
+
+### Added
+- Branch tree modal with merge/batch-delete + UX improvements ([#23])
+- Cmd+B hotkey for branch tree modal ([#23])
+- Collapse auto-play branches into single group + cache-busting ([#23])
+
+### Fixed
+- Fix branch tree depth: sibling detection + linear chain collapse ([#21])
+- Fix branch list overflow: max-height 500px was clipping branches ([#23])
+
+## [0.5.0] - 2026-02-08
+
+### Added
+- World timer system with day/night display ([#14])
+- Branch indicator in header ([#20])
+
+### Fixed
+- Fix branch switch flicker and scroll hijack during streaming ([#19])
+
+## [0.4.0] - 2026-02-08
+
+### Added
+- Multi-key Gemini fallback and UI provider/model switcher ([#9])
+- Mobile novel reader style for better reading experience ([#10])
+
+### Fixed
+- Fix Player AI context: add narrative recap, use full recent messages ([#12])
+- Fix key fallback error handling and remove dead code in state update ([#13])
+
+## [0.3.0] - 2026-02-08
+
+### Added
+- Summary timeline modal ([#5])
+
+### Fixed
+- Fix branch merge overwriting parent messages ([#7])
+- Fix character name hallucination in summaries ([#8])
+
+## [0.2.0] - 2026-02-08
+
+### Added
+- Stateless LLM calls, conversation compaction, and async tag extraction ([#1])
+
+### Fixed
+- Add compaction triggers to edit/regen routes, fix logging ([#3])
+- Fix timeline ref, state double-apply, JSON fallback ([#3])
+
+## [0.1.0] - 2026-02-08
+
+### Added
+- Initial Story RPG project with Flask backend + vanilla JS frontend
+- Branching timeline system with edit/regen/sibling switcher
+- Auto-play AI self-play mode (GM + Player AI)
+- Live view with incremental polling for auto-play branches
+- Auto-play summary dashboard with periodic LLM summaries
+- NPC system with Big5 personality profiles
+- Event tracing system (伏筆/轉折/戰鬥 etc.)
+- Image generation via Pollinations.ai
+- World lore system with CJK bigram search
+- Multi-story support with per-story data isolation
+- Hidden tag pipeline (STATE/LORE/NPC/EVENT/IMG)
+- Context injection (lore + events + NPC activities)
+- Dark theme UI with slide-out drawer
+
+<!-- PR links -->
+[#1]: https://github.com/lainn9527/agent-story/pull/1
+[#3]: https://github.com/lainn9527/agent-story/pull/3
+[#5]: https://github.com/lainn9527/agent-story/pull/5
+[#7]: https://github.com/lainn9527/agent-story/pull/7
+[#8]: https://github.com/lainn9527/agent-story/pull/8
+[#9]: https://github.com/lainn9527/agent-story/pull/9
+[#10]: https://github.com/lainn9527/agent-story/pull/10
+[#12]: https://github.com/lainn9527/agent-story/pull/12
+[#13]: https://github.com/lainn9527/agent-story/pull/13
+[#14]: https://github.com/lainn9527/agent-story/pull/14
+[#19]: https://github.com/lainn9527/agent-story/pull/19
+[#20]: https://github.com/lainn9527/agent-story/pull/20
+[#21]: https://github.com/lainn9527/agent-story/pull/21
+[#22]: https://github.com/lainn9527/agent-story/pull/22
+[#23]: https://github.com/lainn9527/agent-story/pull/23
+[#24]: https://github.com/lainn9527/agent-story/pull/24
+[#25]: https://github.com/lainn9527/agent-story/pull/25
+[#26]: https://github.com/lainn9527/agent-story/pull/26
+[#27]: https://github.com/lainn9527/agent-story/pull/27
+[#28]: https://github.com/lainn9527/agent-story/pull/28
+[#29]: https://github.com/lainn9527/agent-story/pull/29
+[#30]: https://github.com/lainn9527/agent-story/pull/30
+[#31]: https://github.com/lainn9527/agent-story/pull/31
+[#34]: https://github.com/lainn9527/agent-story/pull/34
+[#35]: https://github.com/lainn9527/agent-story/pull/35
+[#36]: https://github.com/lainn9527/agent-story/pull/36
+[#39]: https://github.com/lainn9527/agent-story/pull/39
+[#41]: https://github.com/lainn9527/agent-story/pull/41

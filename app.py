@@ -11,6 +11,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+# Version — single source of truth in VERSION file
+_version_file = os.path.join(os.path.dirname(__file__), "VERSION")
+__version__ = open(_version_file).read().strip() if os.path.exists(_version_file) else "0.0.0"
+
 from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
 
 # ---------------------------------------------------------------------------
@@ -3266,6 +3270,7 @@ def api_config_get():
 
     return jsonify({
         "ok": True,
+        "version": __version__,
         "provider": cfg.get("provider", "claude_cli"),
         "gemini": {
             "model": g.get("model", "gemini-2.0-flash"),
