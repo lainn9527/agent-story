@@ -936,7 +936,8 @@ function _btRenderTree(container, modal) {
             const badge = document.createElement("span");
             badge.className = "bt-protected-badge";
             badge.textContent = "\u2665";
-            name.after(badge);
+            const autoBadge = item.querySelector(".bt-auto-badge");
+            (autoBadge || name).after(badge);
           } else if (!res.protected && existingBadge) {
             existingBadge.remove();
           }
@@ -1836,6 +1837,7 @@ function renderMessages(messages) {
               if (!res.ok) failed++;
             } catch { failed++; }
           }
+          if (failed > 0) showToast(`${failed} 個分支刪除失敗`);
           await loadBranches();
           await switchToBranch(keepId, { preserveScroll: true });
           renderBranchList();
@@ -2866,10 +2868,11 @@ async function sendMessage() {
         // Refresh branch list after background tag extraction (title generation)
         pollForBranchTitle(currentBranchId);
 
-        // Auto-prune — silently refresh branch list
+        // Auto-prune — refresh branch list and notify
         if (data.pruned_branches && data.pruned_branches.length > 0) {
           await loadBranches();
           renderBranchList();
+          showToast(`已自動清理 ${data.pruned_branches.length} 個廢棄分支`);
         }
       },
       // onError

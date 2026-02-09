@@ -687,8 +687,6 @@ body {
   display: none;
 }
 
-/* ---------- Delete Previous Button ---------- */
-
 /* ---------- Regen spinner ---------- */
 .message .regen-spinner {
   display: inline-flex;
@@ -1777,6 +1775,9 @@ body {
 
   .header-sub { display: none; }
   #world-day-display { font-size: 0.75rem; }
+
+  /* Branch tree: always show action buttons on mobile (no hover) */
+  .bt-actions { opacity: 1 !important; }
 }
 
 /* ---------- Branch Tree Modal ---------- */
@@ -1861,7 +1862,7 @@ body {
   display: none;
 }
 .bt-chain {
-  border-left: 1px solid var(--border);
+  border-left: 1px dashed var(--border);
   margin-left: 3px;
   padding-left: 11px;
 }
@@ -1948,8 +1949,13 @@ body {
   cursor: pointer;
   font-size: 0.75rem;
   color: var(--text-dim);
-  padding: 2px 4px;
+  padding: 6px 8px;
   border-radius: 3px;
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .bt-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
 .bt-action-del:hover { color: var(--accent); }
