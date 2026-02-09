@@ -136,10 +136,15 @@ def generate_story_summary(conversation_text: str, summary_path: str | None = No
 # One-shot call (NPC evolution, etc.)
 # ---------------------------------------------------------------------------
 
-def call_oneshot(prompt: str, system_prompt: str | None = None) -> str:
-    """One-shot LLM call. Returns response text or empty string."""
+def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | None = None) -> str:
+    """One-shot LLM call. Returns response text or empty string.
+
+    Args:
+        provider: Override provider for this call only (does not affect global config).
+    """
     cfg = _get_config()
-    provider = get_provider()
+    if provider is None:
+        provider = get_provider()
 
     if provider == "gemini":
         from gemini_bridge import call_gemini_oneshot

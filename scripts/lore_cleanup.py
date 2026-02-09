@@ -619,7 +619,13 @@ def main():
     parser.add_argument("--organize-orphans", action="store_true", help="Organize orphan topics (rule-based + LLM)")
     parser.add_argument("--apply", action="store_true", help="Apply changes (with --organize-orphans, default is dry-run)")
     parser.add_argument("--delay", type=float, default=3.0, help="Delay between LLM calls (default: 3s)")
+    parser.add_argument("--provider", default="claude_cli", choices=["claude_cli", "gemini"],
+                        help="LLM provider for script calls (default: claude_cli)")
     args = parser.parse_args()
+
+    # Force provider for script — avoids burning Gemini quota
+    from llm_bridge import set_provider
+    set_provider(args.provider)
 
     story_id = args.story_id
 
