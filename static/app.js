@@ -1155,15 +1155,10 @@ function _btRenderTree(container, modal) {
     return kids.some(k => containsCurrent(k.id, visited));
   }
 
-  function renderNode(branch, isRoot) {
-    const node = document.createElement("div");
-    node.className = "bt-node" + (isRoot ? " bt-root" : "");
-
+  function createItem(branch) {
     const item = document.createElement("div");
     item.className = "bt-item" + (branch.id === currentBranchId ? " bt-active" : "");
     item.dataset.branchId = branch.id;
-
-    const kids = childrenMap[branch.id] || [];
 
     // Checkbox (select mode)
     if (branch.id !== "main") {
@@ -1178,22 +1173,6 @@ function _btRenderTree(container, modal) {
         _btUpdateToolbar();
       });
       item.appendChild(cb);
-    }
-
-    // Toggle arrow — only for real forks (2+ children); single-child chains are inline
-    if (kids.length > 1) {
-      const toggle = document.createElement("span");
-      toggle.className = "bt-toggle" + (containsCurrent(branch.id) || isRoot ? " expanded" : "");
-      toggle.textContent = "\u25B6";
-      toggle.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const childrenEl = node.querySelector(":scope > .bt-children");
-        if (childrenEl) {
-          childrenEl.classList.toggle("collapsed");
-          toggle.classList.toggle("expanded");
-        }
-      });
-      item.appendChild(toggle);
     }
 
     const dot = document.createElement("span");
@@ -1243,7 +1222,6 @@ function _btRenderTree(container, modal) {
           branch.protected = res.protected;
           heartBtn.textContent = res.protected ? "\u2665" : "\u2661";
           heartBtn.title = res.protected ? "取消保護" : "保護（防止自動清理）";
-          // Update badge
           const existingBadge = item.querySelector(".bt-protected-badge");
           if (res.protected && !existingBadge) {
             const badge = document.createElement("span");
@@ -1306,7 +1284,7 @@ function _btRenderTree(container, modal) {
       item.appendChild(actions);
     }
 
-    // Click to switch branch — scroll to branch point (start of divergence)
+    // Click to switch branch
     item.addEventListener("click", async () => {
       if (_btSelectMode) return;
       modal.classList.add("hidden");
@@ -1316,15 +1294,73 @@ function _btRenderTree(container, modal) {
       await switchToBranch(branch.id, { scrollToIndex: scrollTo, scrollBlock: "start" });
     });
 
+    return item;
+  }
+
+  function addToggle(item, branch, getChildrenEl, isRoot) {
+    const toggle = document.createElement("span");
+    toggle.className = "bt-toggle" + (containsCurrent(branch.id) || isRoot ? " expanded" : "");
+    toggle.textContent = "\u25B6";
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const childrenEl = getChildrenEl();
+      if (childrenEl) {
+        childrenEl.classList.toggle("collapsed");
+        toggle.classList.toggle("expanded");
+      }
+    });
+    const dot = item.querySelector(".bt-dot");
+    item.insertBefore(toggle, dot);
+  }
+
+  function renderNode(branch, isRoot) {
+    const node = document.createElement("div");
+    node.className = "bt-node" + (isRoot ? " bt-root" : "");
+
+    let kids = childrenMap[branch.id] || [];
+
+    const item = createItem(branch);
+    if (kids.length > 1) {
+      addToggle(item, branch, () => node.querySelector(":scope > .bt-children"), isRoot);
+    }
     node.appendChild(item);
 
     // Render children
     if (kids.length === 1) {
-      const childNode = renderNode(kids[0], false);
-      childNode.classList.add("bt-root");
-      const childItem = childNode.querySelector(":scope > .bt-item");
-      if (childItem) childItem.classList.add("bt-inline-child");
-      node.appendChild(childNode);
+      // Flatten single-child chain into a bt-chain container with left border
+      const chainEl = document.createElement("div");
+      chainEl.className = "bt-chain";
+
+      let current = kids[0];
+      let currentKids = childrenMap[current.id] || [];
+
+      while (true) {
+        const chainItem = createItem(current);
+        if (currentKids.length > 1) {
+          addToggle(chainItem, current, () => chainEl.querySelector(":scope > .bt-children"), isRoot);
+        }
+        chainEl.appendChild(chainItem);
+
+        if (currentKids.length === 1) {
+          current = currentKids[0];
+          currentKids = childrenMap[current.id] || [];
+        } else {
+          break;
+        }
+      }
+
+      // If chain ends with a fork, add children container
+      if (currentKids.length > 1) {
+        const childrenEl = document.createElement("div");
+        const shouldExpand = containsCurrent(current.id) || isRoot;
+        childrenEl.className = "bt-children" + (shouldExpand ? "" : " collapsed");
+        for (const kid of currentKids) {
+          childrenEl.appendChild(renderNode(kid, false));
+        }
+        chainEl.appendChild(childrenEl);
+      }
+
+      node.appendChild(chainEl);
     } else if (kids.length > 1) {
       const childrenEl = document.createElement("div");
       const shouldExpand = containsCurrent(branch.id) || isRoot;
