@@ -2515,8 +2515,8 @@ function renderSavesList(saves) {
     // Info line: world day + timestamp
     const info = document.createElement("div");
     info.className = "save-info";
-    const wd = save.world_day || {};
-    const dayText = wd.day ? `第 ${wd.day} 天` : "";
+    const wd = save.world_day;
+    const dayText = (wd != null && wd > 0) ? `第 ${Math.floor(wd) + 1} 天` : "";
     const dateText = save.created_at ? new Date(save.created_at).toLocaleDateString("zh-TW", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
     info.textContent = [dayText, dateText].filter(Boolean).join(" · ");
     card.appendChild(info);
