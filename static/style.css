@@ -1743,10 +1743,9 @@ body {
     opacity: 0.5;
   }
 
-  /* Mobile: msg-index and report button hidden by default, shown on tap via .touched */
-  .msg-index { opacity: 0; }
+  /* Mobile: msg-index always visible; report button shown on tap */
+  .msg-index { opacity: 0.25; }
   .msg-report-btn { opacity: 0; font-size: 0.85rem; padding: 6px 8px; }
-  .message.touched .msg-index { opacity: 0.3; }
   .message.touched .msg-report-btn { opacity: 0.4; }
 
   /* GM options: subtle rest-state affordance for touch */
@@ -1949,12 +1948,10 @@ body {
   right: 8px;
   font-size: 0.65rem;
   color: var(--text-dim);
-  opacity: 0;
-  transition: opacity 0.15s;
+  opacity: 0.35;
   pointer-events: none;
   font-family: monospace;
 }
-.message:hover .msg-index { opacity: 0.6; }
 .message.gm .msg-index { right: auto; left: 0; }
 
 /* ---------- Bug report button (#6) ---------- */
