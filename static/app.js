@@ -970,10 +970,11 @@ function openBranchTreeModal() {
 }
 
 function _btRenderTree(container, modal) {
-  // Build children map
+  // Build children map — skip blank branches (shown in drawer instead)
   const childrenMap = {};
   for (const b of Object.values(branches)) {
-    const parent = b.blank ? "__root__" : (b.parent_branch_id || "__root__");
+    if (b.blank) continue;
+    const parent = b.parent_branch_id || "__root__";
     if (!childrenMap[parent]) childrenMap[parent] = [];
     childrenMap[parent].push(b);
   }
