@@ -1090,8 +1090,10 @@ body {
   background: #a07a0a;
 }
 
-#confirm-modal {
-  z-index: 600;
+#confirm-modal,
+#alert-modal,
+#prompt-modal {
+  z-index: 10000;
 }
 .confirm-modal-box {
   max-width: 380px;
