@@ -241,7 +241,11 @@ def get_all_entries(story_id: str) -> list[dict]:
 
 
 def get_toc(story_id: str) -> str:
-    """Build a compact table-of-contents string for system prompt injection."""
+    """Build a hierarchical table-of-contents string for system prompt injection.
+
+    Topics use full-width colon (：) as hierarchy separator.
+    Output is an indented tree so the LLM sees knowledge structure.
+    """
     conn = _get_conn(story_id)
     _ensure_tables(conn)
     rows = conn.execute(
@@ -253,19 +257,41 @@ def get_toc(story_id: str) -> str:
         return "（尚無已確立的世界設定）"
 
     from collections import OrderedDict
-    groups: dict[str, list] = OrderedDict()
+
+    # Group rows by category
+    cat_rows: dict[str, list] = OrderedDict()
     for r in rows:
         cat = r["category"]
-        if cat not in groups:
-            groups[cat] = []
-        tag_str = f" [{r['tags']}]" if r["tags"] else ""
-        groups[cat].append(f"{r['topic']}{tag_str}")
+        if cat not in cat_rows:
+            cat_rows[cat] = []
+        cat_rows[cat].append(r)
 
     lines = []
-    for cat, topics in groups.items():
+    for cat, entries in cat_rows.items():
         lines.append(f"### 【{cat}】")
-        for t in topics:
-            lines.append(f"- {t}")
+
+        # Build tree: prefix → list of suffixes
+        # A topic like "A：B：C" yields tree node A > B > C
+        tree: dict = OrderedDict()  # nested ordered dicts
+        for r in entries:
+            parts = r["topic"].split("：")
+            node = tree
+            for i, part in enumerate(parts):
+                if part not in node:
+                    node[part] = OrderedDict()
+                node = node[part]
+
+        def _render(node: dict, depth: int):
+            indent = "  " * depth
+            for key, child in node.items():
+                child_keys = list(child.keys())
+                if child_keys:
+                    lines.append(f"{indent}- {key}")
+                    _render(child, depth + 1)
+                else:
+                    lines.append(f"{indent}- {key}")
+
+        _render(tree, 0)
         lines.append("")
 
     return "\n".join(lines).strip()
