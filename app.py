@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 
 # Version — single source of truth in VERSION file
 _version_file = os.path.join(os.path.dirname(__file__), "VERSION")
-__version__ = open(_version_file).read().strip() if os.path.exists(_version_file) else "0.0.0"
+if os.path.exists(_version_file):
+    with open(_version_file) as _f:
+        __version__ = _f.read().strip()
+else:
+    __version__ = "0.0.0"
 
 from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
 
