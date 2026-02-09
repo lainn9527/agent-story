@@ -23,6 +23,7 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 | `compaction.py` | Conversation compaction: rolling narrative recap via background LLM |
 | `claude_bridge.py` | Claude CLI bridge, `--output-format json` for session_id |
 | `lore_db.py` | SQLite lore search engine (CJK bigram scoring) |
+| `usage_db.py` | SQLite token/cost tracking per story, WAL mode |
 | `event_db.py` | SQLite event tracing engine (CJK bigram search) |
 | `image_gen.py` | Pollinations.ai async image generation |
 | `npc_evolution.py` | Background NPC evolution via Claude CLI |
@@ -48,6 +49,7 @@ data/
     lore.db                             # SQLite lore search index
     npcs.json                           # NPC profiles with Big5 personality
     events.db                           # SQLite event tracking
+    usage.db                            # SQLite token/cost tracking
     npc_activities_<branch_id>.json     # Background NPC activity logs
     auto_play_state.json                # Auto-play progress (auto_ branches only)
     branches/<branch_id>/
@@ -199,6 +201,17 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - `llm_bridge.py` exports `call_claude_gm`, `call_claude_gm_stream`, `generate_story_summary`, `call_oneshot`
 - `app.py` and `npc_evolution.py` import from `llm_bridge` (never directly from provider bridges)
 - Adding a new provider: create `<provider>_bridge.py`, add dispatch branch in `llm_bridge.py`
+
+## Usage Tracking
+- `usage_db.py` — Per-story SQLite (`data/stories/<story_id>/usage.db`), WAL mode
+- Thread-local usage propagation: `gemini_bridge._tls` → `llm_bridge._tls` (enriched with provider/model)
+- `llm_bridge.get_last_usage()` — read after any non-streaming LLM call
+- Streaming: usage passed via `"usage"` key in `"done"` payload dict
+- `app.py._log_llm_usage()` — logs usage in Flask routes (send/edit/regen/lore_chat/summary)
+- `usage_db.log_from_bridge()` — convenience one-liner for background callers (compaction, NPC evolution, auto-play, auto-summary, lore organizer)
+- Call types: `gm`, `gm_stream`, `oneshot`, `compaction`, `npc_evolution`, `auto_play_player`, `auto_play_chargen`, `auto_summary`, `lore_organize`, `lore_chat`, `summary`
+- API: `GET /api/usage?story_id=...&days=7` (per-story), `GET /api/usage?all=true` (cross-story)
+- Claude CLI calls log with `null` tokens (no usage data available)
 
 ## Important Patterns
 - JSON keys become strings when serialized — use `String(index)` in JS for lookups

@@ -5,6 +5,16 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-02-09
+
+### Added
+- Token/cost tracking via SQLite `usage_db` with per-story isolation ([#46])
+- Thread-local usage metadata propagation from Gemini API responses ([#46])
+- `GET /api/usage` endpoint with per-story and cross-story aggregation ([#46])
+- `usage_db.log_from_bridge()` convenience helper for background callers ([#46])
+- Usage tracking for `generate_story_summary` LLM calls ([#46])
+- WAL mode for concurrent SQLite reads/writes in usage DB ([#46])
+
 ## [0.9.0] - 2026-02-09
 
 ### Added
@@ -148,3 +158,4 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#39]: https://github.com/lainn9527/agent-story/pull/39
 [#41]: https://github.com/lainn9527/agent-story/pull/41
 [#42]: https://github.com/lainn9527/agent-story/pull/42
+[#46]: https://github.com/lainn9527/agent-story/pull/46
