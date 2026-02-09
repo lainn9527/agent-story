@@ -1739,6 +1739,20 @@ body {
   .sw-delete {
     opacity: 0.5;
   }
+  .sw-prune {
+    opacity: 0.5;
+  }
+
+  /* Show msg-index and report button on mobile (no hover) */
+  .msg-index { opacity: 0.3; }
+  .msg-report-btn { opacity: 0.4; font-size: 0.85rem; padding: 6px 8px; }
+
+  /* GM options: subtle rest-state affordance for touch */
+  .gm-option-li,
+  .gm-option-p {
+    border-left: 2px solid rgba(212, 168, 83, 0.3);
+    padding-left: 8px;
+  }
 
   /* Action buttons */
   .msg-action-btn {
