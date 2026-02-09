@@ -580,6 +580,7 @@ const $drawerOverlay = document.getElementById("drawer-overlay");
 const $drawerToggleBtn = document.getElementById("drawer-toggle-btn");
 const $drawerCloseBtn = document.getElementById("drawer-close-btn");
 const $storyList = document.getElementById("story-list");
+const $branchList = document.getElementById("branch-list");
 const $newStoryBtn = document.getElementById("new-story-btn");
 const $newBlankBranchBtn = document.getElementById("new-blank-branch-btn");
 const $branchTreeBtn = document.getElementById("branch-tree-btn");
@@ -803,11 +804,137 @@ function pollForBranchTitle(branchId) {
       clearInterval(_titlePollTimer);
       _titlePollTimer = null;
     }
+    renderBranchList();
   }, 5000);
 }
 
-// Branch list removed — use branch tree modal (Cmd+B) instead
-function renderBranchList() {}
+function renderBranchList() {
+  $branchList.innerHTML = "";
+
+  // Collect root-level branches: main + blank branches (includes auto_ branches)
+  const roots = [];
+  for (const b of Object.values(branches)) {
+    if (b.id === "main" || b.blank) roots.push(b);
+  }
+  // Sort: main first, then by created_at
+  roots.sort((a, b) => {
+    if (a.id === "main") return -1;
+    if (b.id === "main") return 1;
+    return (a.created_at || "").localeCompare(b.created_at || "");
+  });
+
+  for (const branch of roots) {
+    const item = document.createElement("div");
+    item.className = "drawer-item" + (branch.id === currentBranchId ? " active" : "");
+
+    const label = document.createElement("span");
+    label.className = "drawer-item-label";
+    label.textContent = branch.title || branch.name;
+    label.title = branch.name;
+    item.appendChild(label);
+
+    if (branch.id.startsWith("auto_")) {
+      const badge = document.createElement("span");
+      badge.className = "auto-branch-badge";
+      badge.textContent = "AUTO";
+      item.appendChild(badge);
+    }
+
+    // Action buttons (not for main)
+    if (branch.id !== "main") {
+      const ren = document.createElement("span");
+      ren.className = "drawer-item-action";
+      ren.textContent = "\u270E";
+      ren.title = "重新命名";
+      ren.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startRenamingBranch(item, branch);
+      });
+      item.appendChild(ren);
+
+      const del = document.createElement("span");
+      del.className = "drawer-item-action drawer-item-action-del";
+      del.textContent = "\u2715";
+      del.title = "刪除分支";
+      del.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const descCount = countDescendants(branch.id);
+        let msg = `確定要刪除分支「${branch.name}」？`;
+        if (descCount > 0) {
+          msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
+        }
+        if (!(await showConfirm(msg))) return;
+        const res = await API.deleteBranch(branch.id);
+        if (res.ok) {
+          await loadBranches();
+          if (currentBranchId === branch.id || !branches[currentBranchId]) {
+            await switchToBranch(res.switch_to || "main");
+          }
+          renderBranchList();
+        } else {
+          showAlert(res.error || "刪除失敗");
+        }
+      });
+      item.appendChild(del);
+    }
+
+    // Branch ID tag
+    const idTag = document.createElement("div");
+    idTag.className = "branch-id-tag";
+    idTag.textContent = branch.id;
+    item.appendChild(idTag);
+
+    item.addEventListener("click", () => {
+      if (branch.id !== currentBranchId) {
+        switchToBranch(branch.id);
+        closeDrawer();
+      }
+    });
+
+    $branchList.appendChild(item);
+  }
+}
+
+function startRenamingBranch(item, branch) {
+  const label = item.querySelector(".drawer-item-label");
+  const actions = item.querySelectorAll(".drawer-item-action");
+  actions.forEach(a => a.style.display = "none");
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "branch-rename-input";
+  input.value = branch.name;
+
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let saved = false;
+
+  async function save() {
+    if (saved) return;
+    saved = true;
+    const newName = input.value.trim();
+    if (!newName || newName === branch.name) {
+      renderBranchList();
+      return;
+    }
+    const res = await API.renameBranch(branch.id, newName);
+    if (res.ok) {
+      await loadBranches();
+      renderBranchList();
+    } else {
+      showAlert(res.error || "重新命名失敗");
+      renderBranchList();
+    }
+  }
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); save(); }
+    if (e.key === "Escape") { e.preventDefault(); renderBranchList(); }
+  });
+  input.addEventListener("blur", save);
+}
 
 function countDescendants(branchId) {
   let count = 0;
@@ -1250,6 +1377,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   await API.switchBranch(branchId);
   currentBranchId = branchId;
   updateBranchIndicator();
+  renderBranchList();
 
   if (scrollToIndex != null || preserveScroll) {
     $messages.style.minHeight = $messages.scrollHeight + "px";
