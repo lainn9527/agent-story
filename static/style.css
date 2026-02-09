@@ -75,6 +75,10 @@ body {
   letter-spacing: 0.04em;
 }
 
+.header-title-short {
+  display: none;
+}
+
 .header-icon {
   color: var(--accent);
   margin-right: 4px;
@@ -1785,8 +1789,12 @@ body {
     font-size: 1rem;
   }
 
+  .header-title-full { display: none; }
+  .header-title-short { display: inline; }
+
   .branch-indicator {
-    max-width: 80px;
+    margin-left: auto;
+    max-width: 120px;
     padding: 2px 8px;
     font-size: 0.7rem;
   }
