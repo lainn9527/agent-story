@@ -12,11 +12,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Dice always-success toggle in drawer settings with 30/50/20 probability split ([#37])
 - Header badge `金手指` when always-success mode is active ([#37])
 - Per-branch cheat storage in `gm_cheats.json`, inherited on branch creation ([#37])
+- Restore drawer branch list with root-only view: main + non-auto blank branches shown first, auto branches collapsed under "Auto-Play (N)" toggle ([#62])
+- Branch tree modal is now contextual: shows only the subtree of the currently active root branch ([#62])
 
 ### Changed
 - Increased mobile content padding for better readability ([#37])
 
+### Fixed
+- Story delete button losing hover-reveal styling due to CSS class rename ([#62])
+- Escape during branch rename triggering a save instead of cancelling ([#62])
+- Branch action buttons invisible on mobile touch devices ([#62])
+
 [#37]: https://github.com/lainn9527/agent-story/pull/37
+[#62]: https://github.com/lainn9527/agent-story/pull/62
 
 ## [0.13.0] - 2026-02-10
 
