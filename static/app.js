@@ -1617,6 +1617,8 @@ async function submitEdit(msg, newText) {
         if (data.branch) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
+          // Refresh branch list after background title generation
+          setTimeout(() => { loadBranches().then(() => renderBranchList()); }, 5000);
         }
         activeStreamController = null;
       },
@@ -1692,6 +1694,8 @@ async function regenerateGmMessage(msg, msgEl) {
           await loadBranches();
           await switchToBranch(data.branch.id, { forcePreserve: true });
           showDeletePreviousBtn(previousBranchId);
+          // Refresh branch list after background title generation
+          setTimeout(() => { loadBranches().then(() => renderBranchList()); }, 5000);
         }
         activeStreamController = null;
       },
@@ -3004,6 +3008,9 @@ async function sendMessage() {
         updateWorldDayDisplay(status.world_day);
         loadNpcs();
         loadEvents();
+
+        // Refresh branch list after background tag extraction (title generation)
+        setTimeout(() => { loadBranches().then(() => renderBranchList()); }, 5000);
       },
       // onError
       (msg) => {
