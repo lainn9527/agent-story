@@ -193,7 +193,7 @@ def compact_async(story_id: str, branch_id: str, full_timeline: list[dict]):
 def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
     """Actually perform compaction (runs in background thread)."""
     import time as _time
-    from llm_bridge import call_oneshot, get_last_usage
+    from llm_bridge import call_oneshot
     import usage_db
 
     recap = load_recap(story_id, branch_id)
@@ -226,20 +226,7 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
 
     t0 = _time.time()
     new_recap_text = call_oneshot(prompt)
-    _compact_elapsed = _time.time() - t0
-    usage = get_last_usage()
-    if usage:
-        try:
-            usage_db.log_usage(
-                story_id=story_id, provider=usage.get("provider", ""),
-                model=usage.get("model", ""), call_type="compaction",
-                prompt_tokens=usage.get("prompt_tokens"),
-                output_tokens=usage.get("output_tokens"),
-                total_tokens=usage.get("total_tokens"),
-                branch_id=branch_id, elapsed_ms=int(_compact_elapsed * 1000),
-            )
-        except Exception:
-            pass
+    usage_db.log_from_bridge(story_id, "compaction", _time.time() - t0, branch_id=branch_id)
     if not new_recap_text:
         log.info("    compaction: LLM returned empty, aborting")
         return
@@ -252,20 +239,7 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
         meta_prompt = _META_COMPACT_PROMPT.format(character_name=character_name, recap=new_recap_text)
         t0 = _time.time()
         meta_result = call_oneshot(meta_prompt)
-        _meta_elapsed = _time.time() - t0
-        usage = get_last_usage()
-        if usage:
-            try:
-                usage_db.log_usage(
-                    story_id=story_id, provider=usage.get("provider", ""),
-                    model=usage.get("model", ""), call_type="compaction",
-                    prompt_tokens=usage.get("prompt_tokens"),
-                    output_tokens=usage.get("output_tokens"),
-                    total_tokens=usage.get("total_tokens"),
-                    branch_id=branch_id, elapsed_ms=int(_meta_elapsed * 1000),
-                )
-            except Exception:
-                pass
+        usage_db.log_from_bridge(story_id, "compaction", _time.time() - t0, branch_id=branch_id)
         if meta_result and meta_result.strip():
             new_recap_text = meta_result.strip()
             log.info("    compaction: meta-compacted to %d chars", len(new_recap_text))

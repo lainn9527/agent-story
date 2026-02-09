@@ -166,13 +166,19 @@ def generate_story_summary(conversation_text: str, summary_path: str | None = No
     if provider == "gemini":
         from gemini_bridge import generate_story_summary_gemini
         g = cfg.get("gemini", {})
-        return generate_story_summary_gemini(
+        model = g.get("model", "gemini-2.0-flash")
+        result = generate_story_summary_gemini(
             conversation_text, summary_path,
-            gemini_cfg=g, model=g.get("model", "gemini-2.0-flash"),
+            gemini_cfg=g, model=model,
         )
+        _capture_usage(provider, model)
+        return result
 
+    model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     from claude_bridge import generate_story_summary as _summary
-    return _summary(conversation_text, summary_path)
+    result = _summary(conversation_text, summary_path)
+    _capture_usage(provider, model)
+    return result
 
 
 # ---------------------------------------------------------------------------
