@@ -2060,41 +2060,7 @@ function renderMessages(messages) {
       switcher.appendChild(label);
       switcher.appendChild(rightBtn);
 
-      // Delete current variant button (only when >=2 variants and not main)
       const currentVariant = group.variants[group.current_variant - 1];
-      if (currentVariant && currentVariant.branch_id !== "main" && group.total >= 2) {
-        const delBtn = document.createElement("button");
-        delBtn.className = "sw-delete";
-        delBtn.textContent = "\u2715";
-        delBtn.title = "刪除此版本";
-        delBtn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const branchToDelete = currentVariant.branch_id;
-          const descCount = countDescendants(branchToDelete);
-          let msg = "刪除此版本？";
-          if (descCount > 0) msg += `\n（${descCount} 個子分支將重新掛載到上層）`;
-          if (!(await showConfirm(msg))) return;
-          try {
-            const res = await API.deleteBranch(branchToDelete);
-            if (res.ok) {
-              const adjIdx = group.current_variant >= 2 ? group.current_variant - 2 : 0;
-              const adjacent = group.variants[adjIdx];
-              await loadBranches();
-              if (adjacent && adjacent.branch_id !== branchToDelete) {
-                await switchToBranch(adjacent.branch_id, { preserveScroll: true });
-              } else {
-                await switchToBranch(res.switch_to || "main");
-              }
-              renderBranchList();
-            } else {
-              showAlert(res.error || "刪除失敗");
-            }
-          } catch (err) {
-            showAlert("網路錯誤：" + err.message);
-          }
-        });
-        switcher.appendChild(delBtn);
-      }
 
       // Prune siblings button — keep only current, delete all others (#7)
       if (group.total >= 2) {
@@ -2105,9 +2071,12 @@ function renderMessages(messages) {
         pruneBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           const keepId = currentVariant ? currentVariant.branch_id : currentBranchId;
-          const others = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main");
+          const others = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main" && !branches[v.branch_id]?.protected);
           if (others.length === 0) return;
-          if (!(await showConfirm(`刪除其他 ${others.length} 個版本，只保留當前？`))) return;
+          const protectedCount = group.variants.filter(v => v.branch_id !== keepId && v.branch_id !== "main" && branches[v.branch_id]?.protected).length;
+          let confirmMsg = `刪除其他 ${others.length} 個版本，只保留當前？`;
+          if (protectedCount > 0) confirmMsg += `\n（${protectedCount} 個受保護的版本將保留）`;
+          if (!(await showConfirm(confirmMsg))) return;
           let failed = 0;
           for (const v of others) {
             try {
