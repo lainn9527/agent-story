@@ -108,6 +108,7 @@ def _load_embedding_cache(story_id: str) -> dict | None:
         if cached is not None:
             return cached
 
+    # Build cache outside lock (DB read + numpy ops are slow)
     conn = _get_conn(story_id)
     _ensure_tables(conn)
     rows = conn.execute(
@@ -126,7 +127,7 @@ def _load_embedding_cache(story_id: str) -> dict | None:
         if emb_bytes and len(emb_bytes) == EMBEDDING_DIM * 4:
             ids.append(row["id"])
             categories.append(row["category"])
-            vectors.append(np.frombuffer(emb_bytes, dtype=np.float32))
+            vectors.append(np.array(np.frombuffer(emb_bytes, dtype=np.float32)))
 
     if not vectors:
         return None
@@ -138,8 +139,14 @@ def _load_embedding_cache(story_id: str) -> dict | None:
     matrix = matrix / norms
 
     cache = {"matrix": matrix, "ids": ids, "categories": categories}
+
+    # Store under lock — only if not invalidated in the meantime
     with _cache_lock:
-        _embedding_cache[story_id] = cache
+        if story_id not in _embedding_cache:
+            _embedding_cache[story_id] = cache
+        else:
+            # Another thread populated it; use theirs
+            cache = _embedding_cache[story_id]
     return cache
 
 
@@ -168,7 +175,12 @@ def extract_tags(content: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def rebuild_index(story_id: str):
-    """Rebuild the SQLite FTS index from world_lore.json."""
+    """Rebuild the SQLite FTS index from world_lore.json.
+
+    Preserves existing embeddings: updates text columns via UPSERT,
+    only clears embedding when content has changed (text_hash mismatch).
+    Removes entries no longer in world_lore.json.
+    """
     json_path = _lore_json_path(story_id)
     if not os.path.exists(json_path):
         return
@@ -179,8 +191,9 @@ def rebuild_index(story_id: str):
     conn = _get_conn(story_id)
     _ensure_tables(conn)
 
-    # Clear and rebuild
-    conn.execute("DELETE FROM lore")
+    # Track which topics are in the current JSON
+    current_topics = set()
+
     for entry in lore_entries:
         content = entry.get("content", "")
         if not isinstance(content, str):
@@ -189,23 +202,47 @@ def rebuild_index(story_id: str):
             continue
         tags = extract_tags(content)
         topic = entry.get("topic", "")
+        if not topic:
+            continue
+        current_topics.add(topic)
         text_hash = _compute_text_hash(topic, content)
-        conn.execute(
-            "INSERT OR REPLACE INTO lore (category, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?)",
-            (
-                entry.get("category", "其他"),
-                topic,
-                content,
-                ",".join(tags),
-                text_hash,
-            ),
-        )
+        category = entry.get("category", "其他")
+        tags_str = ",".join(tags)
+
+        existing = conn.execute(
+            "SELECT id, text_hash FROM lore WHERE topic = ?", (topic,)
+        ).fetchone()
+        if existing:
+            if existing["text_hash"] != text_hash:
+                # Content changed — update text, clear embedding for re-embed
+                conn.execute(
+                    "UPDATE lore SET category=?, content=?, tags=?, text_hash=?, embedding=NULL WHERE topic=?",
+                    (category, content, tags_str, text_hash, topic),
+                )
+            else:
+                # Content unchanged — update metadata only, keep embedding
+                conn.execute(
+                    "UPDATE lore SET category=?, tags=? WHERE topic=?",
+                    (category, tags_str, topic),
+                )
+        else:
+            conn.execute(
+                "INSERT INTO lore (category, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?)",
+                (category, topic, content, tags_str, text_hash),
+            )
+
+    # Remove entries no longer in world_lore.json
+    all_topics = [r[0] for r in conn.execute("SELECT topic FROM lore").fetchall()]
+    for topic in all_topics:
+        if topic not in current_topics:
+            conn.execute("DELETE FROM lore WHERE topic = ?", (topic,))
+
     conn.commit()
     conn.close()
 
     _invalidate_cache(story_id)
 
-    # Trigger background embedding if any entries lack embeddings
+    # Trigger background embedding for entries missing embeddings
     _embed_all_if_needed(story_id)
 
 
@@ -327,16 +364,18 @@ def embed_all_entries(story_id: str):
             continue
 
         conn = _get_conn(story_id)
-        for row, vec in zip(batch, vectors):
-            if vec and len(vec) == EMBEDDING_DIM:
-                emb_bytes = np.array(vec, dtype=np.float32).tobytes()
-                text_hash = _compute_text_hash(row["topic"], row["content"])
-                conn.execute(
-                    "UPDATE lore SET embedding=?, text_hash=? WHERE id=?",
-                    (emb_bytes, text_hash, row["id"]),
-                )
-        conn.commit()
-        conn.close()
+        try:
+            for row, vec in zip(batch, vectors):
+                if vec and len(vec) == EMBEDDING_DIM:
+                    emb_bytes = np.array(vec, dtype=np.float32).tobytes()
+                    text_hash = _compute_text_hash(row["topic"], row["content"])
+                    conn.execute(
+                        "UPDATE lore SET embedding=?, text_hash=? WHERE id=?",
+                        (emb_bytes, text_hash, row["id"]),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
 
         log.info("lore_db: embedded batch %d-%d/%d", i, i + len(batch), len(rows))
         if i + batch_size < len(rows):
@@ -598,6 +637,26 @@ def get_entry_count(story_id: str) -> int:
     return count
 
 
+def get_category_summary(story_id: str) -> str:
+    """Return a compact category summary for system prompt (~100 tokens).
+
+    Format: 「分類名(N條)」per category, one line.
+    Gives the GM a mental map of knowledge structure without full TOC.
+    """
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        "SELECT category, COUNT(*) as cnt FROM lore GROUP BY category ORDER BY MIN(id)"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return ""
+
+    parts = [f"{r['category']}({r['cnt']})" for r in rows]
+    return "、".join(parts)
+
+
 def get_toc(story_id: str) -> str:
     """Build a hierarchical table-of-contents string for system prompt injection.
 
@@ -665,13 +724,13 @@ def delete_entry(story_id: str, topic: str):
 def search_relevant_lore(
     story_id: str,
     user_message: str,
-    limit: int = 5,
     context: dict | None = None,
 ) -> str:
     """Search for lore relevant to a user message. Returns formatted text for injection.
 
-    Uses hybrid search (embedding + keyword) when embeddings are available,
-    falls back to keyword-only search otherwise.
+    Uses hybrid search (embedding + keyword with RRF fusion) when embeddings
+    are available, falls back to keyword-only search otherwise.
+    Results are token-budgeted (~3000 tokens) rather than fixed count.
     """
     results = search_hybrid(
         story_id, user_message,
@@ -686,8 +745,8 @@ def search_relevant_lore(
     for e in results:
         # Strip inline [tag: ...] and [source: ...] markers — already indexed in tags column
         content = _INLINE_META_RE.sub("", e["content"]).strip()
-        if len(content) > 800:
-            content = content[:800] + "…（截斷）"
+        if len(content) > 1200:
+            content = content[:1200] + "…（截斷）"
         lines.append(f"#### {e['category']}：{e['topic']}")
         lines.append(content)
         lines.append("")
@@ -702,51 +761,44 @@ def search_relevant_lore(
 def find_duplicates(story_id: str, threshold: float = 0.90) -> list[dict]:
     """Find near-duplicate lore entries via embedding cosine similarity.
 
-    Returns pairs with similarity > threshold.
+    Returns pairs with similarity > threshold, sorted by similarity descending.
     """
     cache = _load_embedding_cache(story_id)
     if cache is None or len(cache["ids"]) < 2:
         return []
 
     matrix = cache["matrix"]  # already normalized
-    n = matrix.shape[0]
+    ids = cache["ids"]
 
     # Pairwise cosine similarity (dot product of normalized vectors)
     sim_matrix = matrix @ matrix.T  # (N, N)
 
-    # Find pairs above threshold (upper triangle only)
-    pairs = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            sim = float(sim_matrix[i, j])
-            if sim >= threshold:
-                pairs.append({
-                    "id_a": cache["ids"][i],
-                    "id_b": cache["ids"][j],
-                    "similarity": round(sim, 4),
-                })
+    # Vectorized: find pairs above threshold in upper triangle
+    i_indices, j_indices = np.where(np.triu(sim_matrix >= threshold, k=1))
 
-    if not pairs:
+    if len(i_indices) == 0:
         return []
 
+    sims = sim_matrix[i_indices, j_indices]
     # Sort by similarity descending
-    pairs.sort(key=lambda x: x["similarity"], reverse=True)
+    order = np.argsort(sims)[::-1]
 
     # Enrich with entry details
     conn = _get_conn(story_id)
     enriched = []
-    for p in pairs:
+    for idx in order:
+        i, j = int(i_indices[idx]), int(j_indices[idx])
         a = conn.execute(
-            "SELECT category, topic, content FROM lore WHERE id=?", (p["id_a"],)
+            "SELECT category, topic, content FROM lore WHERE id=?", (ids[i],)
         ).fetchone()
         b = conn.execute(
-            "SELECT category, topic, content FROM lore WHERE id=?", (p["id_b"],)
+            "SELECT category, topic, content FROM lore WHERE id=?", (ids[j],)
         ).fetchone()
         if a and b:
             enriched.append({
                 "entry_a": {"category": a["category"], "topic": a["topic"], "content": a["content"][:200]},
                 "entry_b": {"category": b["category"], "topic": b["topic"], "content": b["content"][:200]},
-                "similarity": p["similarity"],
+                "similarity": round(float(sims[idx]), 4),
             })
     conn.close()
     return enriched
