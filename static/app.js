@@ -970,11 +970,10 @@ function openBranchTreeModal() {
 }
 
 function _btRenderTree(container, modal) {
-  // Build children map — skip blank branches (shown in drawer instead)
+  // Build children map — blank branches are roots (same as main)
   const childrenMap = {};
   for (const b of Object.values(branches)) {
-    if (b.blank) continue;
-    const parent = b.parent_branch_id || "__root__";
+    const parent = b.blank ? "__root__" : (b.parent_branch_id || "__root__");
     if (!childrenMap[parent]) childrenMap[parent] = [];
     childrenMap[parent].push(b);
   }
@@ -1238,9 +1237,17 @@ function _btRenderTree(container, modal) {
   }
 
   container.innerHTML = "";
+  // Find which root owns the current branch
   const roots = childrenMap["__root__"] || [];
-  for (const root of roots) {
-    container.appendChild(renderNode(root, true));
+  let activeRoot = roots.find(r => r.id === currentBranchId);
+  if (!activeRoot) {
+    activeRoot = roots.find(r => containsCurrent(r.id));
+  }
+  if (!activeRoot && roots.length > 0) {
+    activeRoot = roots.find(r => r.id === "main") || roots[0];
+  }
+  if (activeRoot) {
+    container.appendChild(renderNode(activeRoot, true));
   }
 
   requestAnimationFrame(() => {
