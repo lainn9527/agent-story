@@ -109,6 +109,26 @@ def invalidate_prefix_cache(story_id: str):
 # Rule-Based Matching (no LLM)
 # ---------------------------------------------------------------------------
 _SUFFIX_STOPWORDS = {"系統", "機制", "規則", "概述", "體系", "設定", "說明"}
+# Leading conjunctions/particles that make bad sub-topic starts
+_LEADING_JUNK = {"與", "和", "及", "的", "之"}
+
+
+def _has_children(topic: str, category: str, lore: list[dict] | None = None,
+                  story_id: str | None = None) -> bool:
+    """Check if a topic is used as prefix by other entries (i.e. has children)."""
+    if lore is None and story_id:
+        lore_file = _lore_path(story_id)
+        if not os.path.exists(lore_file):
+            return False
+        with open(lore_file, "r", encoding="utf-8") as f:
+            lore = json.load(f)
+    if not lore:
+        return False
+    prefix_with_colon = topic + "："
+    return any(
+        e.get("topic", "").startswith(prefix_with_colon) and e.get("category", "") == category
+        for e in lore
+    )
 
 
 def try_classify_topic(topic: str, category: str, story_id: str,
@@ -136,6 +156,9 @@ def try_classify_topic(topic: str, category: str, story_id: str,
             remainder = topic[len(prefix):]
             # Remainder must be non-empty (otherwise it's Rule 2: exact match)
             if remainder:
+                # Reject if remainder starts with a conjunction/particle (produces broken names)
+                if remainder[0] in _LEADING_JUNK:
+                    continue
                 # Remainder must be ≥ 2 chars, or be a known stopword
                 if len(remainder) >= 2 or remainder in _SUFFIX_STOPWORDS:
                     best_prefix = prefix
@@ -143,13 +166,13 @@ def try_classify_topic(topic: str, category: str, story_id: str,
 
     if best_prefix:
         remainder = topic[best_len:]
-        # If remainder is purely a stopword, treat as "概述"-style entry
-        if remainder in _SUFFIX_STOPWORDS:
-            return f"{best_prefix}：{remainder}"
         return f"{best_prefix}：{remainder}"
 
     # Rule 2: Exact prefix match — orphan IS a known prefix
+    # Skip if this topic already has children (renaming would orphan them)
     if topic in cat_prefixes:
+        if _has_children(topic, category, story_id=story_id):
+            return None  # don't rename a parent that has children
         return f"{topic}：概述"
 
     return None
@@ -270,13 +293,25 @@ def should_organize(story_id: str) -> bool:
     return len(actionable) >= MIN_ORPHANS_FOR_TRIGGER
 
 
+_organizing: dict[str, bool] = {}
+_organizing_lock = threading.Lock()
+
+
 def organize_lore_async(story_id: str):
-    """Run LLM-based orphan classification in a background thread."""
+    """Run LLM-based orphan classification in a background thread. Deduplicated per story."""
+    with _organizing_lock:
+        if _organizing.get(story_id):
+            return  # already running
+        _organizing[story_id] = True
+
     def _do_organize():
         try:
             _organize_orphans_llm(story_id)
         except Exception:
             log.exception("lore_organizer: background organize failed")
+        finally:
+            with _organizing_lock:
+                _organizing[story_id] = False
 
     t = threading.Thread(target=_do_organize, daemon=True)
     t.start()
@@ -430,7 +465,12 @@ def _organize_orphans_llm(story_id: str):
                 skip[topic] = now
                 continue
 
-        new_topic = f"{prefix}：{topic}"
+        # Build new topic: strip prefix from topic if it starts with it (avoid redundancy)
+        if topic.startswith(prefix):
+            suffix = topic[len(prefix):].lstrip("與和及的之")
+            new_topic = f"{prefix}：{suffix}" if suffix else f"{prefix}：概述"
+        else:
+            new_topic = f"{prefix}：{topic}"
         with lock:
             rename_lore_topic(story_id, topic, new_topic)
         llm_classified += 1

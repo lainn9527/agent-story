@@ -547,7 +547,7 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
                 return
         lore.append(entry)
         _save_json(_story_lore_path(story_id), lore)
-    upsert_lore_entry(story_id, entry)
+        upsert_lore_entry(story_id, entry)
 
 
 def _build_lore_text(story_id: str) -> str:
@@ -2917,28 +2917,30 @@ def api_lore_entry_update():
     if not topic:
         return jsonify({"ok": False, "error": "topic required"}), 400
 
-    lore = _load_lore(story_id)
-    found = False
-    for i, e in enumerate(lore):
-        if e.get("topic") == topic:
-            found = True
-            new_topic = body.get("new_topic", topic).strip()
-            new_category = body.get("category", e.get("category", "其他")).strip()
-            new_content = body.get("content", e.get("content", "")).strip()
-            # If renaming, check for collision with existing topic
-            if new_topic != topic:
-                if any(x.get("topic") == new_topic for x in lore):
-                    return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
-                delete_lore_entry(story_id, topic)
-            updated = {"category": new_category, "topic": new_topic, "content": new_content}
-            if "source" in e:
-                updated["source"] = e["source"]
-            lore[i] = updated
-            _save_json(_story_lore_path(story_id), lore)
-            upsert_lore_entry(story_id, lore[i])
-            return jsonify({"ok": True, "entry": lore[i]})
-    if not found:
-        return jsonify({"ok": False, "error": "entry not found"}), 404
+    lock = get_lore_lock(story_id)
+    with lock:
+        lore = _load_lore(story_id)
+        found = False
+        for i, e in enumerate(lore):
+            if e.get("topic") == topic:
+                found = True
+                new_topic = body.get("new_topic", topic).strip()
+                new_category = body.get("category", e.get("category", "其他")).strip()
+                new_content = body.get("content", e.get("content", "")).strip()
+                # If renaming, check for collision with existing topic
+                if new_topic != topic:
+                    if any(x.get("topic") == new_topic for x in lore):
+                        return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
+                    delete_lore_entry(story_id, topic)
+                updated = {"category": new_category, "topic": new_topic, "content": new_content}
+                if "source" in e:
+                    updated["source"] = e["source"]
+                lore[i] = updated
+                _save_json(_story_lore_path(story_id), lore)
+                upsert_lore_entry(story_id, lore[i])
+                return jsonify({"ok": True, "entry": lore[i]})
+        if not found:
+            return jsonify({"ok": False, "error": "entry not found"}), 404
 
 
 @app.route("/api/lore/entry", methods=["DELETE"])
@@ -2950,12 +2952,14 @@ def api_lore_entry_delete():
     if not topic:
         return jsonify({"ok": False, "error": "topic required"}), 400
 
-    lore = _load_lore(story_id)
-    new_lore = [e for e in lore if e.get("topic") != topic]
-    if len(new_lore) == len(lore):
-        return jsonify({"ok": False, "error": "entry not found"}), 404
-    _save_json(_story_lore_path(story_id), new_lore)
-    delete_lore_entry(story_id, topic)
+    lock = get_lore_lock(story_id)
+    with lock:
+        lore = _load_lore(story_id)
+        new_lore = [e for e in lore if e.get("topic") != topic]
+        if len(new_lore) == len(lore):
+            return jsonify({"ok": False, "error": "entry not found"}), 404
+        _save_json(_story_lore_path(story_id), new_lore)
+        delete_lore_entry(story_id, topic)
     return jsonify({"ok": True})
 
 
