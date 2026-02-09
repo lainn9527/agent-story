@@ -604,7 +604,8 @@ def analyze_response(
     return result
 
 
-def update_phase(state: RunState, analysis: dict):
+def update_phase(state: RunState, analysis: dict,
+                  story_id: str = "", branch_id: str = ""):
     """Update run state phase based on analysis results."""
     if analysis["death"]:
         state.death_detected = True
@@ -616,6 +617,9 @@ def update_phase(state: RunState, analysis: dict):
             state.dungeon_count += 1
             state.hub_turns = 0
             log.info(">>> Phase: hub -> dungeon (dungeon #%d)", state.dungeon_count)
+            if story_id and branch_id:
+                from world_timer import advance_dungeon_enter
+                advance_dungeon_enter(story_id, branch_id)
         else:
             state.hub_turns += 1
     elif state.phase == "dungeon":
@@ -625,6 +629,9 @@ def update_phase(state: RunState, analysis: dict):
             state.phase = "hub"
             state.hub_turns = 0
             log.info(">>> Phase: dungeon -> hub")
+            if story_id and branch_id:
+                from world_timer import advance_dungeon_exit
+                advance_dungeon_exit(story_id, branch_id)
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +656,14 @@ def should_stop(state: RunState, config: AutoPlayConfig) -> bool:
     if state.consecutive_errors >= config.max_errors:
         log.info("STOP: Too many consecutive errors (%d >= %d)", state.consecutive_errors, config.max_errors)
         return True
+    # Cooperative stop: check agent status in agents.json
+    if config.agent_id:
+        from agent_manager import load_agents
+        agents_data = load_agents(config.story_id)
+        agent = agents_data.get("agents", {}).get(config.agent_id)
+        if agent and agent.get("status") != "running":
+            log.info("STOP: Agent status changed to '%s'", agent.get("status"))
+            return True
     return False
 
 
@@ -747,7 +762,7 @@ def auto_play(config: AutoPlayConfig):
         state = load_run_state(story_id, branch_id)
         if state is None:
             log.error("No saved state found for branch %s", branch_id)
-            sys.exit(1)
+            return
         # Clear stale death flag (detection logic may have changed)
         state.death_detected = False
         log.info("Resuming from turn %d on branch %s", state.turn, branch_id)
@@ -830,7 +845,7 @@ def auto_play(config: AutoPlayConfig):
 
             # D. Analyze & update phase
             analysis = analyze_response(gm_response, story_id, branch_id)
-            update_phase(state, analysis)
+            update_phase(state, analysis, story_id, branch_id)
 
             # E. Log
             log_turn(story_id, branch_id, state, player_text, gm_response)
@@ -845,11 +860,23 @@ def auto_play(config: AutoPlayConfig):
                 existing = _load_summaries(story_id, branch_id)
                 last_turn = existing[-1]["turn_end"] + 1 if existing else 0
                 full_tl = get_full_timeline(story_id, branch_id)
-                summary_msgs = full_tl[last_turn * 2:][-20:]  # cap 20 msgs
+                summary_msgs = full_tl[max(0, len(full_tl) - 20):]
                 generate_summary_async(
                     story_id, branch_id, last_turn, state.turn,
                     state.phase, summary_msgs, state.to_dict(),
                 )
+
+            # H. Save agent snapshot on phase change or every 20 turns
+            if config.agent_id and (phase_changed or state.turn % 20 == 0):
+                try:
+                    from shared_world import save_agent_snapshot
+                    char_state = _load_character_state(story_id, branch_id)
+                    save_agent_snapshot(
+                        story_id, branch_id,
+                        state.turn, state.phase, char_state,
+                    )
+                except Exception as e:
+                    log.debug("Failed to save agent snapshot: %s", e)
 
             state.turn += 1
             time.sleep(config.turn_delay)
@@ -874,6 +901,23 @@ def auto_play(config: AutoPlayConfig):
     state.status = "finished"
     state.last_turn_at = datetime.now(timezone.utc).isoformat()
     save_run_state(story_id, branch_id, state)
+
+    # Save final agent snapshot and generate summaries
+    if config.agent_id:
+        try:
+            from shared_world import save_agent_snapshot, generate_snapshot_summaries
+            char_state = _load_character_state(story_id, branch_id)
+            save_agent_snapshot(
+                story_id, branch_id,
+                state.turn, state.phase, char_state,
+            )
+            threading.Thread(
+                target=generate_snapshot_summaries,
+                args=(story_id, branch_id),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            log.debug("Failed to save final agent snapshot: %s", e)
 
     print_summary(state, story_id, branch_id)
 
