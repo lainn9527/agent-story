@@ -2471,12 +2471,27 @@ function renderSavesList(saves) {
     nameEl.className = "save-name";
     nameEl.textContent = save.name;
     nameEl.title = "雙擊重新命名";
-    nameEl.addEventListener("dblclick", async () => {
+
+    async function renameSavePrompt() {
       const newName = prompt("重新命名存檔：", save.name);
       if (newName && newName.trim() && newName.trim() !== save.name) {
-        await API.renameSave(save.id, newName.trim());
+        try {
+          await API.renameSave(save.id, newName.trim());
+        } catch (err) {
+          alert("重命名失敗：" + err.message);
+        }
         loadSaves();
       }
+    }
+    nameEl.addEventListener("dblclick", renameSavePrompt);
+
+    const editBtn = document.createElement("span");
+    editBtn.className = "save-edit";
+    editBtn.textContent = "\u270E";
+    editBtn.title = "重新命名";
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      renameSavePrompt();
     });
 
     const delBtn = document.createElement("span");
@@ -2493,6 +2508,7 @@ function renderSavesList(saves) {
     });
 
     header.appendChild(nameEl);
+    header.appendChild(editBtn);
     header.appendChild(delBtn);
     card.appendChild(header);
 
@@ -2523,6 +2539,9 @@ function renderSavesList(saves) {
       try {
         const res = await API.loadSave(save.id);
         if (res.ok) {
+          stopLivePolling();
+          stopIncompletePolling();
+          removeIncompleteBanner();
           currentBranchId = res.branch_id;
           await loadBranches();
           renderBranchList();
@@ -2531,7 +2550,8 @@ function renderSavesList(saves) {
           renderCharacterStatus(status);
           updateWorldDayDisplay(status.world_day);
           updateBranchIndicator();
-          await Promise.all([loadNpcs(), loadEvents()]);
+          $promoteBtn.style.display = currentBranchId === "main" ? "none" : "";
+          await Promise.all([loadNpcs(), loadEvents(), loadSummaries(), loadSaves()]);
           scrollToBottom();
           closeDrawer();
         } else {

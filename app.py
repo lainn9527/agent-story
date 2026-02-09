@@ -856,13 +856,13 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     advance_world_day(story_id, branch_id, total_days)
                     saved_counts["time"] = total_days
 
-            # Branch title — save to timeline_tree
+            # Branch title — save to timeline_tree (set-once: only if no title yet)
             branch_title = data.get("branch_title", "")
             if branch_title and isinstance(branch_title, str):
                 branch_title = branch_title.strip()[:20]  # cap at 20 chars
                 tree = _load_tree(story_id)
                 branch_meta = tree.get("branches", {}).get(branch_id)
-                if branch_meta:
+                if branch_meta and not branch_meta.get("title"):
                     branch_meta["title"] = branch_title
                     _save_tree(story_id, tree)
                     saved_counts["title"] = branch_title
@@ -3390,6 +3390,7 @@ def api_saves_create():
     character_state = _load_character_state(story_id, branch_id)
     npcs = _load_json(_story_npcs_path(story_id, branch_id), [])
     world_day = get_world_day(story_id, branch_id)
+    recap = load_recap(story_id, branch_id)
 
     # Build preview from last GM message
     last_gm = ""
@@ -3414,6 +3415,7 @@ def api_saves_create():
         "world_day": world_day,
         "character_snapshot": character_state,
         "npc_snapshot": npcs,
+        "recap_snapshot": recap,
         "preview": last_gm,
     }
 
@@ -3455,8 +3457,12 @@ def api_saves_load(save_id):
     wd = save.get("world_day", {"day": 1, "hour": 0})
     _save_json(os.path.join(_branch_dir(story_id, branch_id), "world_day.json"), wd)
 
-    # Copy recap from parent
-    copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
+    # Restore recap from snapshot (preferred) or fallback to parent copy
+    recap_snapshot = save.get("recap_snapshot")
+    if recap_snapshot:
+        save_recap(story_id, branch_id, recap_snapshot)
+    else:
+        copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
 
     save_name = save.get("name", "存檔")
