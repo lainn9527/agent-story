@@ -1467,6 +1467,8 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
             "excerpt": gm_response[:100],
             "timestamp": datetime.now().isoformat(),
         }
+        # edited_by intentionally omitted: _save_lore_entry preserves existing
+        # "user" provenance, so real-time GM tags update content but keep protection.
         _save_lore_entry(story_id, lore_entry)
 
     gm_response, npc_updates = _extract_npc_tag(gm_response)
