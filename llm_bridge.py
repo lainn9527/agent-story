@@ -234,7 +234,7 @@ def _get_gemini_cfg() -> dict | None:
     When provider is overridden (e.g. auto-play sets claude_cli),
     Gemini config is blocked entirely — no API keys, no access.
     """
-    if _provider_override and _provider_override != "gemini":
+    if _provider_override:
         return None
     cfg = _get_config()
     g = cfg.get("gemini", {})
