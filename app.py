@@ -1959,9 +1959,8 @@ def api_send_stream():
 
                     # Auto-prune abandoned siblings
                     pruned = _auto_prune_siblings(story_id, branch_id, gm_msg_index)
-                    if pruned:
-                        tree = _load_tree(story_id)
 
+                    tree = _load_tree(story_id)
                     log.info("/api/send/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
                         "type": "done",
