@@ -971,8 +971,8 @@ def parse_args() -> AutoPlayConfig:
         help="Max consecutive errors before stopping (default: 10)",
     )
     parser.add_argument(
-        "--web-search", action="store_true",
-        help="Enable web search enrichment (default: disabled to avoid Gemini usage)",
+        "--no-web-search", action="store_true",
+        help="Disable web search enrichment",
     )
 
     args = parser.parse_args()
@@ -991,7 +991,7 @@ def parse_args() -> AutoPlayConfig:
         branch_id=args.branch_id,
         provider=args.provider,
         max_errors=args.max_errors,
-        web_search=args.web_search,
+        web_search=not args.no_web_search,
     )
 
     # Load character from file
