@@ -344,6 +344,7 @@ let isSending = false;
 // Branch state
 let currentBranchId = "main";
 let branches = {};
+let lastPlayedBranchId = null;
 let forkPoints = {};
 let activeStreamController = null;
 let siblingGroups = {};
@@ -788,6 +789,7 @@ async function loadBranches() {
   const result = await API.branches();
   branches = result.branches || {};
   currentBranchId = result.active_branch_id || currentBranchId;
+  lastPlayedBranchId = result.last_played_branch_id || null;
   updateBranchIndicator();
 }
 
@@ -997,6 +999,34 @@ function countDescendants(branchId) {
   return count;
 }
 
+function _btFindDeepestLeaf(startId, childrenOf) {
+  let best = null, bestDepth = -1;
+  function dfs(id, depth) {
+    const kids = (childrenOf[id] || []).filter(k => !k.deleted && !k.merged && !k.pruned);
+    if (!kids.length) {
+      if (depth > bestDepth || (depth === bestDepth && best &&
+          (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
+        best = id; bestDepth = depth;
+      }
+      return;
+    }
+    for (const k of kids) dfs(k.id, depth + 1);
+  }
+  dfs(startId, 0);
+  return best !== startId ? best : null;
+}
+
+function _btUpdateContinueBtn() {
+  const btn = document.getElementById("bt-continue-btn");
+  const target = lastPlayedBranchId;
+  const show = target && target !== currentBranchId && branches[target];
+  btn.classList.toggle("hidden", !show);
+  if (show) {
+    const b = branches[target];
+    btn.title = `繼續：${b.title || b.name || target}`;
+  }
+}
+
 
 // ---------- Branch Tree Modal ----------
 let _btSelectMode = false;
@@ -1008,6 +1038,7 @@ function openBranchTreeModal() {
   _btSelectMode = false;
   _btSelected.clear();
   _btUpdateToolbar();
+  _btUpdateContinueBtn();
   document.getElementById("bt-select-toggle").textContent = "\u2610";
   modal.classList.remove("hidden");
   _btRenderTree(container, modal);
@@ -1118,6 +1149,23 @@ function _btRenderTree(container, modal) {
       });
       actions.appendChild(heartBtn);
 
+      // Deepest leaf button
+      const deepest = _btFindDeepestLeaf(branch.id, childrenMap);
+      if (deepest) {
+        const deepBtn = document.createElement("span");
+        deepBtn.className = "bt-action-btn bt-action-deep";
+        deepBtn.textContent = "\u21E3";
+        deepBtn.title = `跳到最深：${branches[deepest]?.title || branches[deepest]?.name || deepest}`;
+        deepBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          modal.classList.add("hidden");
+          closeDrawer();
+          await switchToBranch(deepest);
+          scrollToBottom();
+        });
+        actions.appendChild(deepBtn);
+      }
+
       // Promote button
       const promoteBtn = document.createElement("span");
       promoteBtn.className = "bt-action-btn bt-action-promote";
@@ -1188,6 +1236,28 @@ function _btRenderTree(container, modal) {
       actions.appendChild(delBtn);
 
       item.appendChild(actions);
+    }
+
+    // Deepest leaf button for main branch
+    if (branch.id === "main" && !_btSelectMode) {
+      const deepest = _btFindDeepestLeaf(branch.id, childrenMap);
+      if (deepest) {
+        const actions = document.createElement("span");
+        actions.className = "bt-actions";
+        const deepBtn = document.createElement("span");
+        deepBtn.className = "bt-action-btn bt-action-deep";
+        deepBtn.textContent = "\u21E3";
+        deepBtn.title = `跳到最深：${branches[deepest]?.title || branches[deepest]?.name || deepest}`;
+        deepBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          modal.classList.add("hidden");
+          closeDrawer();
+          await switchToBranch(deepest);
+          scrollToBottom();
+        });
+        actions.appendChild(deepBtn);
+        item.appendChild(actions);
+      }
     }
 
     // Click to switch branch
@@ -3331,6 +3401,13 @@ document.getElementById("branch-tree-modal").addEventListener("click", (e) => {
 document.getElementById("bt-select-toggle").addEventListener("click", _btToggleSelectMode);
 document.getElementById("bt-delete-selected").addEventListener("click", _btDeleteSelected);
 document.getElementById("bt-merge-selected").addEventListener("click", _btMergeSelected);
+document.getElementById("bt-continue-btn").addEventListener("click", async () => {
+  if (!lastPlayedBranchId || !branches[lastPlayedBranchId]) return;
+  document.getElementById("branch-tree-modal").classList.add("hidden");
+  closeDrawer();
+  await switchToBranch(lastPlayedBranchId);
+  scrollToBottom();
+});
 
 // Create save button
 $createSaveBtn.addEventListener("click", async () => {
