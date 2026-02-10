@@ -5,6 +5,15 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.3] - 2026-02-10
+
+### Added
+- Branch tree "▶ 繼續" toolbar button: one-click jump to last-played branch ([#65])
+- Branch tree "⇣" per-node button: jump to deepest descendant leaf of any branch ([#65])
+- Backend tracks `last_played_branch_id` on send/edit/regen actions ([#65])
+
+[#65]: https://github.com/lainn9527/agent-story/pull/65
+
 ## [0.13.2] - 2026-02-10
 
 ### Fixed
