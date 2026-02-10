@@ -221,11 +221,13 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - System prompt uses double-braces `{{}}` for literal braces (Python `.format()`)
 
 ## Development Guidelines
-- **This machine is the production server.** Port 5051 is reserved for the live instance. When testing locally, always use a different port (e.g. `PORT=5052 python app.py`). Never bind to 5051 during development.
+- **This machine is the production server.** Port 5051 is reserved for the live instance. Production runs with `debug=False` (no watchdog reloader). For dev/testing, use `DEBUG=1 PORT=<port> python3 app.py`.
 - **Use `claude_cli` provider for testing.** Gemini free-tier keys are shared with production and rate-limited. Set `"provider": "claude_cli"` in your local `llm_config.json` to avoid burning Gemini quota.
+- **NEVER overwrite production `llm_config.json`.** This file contains API keys and is not tracked by git. When setting up e2e testing, ALWAYS verify the source config has `api_keys` before copying. Copy direction is always: main → worktree, never the reverse. If main's config is broken, restore from another worktree backup.
 
 ### Git Workflow
 - **Default branch**: `main`
+- **NEVER edit files on `main`.** The `main` branch IS the production server. Always use a worktree for any code changes.
 - **Always use git worktree.** Create a new branch based on `main` in a worktree for every task. Never work directly on `main`.
   ```bash
   git worktree add ../story-<branch-name> -b <branch-name> main
@@ -234,6 +236,7 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - **Open a PR** when the work is ready for review.
 - **PR Review process**: Spawn 4 subagents (BE, FE, UI/UX, Game Director) to review the PR and leave comments via `gh pr review` / `gh pr comment`.
   - If any reviewer leaves actionable comments, address them and reply on the same comment thread.
+  - **After fixing review comments, re-run the relevant reviewers** on the updated code. Do NOT skip re-review — just replying on the PR is not enough.
   - Repeat until all reviewers have no remaining issues.
 - **E2E testing (user-gated).** After all reviews pass, set up e2e testing for the user:
   1. Copy production data and config into the worktree (never symlink — avoids data pollution):
@@ -243,7 +246,7 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
      ```
   2. Find a random available port and start the server:
      ```bash
-     PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()") && echo "Test server on port $PORT" && cd ../story-<branch-name> && PORT=$PORT python app.py
+     PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()") && echo "Test server on port $PORT" && cd ../story-<branch-name> && DEBUG=1 PORT=$PORT python3 app.py
      ```
   3. Tell the user the URL (`http://localhost:<port>`) and ask them to test.
   **Do NOT merge until the user explicitly confirms the PR is ready to merge.**
