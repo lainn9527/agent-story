@@ -753,9 +753,18 @@ def print_summary(state: RunState, story_id: str, branch_id: str):
 
 def auto_play(config: AutoPlayConfig):
     """Run the auto-play loop."""
-    # Apply provider override for this process
-    if config.provider:
-        set_provider(config.provider)
+    # Auto-play defaults to claude_cli to avoid burning Gemini API quota.
+    # Users can still explicitly pass --provider gemini if they want.
+    if config.provider is None:
+        from llm_bridge import get_provider
+        current = get_provider()
+        if current != "claude_cli":
+            log.warning(
+                "Auto-play 預設使用 claude_cli（避免消耗 Gemini 額度）。"
+                "若需使用 Gemini，請明確指定 --provider gemini"
+            )
+        config.provider = "claude_cli"
+    set_provider(config.provider)
 
     # Setup or resume
     if config.resume and config.branch_id:
