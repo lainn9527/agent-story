@@ -1791,7 +1791,7 @@ body {
 
   .message.gm {
     max-width: 100%;
-    padding: 0 4px;
+    padding: 0 4px 32px;
     font-size: 1.12rem;
     line-height: 1.75;
     font-family: "Noto Serif TC", "Songti TC", "Source Han Serif TC", "Georgia", serif;
@@ -1836,10 +1836,6 @@ body {
     padding: 12px 16px 28px;
   }
 
-  /* Sibling switcher — ensure bottom padding for absolute-positioned switcher */
-  .message.gm.has-switcher {
-    padding-bottom: 32px;
-  }
   /* Sibling switcher — slightly larger touch targets */
   .sibling-switcher .sw-arrow {
     padding: 4px 10px;
