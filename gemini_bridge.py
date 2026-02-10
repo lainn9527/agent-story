@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 
-from gemini_key_manager import get_available_keys, mark_rate_limited
+from gemini_key_manager import get_available_keys, load_keys, mark_rate_limited
 
 log = logging.getLogger("rpg")
 
@@ -150,6 +150,8 @@ def _with_key_fallback(gemini_cfg: dict, fn):
     """
     keys = get_available_keys(gemini_cfg)
     if not keys:
+        if not load_keys(gemini_cfg):
+            return None, "未設定 Gemini API key，請在設定中加入 api_keys"
         return None, "所有 Gemini API key 都在冷卻中，請稍後再試"
 
     last_err = None
@@ -299,7 +301,10 @@ def call_gemini_gm_stream(
     # Try each available key until one connects successfully
     keys = get_available_keys(gemini_cfg)
     if not keys:
-        yield ("error", "所有 Gemini API key 都在冷卻中，請稍後再試")
+        if not load_keys(gemini_cfg):
+            yield ("error", "未設定 Gemini API key，請在設定中加入 api_keys")
+        else:
+            yield ("error", "所有 Gemini API key 都在冷卻中，請稍後再試")
         return
 
     resp = None

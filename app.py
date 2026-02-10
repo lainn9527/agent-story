@@ -3902,4 +3902,6 @@ if __name__ == "__main__":
     _ensure_data_dir()
     _cleanup_incomplete_branches()
     _init_lore_indexes()
-    app.run(debug=True, host='0.0.0.0', port=5051)
+    port = int(os.environ.get("PORT", 5051))
+    debug = os.environ.get("DEBUG", "0") == "1"
+    app.run(debug=debug, host='0.0.0.0', port=port)
