@@ -550,11 +550,10 @@ def _find_similar_topic(new_topic: str, new_category: str,
     return best_topic if best_sim >= threshold else None
 
 
-def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = None, embed: bool = True):
+def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = None):
     """Save a lore entry. If same topic exists, update it. Also updates search index.
 
     Uses lore lock for thread safety + auto-classifies orphan topics.
-    Set embed=False to skip background embedding (e.g. during auto-play).
     """
     topic = entry.get("topic", "").strip()
     if not topic:
@@ -586,11 +585,11 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
                     entry["edited_by"] = existing["edited_by"]
                 lore[i] = entry
                 _save_json(_story_lore_path(story_id), lore)
-                upsert_lore_entry(story_id, entry, embed=embed)
+                upsert_lore_entry(story_id, entry)
                 return
         lore.append(entry)
         _save_json(_story_lore_path(story_id), lore)
-        upsert_lore_entry(story_id, entry, embed=embed)
+        upsert_lore_entry(story_id, entry)
 
 
 def _build_lore_text(story_id: str) -> str:
@@ -1552,11 +1551,8 @@ def _build_augmented_message(
             "status": character_state.get("current_status", ""),
         }
 
-    # Skip embedding search for auto-play branches to save Gemini API quota
-    use_embedding = not branch_id.startswith("auto_")
-
     parts = []
-    lore = search_relevant_lore(story_id, user_text, context=lore_context, use_embedding=use_embedding)
+    lore = search_relevant_lore(story_id, user_text, context=lore_context)
     if lore:
         parts.append(lore)
     if not is_blank:

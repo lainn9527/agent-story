@@ -229,7 +229,13 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 # ---------------------------------------------------------------------------
 
 def _get_gemini_cfg() -> dict | None:
-    """Return Gemini config if keys are configured, else None."""
+    """Return Gemini config if Gemini is allowed and keys are configured.
+
+    When provider is overridden (e.g. auto-play sets claude_cli),
+    Gemini config is blocked entirely — no API keys, no access.
+    """
+    if _provider_override and _provider_override != "gemini":
+        return None
     cfg = _get_config()
     g = cfg.get("gemini", {})
     from gemini_key_manager import load_keys
@@ -263,16 +269,11 @@ def embed_texts_batch(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -
 def web_search(query: str) -> str:
     """Search the web via Gemini's Google Search grounding.
 
-    Always uses Gemini regardless of the active provider, since only
-    Gemini supports Google Search grounding.
+    Blocked when provider is overridden to non-Gemini (e.g. auto-play).
     Returns grounded response text or empty string on failure.
     """
-    cfg = _get_config()
-    g = cfg.get("gemini", {})
-    # Check if any keys are configured
-    from gemini_key_manager import load_keys
-    if not load_keys(g):
-        log.info("llm_bridge: web_search skipped — no Gemini API keys configured")
+    g = _get_gemini_cfg()
+    if not g:
         return ""
     from gemini_bridge import call_gemini_grounded_search
     model = g.get("model", "gemini-2.5-flash")

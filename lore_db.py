@@ -246,12 +246,8 @@ def rebuild_index(story_id: str):
     _embed_all_if_needed(story_id)
 
 
-def upsert_entry(story_id: str, entry: dict, embed: bool = True):
-    """Insert or update a single lore entry in the index.
-
-    Set embed=False to skip background embedding (e.g. during auto-play).
-    Missing embeddings are backfilled on next server startup.
-    """
+def upsert_entry(story_id: str, entry: dict):
+    """Insert or update a single lore entry in the index."""
     conn = _get_conn(story_id)
     _ensure_tables(conn)
 
@@ -285,8 +281,7 @@ def upsert_entry(story_id: str, entry: dict, embed: bool = True):
 
     if hash_changed:
         _invalidate_cache(story_id)
-        if embed:
-            _embed_single_async(story_id, topic, content)
+        _embed_single_async(story_id, topic, content)
 
 
 # ---------------------------------------------------------------------------
@@ -519,19 +514,17 @@ def search_hybrid(
     query: str,
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     context: dict | None = None,
-    use_embedding: bool = True,
 ) -> list[dict]:
     """Hybrid search: combine keyword + embedding results via RRF.
 
     context: optional dict with "phase" and "status" for category boosting.
-    use_embedding: if False, skip embedding search (saves 1 Gemini API call).
     Returns entries up to token_budget.
     """
     # Keyword search (top 20)
     kw_results = search_lore(story_id, query, limit=20)
 
-    # Embedding search (top 20) — skip if disabled (e.g. auto-play)
-    emb_results = _search_embedding(story_id, query, limit=20) if use_embedding else []
+    # Embedding search (top 20) — returns [] if Gemini is blocked
+    emb_results = _search_embedding(story_id, query, limit=20)
 
     if not kw_results and not emb_results:
         return []
@@ -745,22 +738,17 @@ def search_relevant_lore(
     story_id: str,
     user_message: str,
     context: dict | None = None,
-    use_embedding: bool = True,
 ) -> str:
     """Search for lore relevant to a user message. Returns formatted text for injection.
 
     Uses hybrid search (embedding + keyword with RRF fusion) when embeddings
     are available, falls back to keyword-only search otherwise.
     Results are token-budgeted (~3000 tokens) rather than fixed count.
-
-    Set use_embedding=False to skip embedding search (saves API calls,
-    useful for auto-play where keyword search is sufficient).
     """
     results = search_hybrid(
         story_id, user_message,
         token_budget=DEFAULT_TOKEN_BUDGET,
         context=context,
-        use_embedding=use_embedding,
     )
 
     if not results:
