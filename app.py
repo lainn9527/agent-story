@@ -580,6 +580,9 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
                 # Preserve source provenance if not provided in new entry
                 if "source" not in entry and "source" in existing:
                     entry["source"] = existing["source"]
+                # Preserve edited_by provenance if not provided in new entry
+                if "edited_by" not in entry and "edited_by" in existing:
+                    entry["edited_by"] = existing["edited_by"]
                 lore[i] = entry
                 _save_json(_story_lore_path(story_id), lore)
                 upsert_lore_entry(story_id, entry)
@@ -706,6 +709,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             toc = get_lore_toc(story_id)
             lore = _load_lore(story_id)
             topic_categories = {e.get("topic", ""): e.get("category", "") for e in lore}
+            user_protected = {e.get("topic", "") for e in lore if e.get("edited_by") == "user"}
             existing_titles = get_event_titles(story_id, branch_id)
 
             # Build schema summary for state extraction
@@ -821,6 +825,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     if similar:
                         log.info("    lore merge: '%s' → '%s'", topic, similar)
                         entry["topic"] = similar
+                # Skip if resolved topic is user-edited (protect manual edits)
+                resolved_topic = entry.get("topic", topic)
+                if resolved_topic in user_protected:
+                    log.info("    lore skip (user-edited): '%s'", resolved_topic)
+                    continue
+                entry["edited_by"] = "auto"
                 _save_lore_entry(story_id, entry, prefix_registry=prefix_reg)
                 topic_categories[entry.get("topic", topic)] = category
                 saved_counts["lore"] += 1
@@ -3182,7 +3192,7 @@ def api_lore_entry_create():
     for e in lore:
         if e.get("topic") == topic:
             return jsonify({"ok": False, "error": f"topic '{topic}' already exists"}), 409
-    entry = {"category": category, "topic": topic, "content": content}
+    entry = {"category": category, "topic": topic, "content": content, "edited_by": "user"}
     _save_lore_entry(story_id, entry)
     return jsonify({"ok": True, "entry": entry})
 
@@ -3211,7 +3221,7 @@ def api_lore_entry_update():
                     if any(x.get("topic") == new_topic for x in lore):
                         return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
                     delete_lore_entry(story_id, topic)
-                updated = {"category": new_category, "topic": new_topic, "content": new_content}
+                updated = {"category": new_category, "topic": new_topic, "content": new_content, "edited_by": "user"}
                 if "source" in e:
                     updated["source"] = e["source"]
                 lore[i] = updated
@@ -3375,6 +3385,7 @@ def api_lore_apply():
                 "category": p.get("category", "其他"),
                 "topic": topic,
                 "content": p.get("content", ""),
+                "edited_by": "user",
             }
             _save_lore_entry(story_id, entry)
             applied.append({"action": "add", "topic": topic})
@@ -3383,6 +3394,7 @@ def api_lore_apply():
                 "category": p.get("category", "其他"),
                 "topic": topic,
                 "content": p.get("content", ""),
+                "edited_by": "user",
             }
             _save_lore_entry(story_id, entry)
             applied.append({"action": "edit", "topic": topic})
