@@ -55,6 +55,11 @@ from gm_cheats import (
     get_dice_always_success, set_dice_always_success,
 )
 
+# RisuAI-inspired features
+from scripts.feature_config import get_feature_config
+from scripts.narrative_enhancer import create_enhancer
+from scripts.math_engine import create_math_engine
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -70,6 +75,35 @@ LEGACY_TREE_PATH = os.path.join(DATA_DIR, "timeline_tree.json")
 LEGACY_CHARACTER_STATE_PATH = os.path.join(DATA_DIR, "character_state.json")
 LEGACY_SUMMARY_PATH = os.path.join(DATA_DIR, "story_summary.txt")
 LEGACY_NEW_MESSAGES_PATH = os.path.join(DATA_DIR, "new_messages.json")
+
+# Feature engines cache — lazily initialized per story
+_feature_engines = {}  # story_id -> {"enhancer": ..., "math": ...}
+_feature_lock = threading.Lock()
+
+
+def _get_feature_engines(story_id: str) -> dict:
+    """Get or create feature engines for a story."""
+    with _feature_lock:
+        if story_id not in _feature_engines:
+            # Load feature config
+            feature_config = get_feature_config(story_id, DATA_DIR)
+
+            # Create engines
+            engines = {}
+
+            # Narrative enhancer
+            if feature_config.is_enabled("narrative_enhancer"):
+                config = feature_config.get_feature_config("narrative_enhancer")
+                engines["enhancer"] = create_enhancer(config)
+
+            # Math engine
+            if feature_config.is_enabled("math_engine"):
+                config = feature_config.get_feature_config("math_engine")
+                engines["math"] = create_math_engine(config)
+
+            _feature_engines[story_id] = engines
+
+        return _feature_engines[story_id]
 
 
 def _log_llm_usage(story_id: str, call_type: str, elapsed_s: float, branch_id: str = "", usage: dict | None = None):
@@ -1436,6 +1470,13 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     gm_response = re.sub(r"^---\s*", "", gm_response).strip()
     gm_response = re.sub(r"\n---\n", "\n", gm_response).strip()
 
+    # Feature: Math Engine — process CALC tags early so results can be used in state updates
+    engines = _get_feature_engines(story_id)
+    if "math" in engines:
+        character_state = _load_character_state(story_id, branch_id)
+        variables = {k: v for k, v in character_state.items() if isinstance(v, (int, float))}
+        gm_response = engines["math"].process_text(gm_response, variables)
+
     # Deduplicate reward point hints — keep only the last occurrence
     reward_hints = list(_REWARD_HINT_RE.finditer(gm_response))
     if len(reward_hints) > 1:
@@ -1489,6 +1530,10 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         "npcs_snapshot": _load_npcs(story_id, branch_id),
         "world_day_snapshot": get_world_day(story_id, branch_id),
     }
+
+    # Feature: Narrative Enhancer — apply text transformations at the end
+    if "enhancer" in engines:
+        gm_response = engines["enhancer"].enhance(gm_response, mode="output")
 
     return gm_response, image_info, snapshots
 
@@ -3772,6 +3817,77 @@ def api_config_set():
 
     log.info("api_config_set: updated — provider=%s", cfg.get("provider"))
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Features API (RisuAI-inspired features)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/features", methods=["GET"])
+def api_features_get():
+    """Get all feature configurations for the current story."""
+    story_id = _active_story_id()
+    feature_config = get_feature_config(story_id, DATA_DIR)
+
+    return jsonify({
+        "ok": True,
+        "features": feature_config.get_all()
+    })
+
+
+@app.route("/api/features", methods=["POST"])
+def api_features_set():
+    """Update feature configuration for the current story."""
+    story_id = _active_story_id()
+    data = request.get_json(force=True)
+
+    feature_config = get_feature_config(story_id, DATA_DIR)
+
+    # Update each feature in the request
+    for feature_name, config in data.items():
+        feature_config.update_feature_config(feature_name, config)
+
+    # Clear cached engines to force reload
+    with _feature_lock:
+        if story_id in _feature_engines:
+            del _feature_engines[story_id]
+
+    log.info("api_features_set: updated features for story %s", story_id)
+    return jsonify({"ok": True, "features": feature_config.get_all()})
+
+
+@app.route("/api/features/<feature_name>/enable", methods=["POST"])
+def api_feature_enable(feature_name: str):
+    """Enable a specific feature for the current story."""
+    story_id = _active_story_id()
+    feature_config = get_feature_config(story_id, DATA_DIR)
+
+    feature_config.enable_feature(feature_name)
+
+    # Clear cached engines to force reload
+    with _feature_lock:
+        if story_id in _feature_engines:
+            del _feature_engines[story_id]
+
+    log.info("api_feature_enable: %s for story %s", feature_name, story_id)
+    return jsonify({"ok": True, "enabled": True})
+
+
+@app.route("/api/features/<feature_name>/disable", methods=["POST"])
+def api_feature_disable(feature_name: str):
+    """Disable a specific feature for the current story."""
+    story_id = _active_story_id()
+    feature_config = get_feature_config(story_id, DATA_DIR)
+
+    feature_config.disable_feature(feature_name)
+
+    # Clear cached engines to force reload
+    with _feature_lock:
+        if story_id in _feature_engines:
+            del _feature_engines[story_id]
+
+    log.info("api_feature_disable: %s for story %s", feature_name, story_id)
+    return jsonify({"ok": True, "enabled": False})
 
 
 # ---------------------------------------------------------------------------
