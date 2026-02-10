@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.4] - 2026-02-11
+
+### Fixed
+- User-edited lore entries no longer overwritten by background auto-extraction (`_extract_tags_async`) ([#68])
+
+[#68]: https://github.com/lainn9527/agent-story/pull/68
+
 ## [0.13.3] - 2026-02-10
 
 ### Added
