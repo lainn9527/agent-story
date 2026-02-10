@@ -1961,6 +1961,8 @@ def api_send_stream():
                     pruned = _auto_prune_siblings(story_id, branch_id, gm_msg_index)
 
                     tree = _load_tree(story_id)
+                    tree["last_played_branch_id"] = branch_id
+                    _save_tree(story_id, tree)
                     log.info("/api/send/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
                         "type": "done",
@@ -2000,6 +2002,7 @@ def api_branches():
                if not b.get("deleted") and not b.get("merged") and not b.get("pruned")}
     return jsonify({
         "active_branch_id": tree.get("active_branch_id", "main"),
+        "last_played_branch_id": tree.get("last_played_branch_id"),
         "branches": visible,
     })
 
@@ -2335,6 +2338,7 @@ def api_branches_edit_stream():
         "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
+    tree["last_played_branch_id"] = branch_id
     _save_tree(story_id, tree)
 
     # Build prompt context
@@ -2583,6 +2587,7 @@ def api_branches_regenerate_stream():
         "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
+    tree["last_played_branch_id"] = branch_id
     _save_tree(story_id, tree)
 
     # Build prompt context

@@ -1935,6 +1935,8 @@ body {
 .bt-toolbar-btn.bt-danger:hover { background: rgba(217, 48, 37, 0.1); }
 .bt-toolbar-btn.bt-merge { color: var(--gold); border-color: var(--gold); }
 .bt-toolbar-btn.bt-merge:hover { background: rgba(184, 134, 11, 0.1); }
+.bt-toolbar-btn.bt-continue { color: var(--gold); border-color: var(--gold); }
+.bt-toolbar-btn.bt-continue:hover { background: rgba(184, 134, 11, 0.15); }
 .branch-tree-container {
   flex: 1;
   overflow: auto;
@@ -2071,6 +2073,8 @@ body {
 .bt-action-heart:hover { color: #ff6b9d; background: rgba(255,107,157,0.1); }
 .bt-action-promote { font-size: 0.75rem; }
 .bt-action-promote:hover { color: #4fc3f7; background: rgba(79,195,247,0.1); }
+.bt-action-deep { color: #6bb5ff; }
+.bt-action-deep:hover { color: #9dd0ff; background: rgba(107, 181, 255, 0.1); }
 .bt-protected-badge { font-size: 0.65rem; color: #ff6b9d; margin-left: 2px; }
 
 /* ---------- Message index label (#5) ---------- */
