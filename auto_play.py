@@ -753,18 +753,11 @@ def print_summary(state: RunState, story_id: str, branch_id: str):
 
 def auto_play(config: AutoPlayConfig):
     """Run the auto-play loop."""
-    # Auto-play must use claude_cli to avoid burning Gemini API quota.
-    # Reject if config defaults to gemini and user didn't explicitly override.
+    # Auto-play defaults to claude_cli and disables web search to avoid
+    # any Gemini API usage.  Pass --provider gemini / --web-search to override.
     if config.provider is None:
-        from llm_bridge import get_provider
-        current = get_provider()
-        if current != "claude_cli":
-            log.error(
-                "Auto-play 禁止使用 Gemini（避免消耗 API 額度）。"
-                "請指定 --provider claude_cli，或將 llm_config.json 的 provider 改為 claude_cli"
-            )
-            sys.exit(1)
-    set_provider(config.provider or "claude_cli")
+        config.provider = "claude_cli"
+    set_provider(config.provider)
 
     # Setup or resume
     if config.resume and config.branch_id:
@@ -978,8 +971,8 @@ def parse_args() -> AutoPlayConfig:
         help="Max consecutive errors before stopping (default: 10)",
     )
     parser.add_argument(
-        "--no-web-search", action="store_true",
-        help="Disable web search enrichment (default: enabled)",
+        "--web-search", action="store_true",
+        help="Enable web search enrichment (default: disabled to avoid Gemini usage)",
     )
 
     args = parser.parse_args()
@@ -998,7 +991,7 @@ def parse_args() -> AutoPlayConfig:
         branch_id=args.branch_id,
         provider=args.provider,
         max_errors=args.max_errors,
-        web_search=not args.no_web_search,
+        web_search=args.web_search,
     )
 
     # Load character from file
