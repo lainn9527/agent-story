@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.5] - 2026-02-12
+
+### Fixed
+- Gemini API transient network errors (e.g. "no route to host") now retry with 2s backoff instead of failing immediately ([#69])
+
+[#69]: https://github.com/lainn9527/agent-story/pull/69
+
 ## [0.13.4] - 2026-02-11
 
 ### Fixed
