@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.6] - 2026-02-12
+
+### Added
+- Gemini 3 Flash Preview (`gemini-3-flash-preview`) added to model selector ([#70])
+
+[#70]: https://github.com/lainn9527/agent-story/pull/70
+
 ## [0.13.5] - 2026-02-12
 
 ### Fixed
