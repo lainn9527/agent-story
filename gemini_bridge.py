@@ -167,6 +167,12 @@ def _with_key_fallback(gemini_cfg: dict, fn):
                 continue
             # Non-key error — don't retry
             return None, f"Gemini API HTTP {e.code}：{body_text}"
+        except (OSError, urllib.error.URLError) as e:
+            last_err = f"Gemini API 網路錯誤：{e}"
+            log.info("    gemini_bridge: network error on key ...%s — %s, retrying",
+                     api_key[-6:], e)
+            time.sleep(2)
+            continue
         except Exception as e:
             return None, f"Gemini API 錯誤：{e}"
 
@@ -303,6 +309,7 @@ def call_gemini_gm_stream(
         return
 
     resp = None
+    network_retries = 0
     for key_info in keys:
         api_key = key_info["key"]
         url = (
@@ -324,6 +331,15 @@ def call_gemini_gm_stream(
                 continue
             log.info("    gemini_bridge_stream: HTTP %d — %s", e.code, body_text)
             yield ("error", f"Gemini API HTTP {e.code}：{body_text}")
+            return
+        except (OSError, urllib.error.URLError) as e:
+            network_retries += 1
+            if network_retries <= 2:
+                log.info("    gemini_bridge_stream: network error (%s), retry %d/2", e, network_retries)
+                time.sleep(2)
+                continue
+            log.info("    gemini_bridge_stream: network error (%s), retries exhausted", e)
+            yield ("error", f"Gemini API 連線失敗（重試後仍失敗）：{e}")
             return
         except Exception as e:
             log.info("    gemini_bridge_stream: EXCEPTION on connect — %s", e)
