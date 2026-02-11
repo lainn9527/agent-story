@@ -153,28 +153,33 @@ def _with_key_fallback(gemini_cfg: dict, fn):
         return None, "所有 Gemini API key 都在冷卻中，請稍後再試"
 
     last_err = None
-    for key_info in keys:
-        api_key = key_info["key"]
-        try:
-            return fn(api_key), None
-        except urllib.error.HTTPError as e:
-            body_text = e.read().decode("utf-8", errors="replace")[:300]
-            if _is_key_error(e.code, body_text):
-                mark_rate_limited(api_key)
-                last_err = f"API key ...{api_key[-6:]} failed (HTTP {e.code})"
-                log.info("    gemini_bridge: HTTP %d on key ...%s, trying next — %s",
-                         e.code, api_key[-6:], body_text[:100])
-                continue
-            # Non-key error — don't retry
-            return None, f"Gemini API HTTP {e.code}：{body_text}"
-        except (OSError, urllib.error.URLError) as e:
-            last_err = f"Gemini API 網路錯誤：{e}"
-            log.info("    gemini_bridge: network error on key ...%s — %s, retrying",
-                     api_key[-6:], e)
-            time.sleep(2)
-            continue
-        except Exception as e:
-            return None, f"Gemini API 錯誤：{e}"
+    max_network_retries = 2
+    for attempt in range(1 + max_network_retries):
+        for key_info in keys:
+            api_key = key_info["key"]
+            try:
+                return fn(api_key), None
+            except urllib.error.HTTPError as e:
+                body_text = e.read().decode("utf-8", errors="replace")[:300]
+                if _is_key_error(e.code, body_text):
+                    mark_rate_limited(api_key)
+                    last_err = f"API key ...{api_key[-6:]} failed (HTTP {e.code})"
+                    log.info("    gemini_bridge: HTTP %d on key ...%s, trying next — %s",
+                             e.code, api_key[-6:], body_text[:100])
+                    continue
+                # Non-key error — don't retry
+                return None, f"Gemini API HTTP {e.code}：{body_text}"
+            except (OSError, urllib.error.URLError) as e:
+                last_err = f"Gemini API 網路錯誤：{e}"
+                log.info("    gemini_bridge: network error on key ...%s — %s, retry %d/%d",
+                         api_key[-6:], e, attempt + 1, 1 + max_network_retries)
+                time.sleep(2)
+                break  # break inner key loop to restart from first key
+            except Exception as e:
+                return None, f"Gemini API 錯誤：{e}"
+        else:
+            # Inner loop exhausted all keys (key errors) without network error break
+            break
 
     return None, f"【系統錯誤】所有 API key 都失敗：{last_err}"
 
@@ -309,45 +314,52 @@ def call_gemini_gm_stream(
         return
 
     resp = None
-    network_retries = 0
-    for key_info in keys:
-        api_key = key_info["key"]
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-            f":streamGenerateContent?alt=sse&key={api_key}"
-        )
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            resp = urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx)
-            break  # connected OK
-        except urllib.error.HTTPError as e:
-            body_text = e.read().decode("utf-8", errors="replace")[:300]
-            if _is_key_error(e.code, body_text):
-                mark_rate_limited(api_key)
-                log.info("    gemini_bridge_stream: HTTP %d on key ...%s, trying next", e.code, api_key[-6:])
-                continue
-            log.info("    gemini_bridge_stream: HTTP %d — %s", e.code, body_text)
-            yield ("error", f"Gemini API HTTP {e.code}：{body_text}")
-            return
-        except (OSError, urllib.error.URLError) as e:
-            network_retries += 1
-            if network_retries <= 2:
-                log.info("    gemini_bridge_stream: network error (%s), retry %d/2", e, network_retries)
+    last_network_err = None
+    max_network_retries = 2
+    for attempt in range(1 + max_network_retries):
+        for key_info in keys:
+            api_key = key_info["key"]
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+                f":streamGenerateContent?alt=sse&key={api_key}"
+            )
+            req = urllib.request.Request(
+                url, data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                resp = urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx)
+                break  # connected OK
+            except urllib.error.HTTPError as e:
+                body_text = e.read().decode("utf-8", errors="replace")[:300]
+                if _is_key_error(e.code, body_text):
+                    mark_rate_limited(api_key)
+                    log.info("    gemini_bridge_stream: HTTP %d on key ...%s, trying next", e.code, api_key[-6:])
+                    continue
+                log.info("    gemini_bridge_stream: HTTP %d — %s", e.code, body_text)
+                yield ("error", f"Gemini API HTTP {e.code}：{body_text}")
+                return
+            except (OSError, urllib.error.URLError) as e:
+                last_network_err = e
+                log.info("    gemini_bridge_stream: network error (%s), retry %d/%d",
+                         e, attempt + 1, 1 + max_network_retries)
                 time.sleep(2)
-                continue
-            log.info("    gemini_bridge_stream: network error (%s), retries exhausted", e)
-            yield ("error", f"Gemini API 連線失敗（重試後仍失敗）：{e}")
-            return
-        except Exception as e:
-            log.info("    gemini_bridge_stream: EXCEPTION on connect — %s", e)
-            yield ("error", f"Gemini API 連線失敗：{e}")
-            return
+                break  # break inner key loop to restart from first key
+            except Exception as e:
+                log.info("    gemini_bridge_stream: EXCEPTION on connect — %s", e)
+                yield ("error", f"Gemini API 連線失敗：{e}")
+                return
+        else:
+            # Inner loop exhausted all keys (key errors) without break
+            break
+        if resp is not None:
+            break  # connected OK in inner loop
 
     if resp is None:
-        yield ("error", "所有 Gemini API key 都失敗")
+        if last_network_err:
+            yield ("error", f"Gemini API 連線失敗（重試後仍失敗）：{last_network_err}")
+        else:
+            yield ("error", "所有 Gemini API key 都失敗")
         return
 
     # Set socket-level read timeout so readline() won't block forever
