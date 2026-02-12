@@ -726,7 +726,8 @@ body {
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: background 0.2s;
+  transition: background 0.2s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .edit-save-btn {
@@ -738,6 +739,11 @@ body {
   background: var(--accent-dim);
 }
 
+.edit-save-btn:active {
+  background: var(--accent-dim);
+  transform: scale(0.95);
+}
+
 .edit-cancel-btn {
   background: transparent;
   color: var(--text-dim);
@@ -747,6 +753,11 @@ body {
 .edit-cancel-btn:hover {
   color: var(--text);
   border-color: var(--text-dim);
+}
+
+.edit-cancel-btn:active {
+  background: rgba(255, 255, 255, 0.05);
+  transform: scale(0.95);
 }
 
 .message.editing .msg-action-btn {
@@ -1859,6 +1870,14 @@ body {
     border-left: 2px solid rgba(212, 168, 83, 0.3);
     padding-left: 8px;
     text-indent: 0;
+  }
+
+  /* Edit buttons: larger touch targets (min 44px) */
+  .edit-save-btn,
+  .edit-cancel-btn {
+    padding: 10px 20px;
+    font-size: 0.95rem;
+    min-height: 44px;
   }
 
   /* Action buttons */
