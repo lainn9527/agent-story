@@ -225,7 +225,7 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 
 
 # ---------------------------------------------------------------------------
-# Embedding (local bge-m3 via fastembed — no API calls)
+# Embedding (local jina-embeddings-v2-base-zh via fastembed — no API calls)
 # ---------------------------------------------------------------------------
 
 _embed_model = None
@@ -244,7 +244,7 @@ def _get_embed_model():
     return _embed_model
 
 
-def embed_text(text: str, **_kwargs) -> list[float] | None:
+def embed_text(text: str) -> list[float] | None:
     """Embed a single text locally via jina-zh. Returns 768-dim vector or None."""
     try:
         model = _get_embed_model()
@@ -255,7 +255,7 @@ def embed_text(text: str, **_kwargs) -> list[float] | None:
         return None
 
 
-def embed_texts_batch(texts: list[str], **_kwargs) -> list[list[float]] | None:
+def embed_texts_batch(texts: list[str]) -> list[list[float]] | None:
     """Batch-embed texts locally via jina-zh. Returns list of 768-dim vectors or None."""
     if not texts:
         return []
