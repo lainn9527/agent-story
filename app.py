@@ -548,6 +548,10 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             "- 描寫應包含感官細節（觸覺、視覺、聽覺等），保持文學性與沉浸感。\n"
             "- 場景進行中不要自行中斷或切換，持續描寫直到玩家主動推進劇情。\n"
             "- 角色的情感反應、對話和身體語言都要細膩呈現。\n"
+            "- 下方的偏好設定是玩家希望在【整場親密互動過程中】逐漸體驗的元素，"
+            "不要在單次回覆中塞入所有元素。每次回覆只自然融入 1-3 個元素，"
+            "讓場景像真實互動一樣循序漸進地發展。根據劇情節奏和玩家的回應，"
+            "逐步引入新的元素。\n"
         )
         prefs_text = _format_nsfw_preferences(_load_nsfw_preferences(story_id))
         if prefs_text:
