@@ -3617,6 +3617,19 @@ async function sendMessage() {
         loadNpcs();
         loadEvents();
 
+        // Delayed re-fetch: background tag extraction may update state after streaming ends
+        const statusSnapshot = JSON.stringify(status);
+        setTimeout(async () => {
+          if (currentBranchId !== gmMsg.owner_branch_id) return; // user switched branch
+          const fresh = await API.status(currentBranchId);
+          if (JSON.stringify(fresh) !== statusSnapshot) {
+            renderCharacterStatus(fresh);
+            updateWorldDayDisplay(fresh.world_day);
+            loadNpcs();
+            loadEvents();
+          }
+        }, 5000);
+
         // Refresh branch list after background tag extraction (title generation)
         pollForBranchTitle(currentBranchId);
 
