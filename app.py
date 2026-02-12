@@ -311,6 +311,13 @@ _TEAM_RULES = {
 }
 
 
+def _rel_to_str(val) -> str:
+    """Normalize a relationship value to string (may be str or dict)."""
+    if isinstance(val, dict):
+        return val.get("summary") or val.get("description") or val.get("type") or ""
+    return val or ""
+
+
 def _classify_npc(npc: dict, rels: dict) -> str:
     """Classify an NPC into a relationship category.
 
@@ -321,7 +328,7 @@ def _classify_npc(npc: dict, rels: dict) -> str:
     status = (npc.get("current_status") or "").lower()
     role = (npc.get("role") or "").lower()
     rel_player = (npc.get("relationship_to_player") or "").lower()
-    char_rel = (rels.get(name) or "").lower()
+    char_rel = _rel_to_str(rels.get(name)).lower()
     combined = f"{status} {role} {rel_player} {char_rel}"
 
     # Dead NPCs first — GM must not resurrect them
@@ -376,7 +383,10 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     if state.get("gene_lock"):
         lines.append(f"- 基因鎖：{state['gene_lock']}")
     if state.get("reward_points") is not None:
-        lines.append(f"- 獎勵點餘額：{state['reward_points']:,} 點")
+        try:
+            lines.append(f"- 獎勵點餘額：{int(state['reward_points']):,} 點")
+        except (ValueError, TypeError):
+            lines.append(f"- 獎勵點餘額：{state['reward_points']} 點")
 
     # 4. Key inventory (top 5 items, name only)
     inv = state.get("inventory", [])
@@ -391,7 +401,7 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
         for npc in npcs:
             name = npc.get("name", "?")
             cat = _classify_npc(npc, rels)
-            rel = rels.get(name) or npc.get("relationship_to_player", "")
+            rel = _rel_to_str(rels.get(name)) or npc.get("relationship_to_player", "")
             entry = f"{name}（{rel}）" if rel else name
             groups.setdefault(cat, []).append(entry)
         labels = {"ally": "隊友", "hostile": "敵對", "captured": "俘虜",
@@ -401,7 +411,7 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
             if members:
                 lines.append(f"- {labels[cat]}：{'、'.join(members)}")
     elif rels:
-        rel_parts = [f"{name}（{rel}）" for name, rel in rels.items()]
+        rel_parts = [f"{name}（{_rel_to_str(rel)}）" for name, rel in rels.items()]
         lines.append(f"- 人際關係：{'、'.join(rel_parts)}")
 
     if not lines:
