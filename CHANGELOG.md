@@ -5,6 +5,21 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-02-12
+
+### Added
+- Critical facts injection into GM system prompt: current phase, world time, gene lock, reward points, key inventory, NPC relationship matrix ([#74])
+- Claude CLI tool access (`--allowedTools Read,Grep`) for GM fact-checking against game data files ([#74])
+- `_rel_to_str()` helper for normalizing dict-type relationship values ([#74])
+- `_classify_npc()` with combined signal classification (dead > hostile > captured > ally > neutral) ([#74])
+
+### Fixed
+- Dict-type relationship values in `character_state.json` no longer crash NPC classification ([#74])
+- Float-type `world_day` values handled correctly in critical facts ([#74])
+- Reward points format safely handles non-numeric values ([#74])
+
+[#74]: https://github.com/lainn9527/agent-story/pull/74
+
 ## [0.14.0] - 2026-02-12
 
 ### Added
