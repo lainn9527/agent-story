@@ -688,6 +688,10 @@ async function init() {
       };
     }
 
+    // Init addon panel
+    initAddonPanel();
+    loadPistolModeStatus();
+
     // Start live polling if current branch is auto-play
     if (isAutoBranch(currentBranchId)) {
       startLivePolling(currentBranchId);
@@ -1523,6 +1527,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   loadEvents();
   loadSummaries();
   loadDiceCheatStatus();
+  loadPistolModeStatus();
 
   // Show/hide "load earlier" button for auto branches with truncated messages
   if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
@@ -2856,6 +2861,236 @@ async function toggleDiceCheat() {
     updateCheatBadge(newState);
   } catch (e) {
     console.error("toggleDiceCheat error:", e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Addon Panel (附加功能)
+// ---------------------------------------------------------------------------
+
+function initAddonPanel() {
+  const btn = document.getElementById("addon-panel-btn");
+  const panel = document.getElementById("addon-panel");
+  if (!btn || !panel) return;
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (panel.classList.contains("hidden")) {
+      openAddonPanel();
+    } else {
+      closeAddonPanel();
+    }
+  });
+
+  // Close on outside click
+  document.addEventListener("click", (e) => {
+    if (!panel.classList.contains("hidden") && !panel.contains(e.target) && e.target !== btn) {
+      closeAddonPanel();
+    }
+  });
+
+  // Prevent panel clicks from closing
+  panel.addEventListener("click", (e) => e.stopPropagation());
+}
+
+async function openAddonPanel() {
+  const panel = document.getElementById("addon-panel");
+  if (!panel) return;
+  panel.classList.remove("hidden");
+  await loadAddonPanelState();
+}
+
+function closeAddonPanel() {
+  const panel = document.getElementById("addon-panel");
+  if (panel) panel.classList.add("hidden");
+}
+
+async function loadAddonPanelState() {
+  // Load model config
+  try {
+    const cfg = await API.getConfig();
+    if (cfg.ok) {
+      const provSel = document.getElementById("addon-provider-select");
+      const modelSel = document.getElementById("addon-model-select");
+
+      provSel.innerHTML = "";
+      for (const [val, label] of Object.entries(PROVIDER_LABELS)) {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (val === cfg.provider) opt.selected = true;
+        provSel.appendChild(opt);
+      }
+
+      function updateAddonModelDropdown(provider, currentModel) {
+        modelSel.innerHTML = "";
+        const models = provider === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+        for (const m of models) {
+          const opt = document.createElement("option");
+          opt.value = m;
+          opt.textContent = m;
+          if (m === currentModel) opt.selected = true;
+          modelSel.appendChild(opt);
+        }
+      }
+
+      const currentModel = cfg.provider === "gemini" ? cfg.gemini.model : cfg.claude_cli.model;
+      updateAddonModelDropdown(cfg.provider, currentModel);
+
+      provSel.onchange = async () => {
+        const newProv = provSel.value;
+        const models = newProv === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+        updateAddonModelDropdown(newProv, models[0]);
+        const update = { provider: newProv };
+        if (newProv === "gemini") update.gemini = { model: models[0] };
+        else update.claude_cli = { model: models[0] };
+        await API.setConfig(update);
+      };
+
+      modelSel.onchange = async () => {
+        const prov = provSel.value;
+        const update = {};
+        if (prov === "gemini") update.gemini = { model: modelSel.value };
+        else update.claude_cli = { model: modelSel.value };
+        await API.setConfig(update);
+      };
+    }
+  } catch (e) {
+    console.error("loadAddonPanelState config error:", e);
+  }
+
+  // Load dice cheat status
+  try {
+    const res = await fetch(`/api/cheats/dice?branch_id=${currentBranchId}`);
+    const data = await res.json();
+    const btn = document.getElementById("addon-dice-btn");
+    if (btn) {
+      const active = !!data.always_success;
+      btn.textContent = active ? "ON" : "OFF";
+      btn.classList.toggle("active", active);
+    }
+  } catch (e) {
+    console.error("loadAddonPanelState dice error:", e);
+  }
+
+  // Load pistol mode status
+  try {
+    const res = await fetch(`/api/cheats/pistol?branch_id=${currentBranchId}`);
+    const data = await res.json();
+    const btn = document.getElementById("addon-pistol-btn");
+    if (btn) {
+      const active = !!data.pistol_mode;
+      btn.textContent = active ? "ON" : "OFF";
+      btn.classList.toggle("active", active);
+    }
+  } catch (e) {
+    console.error("loadAddonPanelState pistol error:", e);
+  }
+
+  // Load NSFW preferences
+  try {
+    const res = await fetch("/api/nsfw-preferences");
+    const data = await res.json();
+    const ta = document.getElementById("addon-nsfw-prefs");
+    if (ta) ta.value = data.preferences || "";
+  } catch (e) {
+    console.error("loadAddonPanelState prefs error:", e);
+  }
+
+  updateAddonBtnIndicator();
+}
+
+async function toggleAddonDiceCheat() {
+  const btn = document.getElementById("addon-dice-btn");
+  if (!btn) return;
+  const isActive = btn.classList.contains("active");
+  const newState = !isActive;
+  try {
+    await fetch("/api/cheats/dice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId, always_success: newState }),
+    });
+    btn.textContent = newState ? "ON" : "OFF";
+    btn.classList.toggle("active", newState);
+    // Sync drawer button
+    const drawerBtn = document.getElementById("dice-cheat-btn");
+    if (drawerBtn) {
+      drawerBtn.textContent = newState ? "ON" : "OFF";
+      drawerBtn.classList.toggle("active", newState);
+    }
+    updateCheatBadge(newState);
+    updateAddonBtnIndicator();
+  } catch (e) {
+    console.error("toggleAddonDiceCheat error:", e);
+  }
+}
+
+async function togglePistolMode() {
+  const btn = document.getElementById("addon-pistol-btn");
+  if (!btn) return;
+  const isActive = btn.classList.contains("active");
+  const newState = !isActive;
+  try {
+    await fetch("/api/cheats/pistol", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId, pistol_mode: newState }),
+    });
+    btn.textContent = newState ? "ON" : "OFF";
+    btn.classList.toggle("active", newState);
+    updatePistolBadge(newState);
+    updateAddonBtnIndicator();
+  } catch (e) {
+    console.error("togglePistolMode error:", e);
+  }
+}
+
+async function saveNsfwPreferences() {
+  const ta = document.getElementById("addon-nsfw-prefs");
+  const saveBtn = document.getElementById("addon-save-prefs-btn");
+  if (!ta) return;
+  try {
+    await fetch("/api/nsfw-preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferences: ta.value }),
+    });
+    if (saveBtn) {
+      saveBtn.textContent = "已儲存";
+      saveBtn.classList.add("saved");
+      setTimeout(() => {
+        saveBtn.textContent = "儲存偏好";
+        saveBtn.classList.remove("saved");
+      }, 2000);
+    }
+  } catch (e) {
+    console.error("saveNsfwPreferences error:", e);
+  }
+}
+
+function updatePistolBadge(active) {
+  const badge = document.getElementById("pistol-badge");
+  if (badge) badge.classList.toggle("visible", active);
+}
+
+function updateAddonBtnIndicator() {
+  const btn = document.getElementById("addon-panel-btn");
+  if (!btn) return;
+  const diceBtn = document.getElementById("addon-dice-btn");
+  const pistolBtn = document.getElementById("addon-pistol-btn");
+  const anyActive = (diceBtn && diceBtn.classList.contains("active")) ||
+                    (pistolBtn && pistolBtn.classList.contains("active"));
+  btn.classList.toggle("addon-active", anyActive);
+}
+
+async function loadPistolModeStatus() {
+  try {
+    const res = await fetch(`/api/cheats/pistol?branch_id=${currentBranchId}`);
+    const data = await res.json();
+    updatePistolBadge(!!data.pistol_mode);
+  } catch (e) {
+    console.error("loadPistolModeStatus error:", e);
   }
 }
 

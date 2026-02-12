@@ -53,6 +53,7 @@ from lore_organizer import (
 from gm_cheats import (
     is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats,
     get_dice_always_success, set_dice_always_success,
+    get_pistol_mode, set_pistol_mode,
 )
 
 # ---------------------------------------------------------------------------
@@ -207,6 +208,19 @@ def _story_messages_path(story_id: str, branch_id: str) -> str:
 
 def _story_character_state_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "character_state.json")
+
+
+def _nsfw_preferences_path(story_id: str) -> str:
+    return os.path.join(_story_dir(story_id), "nsfw_preferences.txt")
+
+
+def _load_nsfw_preferences(story_id: str) -> str:
+    path = _nsfw_preferences_path(story_id)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except (FileNotFoundError, OSError):
+        return ""
 
 
 def _story_system_prompt_path(story_id: str) -> str:
@@ -492,6 +506,21 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     # Phase 2: Append tool instructions for Claude CLI only
     if get_provider() == "claude_cli":
         result += _build_tool_instructions(story_id, branch_id)
+
+    # Pistol mode (手槍模式) — inject NSFW scene instructions
+    story_dir = _story_dir(story_id)
+    if get_pistol_mode(story_dir, branch_id):
+        pistol_block = (
+            "\n\n## 親密場景指示（手槍模式已啟用）\n"
+            "- 當劇情自然發展到親密、浪漫或情色場景時，請詳細描寫，不要跳過或淡化。\n"
+            "- 描寫應包含感官細節（觸覺、視覺、聽覺等），保持文學性與沉浸感。\n"
+            "- 場景進行中不要自行中斷或切換，持續描寫直到玩家主動推進劇情。\n"
+            "- 角色的情感反應、對話和身體語言都要細膩呈現。\n"
+        )
+        prefs = _load_nsfw_preferences(story_id)
+        if prefs:
+            pistol_block += f"- 玩家偏好設定：{prefs}\n"
+        result += pistol_block
 
     return result
 
@@ -2146,6 +2175,7 @@ def api_status():
     state["world_day"] = get_world_day(story_id, branch_id)
     state["dice_modifier"] = get_dice_modifier(_story_dir(story_id), branch_id)
     state["dice_always_success"] = get_dice_always_success(_story_dir(story_id), branch_id)
+    state["pistol_mode"] = get_pistol_mode(_story_dir(story_id), branch_id)
     return jsonify(state)
 
 
@@ -3997,6 +4027,52 @@ def api_cheats_dice_set():
         log.info("cheats/dice: always_success=%s branch=%s", enabled, branch_id)
 
     return jsonify({"ok": True, "always_success": get_dice_always_success(story_dir, branch_id)})
+
+
+@app.route("/api/cheats/pistol", methods=["GET"])
+def api_cheats_pistol_get():
+    """Get pistol mode (手槍模式) status for current branch."""
+    story_id = _active_story_id()
+    branch_id = request.args.get("branch_id", "main")
+    story_dir = _story_dir(story_id)
+    return jsonify({"pistol_mode": get_pistol_mode(story_dir, branch_id)})
+
+
+@app.route("/api/cheats/pistol", methods=["POST"])
+def api_cheats_pistol_set():
+    """Toggle pistol mode (手槍模式)."""
+    body = request.get_json(force=True)
+    story_id = _active_story_id()
+    branch_id = body.get("branch_id", "main")
+    story_dir = _story_dir(story_id)
+
+    if "pistol_mode" in body:
+        enabled = bool(body["pistol_mode"])
+        set_pistol_mode(story_dir, branch_id, enabled)
+        log.info("cheats/pistol: pistol_mode=%s branch=%s", enabled, branch_id)
+
+    return jsonify({"ok": True, "pistol_mode": get_pistol_mode(story_dir, branch_id)})
+
+
+@app.route("/api/nsfw-preferences", methods=["GET"])
+def api_nsfw_preferences_get():
+    """Get NSFW preferences text for current story."""
+    story_id = _active_story_id()
+    return jsonify({"preferences": _load_nsfw_preferences(story_id)})
+
+
+@app.route("/api/nsfw-preferences", methods=["POST"])
+def api_nsfw_preferences_set():
+    """Save NSFW preferences text for current story."""
+    body = request.get_json(force=True)
+    story_id = _active_story_id()
+    text = body.get("preferences", "").strip()
+    path = _nsfw_preferences_path(story_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    log.info("nsfw-preferences: saved %d chars for story=%s", len(text), story_id)
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

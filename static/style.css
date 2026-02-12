@@ -868,6 +868,7 @@ body {
   padding: 12px 18%;
   background: var(--bg-main);
   border-top: none;
+  position: relative;
 }
 
 #input-area-inner {
@@ -926,6 +927,144 @@ body {
 #send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---------- Addon Panel Button ---------- */
+#addon-panel-btn {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+#addon-panel-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+#addon-panel-btn.addon-active {
+  border-color: #4a8;
+  color: #6fc;
+  box-shadow: 0 0 8px rgba(68, 170, 136, 0.3);
+}
+
+/* ---------- Addon Panel Popup ---------- */
+.addon-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 18%;
+  width: 280px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 400;
+  padding: 0;
+  overflow: hidden;
+}
+.addon-panel.hidden {
+  display: none;
+}
+.addon-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.addon-section:last-child {
+  border-bottom: none;
+}
+.addon-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.addon-field {
+  margin-bottom: 8px;
+}
+.addon-field label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.addon-field select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-main);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239b9689' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+.addon-field select:hover,
+.addon-field select:focus {
+  border-color: var(--gold);
+}
+.addon-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-main);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  min-height: 50px;
+}
+.addon-field textarea:focus {
+  border-color: var(--gold);
+}
+.addon-toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+.addon-save-btn {
+  width: 100%;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.addon-save-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.addon-save-btn.saved {
+  border-color: #4a8;
+  color: #6fc;
+  background: rgba(68, 170, 136, 0.1);
 }
 
 /* ---------- Modal (New Story) ---------- */
@@ -1747,6 +1886,22 @@ body {
   display: inline-flex;
 }
 
+/* Header pistol badge */
+#pistol-badge {
+  display: none;
+  align-items: center;
+  margin-left: 4px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #f9a8d4;
+  background: rgba(249, 168, 212, 0.15);
+}
+#pistol-badge.visible {
+  display: inline-flex;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 768px) {
   :root {
@@ -1905,6 +2060,13 @@ body {
 
   .header-sub { display: none; }
   #world-day-display { font-size: 0.75rem; }
+
+  /* Addon panel: near full-width on mobile */
+  .addon-panel {
+    right: 20px;
+    left: 20px;
+    width: auto;
+  }
 
   /* Branch tree: always show action buttons on mobile (no hover) */
   .bt-actions { opacity: 1 !important; }
