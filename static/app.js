@@ -2918,54 +2918,38 @@ function closeAddonPanel() {
 }
 
 async function loadAddonPanelState() {
-  // Load model config
+  // Load model config — combined provider+model select with optgroups
   try {
     const cfg = await API.getConfig();
     if (cfg.ok) {
-      const provSel = document.getElementById("addon-provider-select");
-      const modelSel = document.getElementById("addon-model-select");
-
-      provSel.innerHTML = "";
-      for (const [val, label] of Object.entries(PROVIDER_LABELS)) {
-        const opt = document.createElement("option");
-        opt.value = val;
-        opt.textContent = label;
-        if (val === cfg.provider) opt.selected = true;
-        provSel.appendChild(opt);
-      }
-
-      function updateAddonModelDropdown(provider, currentModel) {
-        modelSel.innerHTML = "";
-        const models = provider === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
-        for (const m of models) {
-          const opt = document.createElement("option");
-          opt.value = m;
-          opt.textContent = m;
-          if (m === currentModel) opt.selected = true;
-          modelSel.appendChild(opt);
+      const sel = document.getElementById("addon-model-combined");
+      if (sel) {
+        sel.innerHTML = "";
+        const currentModel = cfg.provider === "gemini" ? cfg.gemini.model : cfg.claude_cli.model;
+        const providerModels = { gemini: GEMINI_MODELS, claude_cli: CLAUDE_MODELS };
+        for (const [prov, models] of Object.entries(providerModels)) {
+          const group = document.createElement("optgroup");
+          group.label = PROVIDER_LABELS[prov] || prov;
+          for (const m of models) {
+            const opt = document.createElement("option");
+            opt.value = prov + "|" + m;
+            opt.textContent = m;
+            if (prov === cfg.provider && m === currentModel) opt.selected = true;
+            group.appendChild(opt);
+          }
+          sel.appendChild(group);
         }
+
+        sel.onchange = async () => {
+          const [newProv, newModel] = sel.value.split("|");
+          const update = { provider: newProv };
+          if (newProv === "gemini") update.gemini = { model: newModel };
+          else update.claude_cli = { model: newModel };
+          await API.setConfig(update);
+          // Sync drawer dropdowns
+          loadConfigPanel();
+        };
       }
-
-      const currentModel = cfg.provider === "gemini" ? cfg.gemini.model : cfg.claude_cli.model;
-      updateAddonModelDropdown(cfg.provider, currentModel);
-
-      provSel.onchange = async () => {
-        const newProv = provSel.value;
-        const models = newProv === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
-        updateAddonModelDropdown(newProv, models[0]);
-        const update = { provider: newProv };
-        if (newProv === "gemini") update.gemini = { model: models[0] };
-        else update.claude_cli = { model: models[0] };
-        await API.setConfig(update);
-      };
-
-      modelSel.onchange = async () => {
-        const prov = provSel.value;
-        const update = {};
-        if (prov === "gemini") update.gemini = { model: modelSel.value };
-        else update.claude_cli = { model: modelSel.value };
-        await API.setConfig(update);
-      };
     }
   } catch (e) {
     console.error("loadAddonPanelState config error:", e);
