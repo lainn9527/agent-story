@@ -311,12 +311,47 @@ _TEAM_RULES = {
 }
 
 
-def _build_critical_facts(story_id: str, branch_id: str) -> str:
-    """Build critical facts section for system prompt to prevent factual inconsistencies."""
+def _classify_npc(npc: dict, rels: dict) -> str:
+    """Classify an NPC into a relationship category.
+
+    Uses current_status, character_state relationships, role, and
+    relationship_to_player — in that priority order.
+    """
+    name = npc.get("name", "")
+    status = (npc.get("current_status") or "").lower()
+    role = (npc.get("role") or "").lower()
+    rel_player = (npc.get("relationship_to_player") or "").lower()
+    char_rel = (rels.get(name) or "").lower()
+    combined = f"{status} {role} {rel_player} {char_rel}"
+
+    # Dead NPCs first — GM must not resurrect them
+    if any(k in status for k in ("死亡", "已故", "陣亡")):
+        return "dead"
+    # Hostile
+    if any(k in combined for k in ("敵", "對手", "威脅", "仇")):
+        return "hostile"
+    # Captured / prisoner
+    if any(k in combined for k in ("俘", "囚", "關押")):
+        return "captured"
+    # Ally — broad keyword coverage for production data
+    ally_kw = ("隊友", "戰友", "同伴", "盟友", "夥伴", "伴侶", "隨從",
+               "忠誠", "信任", "兄弟", "好感", "崇拜", "曖昧", "約定")
+    if any(k in combined for k in ally_kw):
+        return "ally"
+    # NPC appears in character_state relationships → likely ally
+    if name in rels:
+        return "ally"
+    return "neutral"
+
+
+def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list[dict]) -> str:
+    """Build critical facts section for system prompt to prevent factual inconsistencies.
+
+    Accepts pre-loaded state and npcs to avoid redundant file reads.
+    """
     lines = []
 
-    # 1. Current phase from character state
-    state = _load_character_state(story_id, branch_id)
+    # 1. Current phase
     if state.get("current_phase"):
         lines.append(f"- 當前階段：{state['current_phase']}")
 
@@ -337,37 +372,35 @@ def _build_critical_facts(story_id: str, branch_id: str) -> str:
             period = "夜晚"
         lines.append(f"- 當前時間：世界第 {day} 天·{period}")
 
-    # 3. NPC relationship matrix (grouped by role)
-    npcs = _load_npcs(story_id, branch_id)
-    rels = state.get("relationships", {})
+    # 3. Key character stats
+    if state.get("gene_lock"):
+        lines.append(f"- 基因鎖：{state['gene_lock']}")
+    if state.get("reward_points") is not None:
+        lines.append(f"- 獎勵點餘額：{state['reward_points']:,} 點")
 
+    # 4. Key inventory (top 5 items, name only)
+    inv = state.get("inventory", [])
+    if inv:
+        item_names = [item.split("—")[0].split(" — ")[0].strip() for item in inv[:5]]
+        lines.append(f"- 關鍵道具：{'、'.join(item_names)}")
+
+    # 5. NPC relationship matrix
+    rels = state.get("relationships", {})
     if npcs:
-        allies, hostile, captured, neutral = [], [], [], []
+        groups: dict[str, list[str]] = {}
         for npc in npcs:
             name = npc.get("name", "?")
-            role = npc.get("role", "")
-            # Prefer character_state relationship (more up-to-date), fall back to NPC data
+            cat = _classify_npc(npc, rels)
             rel = rels.get(name) or npc.get("relationship_to_player", "")
             entry = f"{name}（{rel}）" if rel else name
-            role_lower = role.lower() if role else ""
-            if any(k in role_lower for k in ("隊友", "戰友", "同伴")):
-                allies.append(entry)
-            elif any(k in role_lower for k in ("敵", "對手")):
-                hostile.append(entry)
-            elif any(k in role_lower for k in ("俘", "囚")):
-                captured.append(entry)
-            else:
-                neutral.append(entry)
-        if allies:
-            lines.append(f"- 隊友：{'、'.join(allies)}")
-        if hostile:
-            lines.append(f"- 敵對：{'、'.join(hostile)}")
-        if captured:
-            lines.append(f"- 俘虜：{'、'.join(captured)}")
-        if neutral:
-            lines.append(f"- 其他NPC：{'、'.join(neutral)}")
+            groups.setdefault(cat, []).append(entry)
+        labels = {"ally": "隊友", "hostile": "敵對", "captured": "俘虜",
+                  "dead": "已故", "neutral": "其他NPC"}
+        for cat in ("ally", "hostile", "captured", "dead", "neutral"):
+            members = groups.get(cat)
+            if members:
+                lines.append(f"- {labels[cat]}：{'、'.join(members)}")
     elif rels:
-        # Fallback to character_state relationships when no NPC data
         rel_parts = [f"{name}（{rel}）" for name, rel in rels.items()]
         lines.append(f"- 人際關係：{'、'.join(rel_parts)}")
 
@@ -380,14 +413,18 @@ def _build_tool_instructions(story_id: str, branch_id: str) -> str:
     """Build tool usage instructions for Claude CLI GM (Phase 2: fact-checking via Read/Grep)."""
     npcs_path = _story_npcs_path(story_id, branch_id)
     state_path = _story_character_state_path(story_id, branch_id)
-    world_day_path = os.path.join(_branch_dir(story_id, branch_id), "world_day.json")
+    # Construct path without _branch_dir() to avoid os.makedirs side effect
+    world_day_path = os.path.join(_story_dir(story_id), "branches", branch_id, "world_day.json")
+    lore_path = os.path.join(_story_dir(story_id), "world_lore.json")
     return (
-        "\n\n## 資料查詢\n"
-        "你可以使用 Read 工具查看遊戲檔案來確認事實。\n"
-        "當你不確定某個 NPC 的關係、玩家的道具、或歷史事件時，請先查詢再回答。\n"
-        f"- NPC 資料：{npcs_path}\n"
-        f"- 角色狀態：{state_path}\n"
-        f"- 世界時間：{world_day_path}\n"
+        "\n\n## 資料查詢（確認事實用）\n"
+        "當你對 NPC 關係、道具、或過去事件記憶模糊時，可以先查閱資料再回答：\n"
+        f"- Read {npcs_path} — NPC 完整資料\n"
+        f"- Read {state_path} — 角色當前狀態與道具\n"
+        f"- Read {world_day_path} — 世界時間\n"
+        f"- Read {lore_path} — 世界設定\n"
+        "- 用 Grep 在上述檔案中搜尋特定關鍵字\n"
+        "只在不確定時查詢，不要每次都讀取。\n"
     )
 
 
@@ -404,8 +441,15 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
 
     prompt_path = _story_system_prompt_path(story_id)
     lore_text = _build_lore_text(story_id)
+    # Load NPCs once — used by both npc_text and critical_facts
+    npcs = _load_npcs(story_id, branch_id)
     npc_text = _build_npc_text(story_id, branch_id)
-    critical_facts = _build_critical_facts(story_id, branch_id)
+    # Parse state dict from JSON string to avoid redundant _load_character_state
+    try:
+        state_dict = json.loads(state_text)
+    except (json.JSONDecodeError, TypeError):
+        state_dict = {}
+    critical_facts = _build_critical_facts(story_id, branch_id, state_dict, npcs)
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
@@ -422,6 +466,15 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             other_agents="（目前無其他輪迴者資料）",
             critical_facts=critical_facts,
         )
+        # If template lacks {critical_facts} placeholder, inject before character state
+        if critical_facts and "關鍵事實" not in result:
+            marker = "## 當前角色狀態"
+            idx = result.find(marker)
+            facts_section = f"## ⚠️ 關鍵事實（絕對不可搞混）\n{critical_facts}\n\n"
+            if idx >= 0:
+                result = result[:idx] + facts_section + result[idx:]
+            else:
+                result = facts_section + result
     else:
         # Fallback to prompts.py template
         result = build_system_prompt(state_text, summary, critical_facts=critical_facts)
