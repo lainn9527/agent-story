@@ -427,6 +427,7 @@ body {
 .char-field {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   padding: 4px 0;
   font-size: 0.84rem;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
@@ -435,6 +436,12 @@ body {
 .char-field label {
   color: var(--text-dim);
   font-weight: 500;
+  flex-shrink: 0;
+}
+
+.char-field span {
+  text-align: right;
+  word-break: break-word;
 }
 
 .char-field.highlight span {

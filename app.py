@@ -1131,15 +1131,27 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
             add_key = list_def.get("state_add_key")
             if add_key and add_key in update:
                 lst = state.get(key, [])
-                for item in update[add_key]:
-                    if item not in lst:
+                add_val = update[add_key]
+                # LLM sometimes returns a string instead of list — wrap it
+                if isinstance(add_val, str):
+                    add_val = [add_val]
+                elif not isinstance(add_val, list):
+                    add_val = []
+                for item in add_val:
+                    if isinstance(item, str) and item not in lst:
                         lst.append(item)
                 state[key] = lst
 
             remove_key = list_def.get("state_remove_key")
             if remove_key and remove_key in update:
                 lst = state.get(key, [])
-                for rm_item in update[remove_key]:
+                rm_val = update[remove_key]
+                # Same safety: wrap string in list
+                if isinstance(rm_val, str):
+                    rm_val = [rm_val]
+                elif not isinstance(rm_val, list):
+                    rm_val = []
+                for rm_item in rm_val:
                     rm_name = rm_item.split(" — ")[0].strip()
                     lst = [x for x in lst if x.split(" — ")[0].strip() != rm_name]
                 state[key] = lst
@@ -1183,8 +1195,13 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         if key.endswith("_delta"):
             handled_keys.add(key)
 
+    # Keys managed by other systems — never save to character state
+    _SYSTEM_KEYS = {"world_day", "world_time", "branch_title"}
+
     # Save extra keys — only non-delta, non-handled, string/number fields
     for key, val in update.items():
+        if key in _SYSTEM_KEYS:
+            continue
         if key not in handled_keys and isinstance(val, (str, int, float, bool)):
             state[key] = val
 
