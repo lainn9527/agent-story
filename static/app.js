@@ -2387,19 +2387,60 @@ function renderCharacterStatus(state) {
     if (l.state_add_key) helperKeys.add(l.state_add_key);
     if (l.state_remove_key) helperKeys.add(l.state_remove_key);
   }
+
+  // Client-side blocklist: keys that should never be shown to player
+  const HIDDEN_SUFFIXES = ["_delta", "_add", "_remove"];
+  const HIDDEN_EXACT = new Set([
+    "world_day", "world_time", "branch_title", "reward_points_delta",
+    "dice_modifier", "dice_always_success",
+  ]);
+  // NPC name prefixes — their data belongs in the NPC panel
+  const NPC_PREFIXES = ["meiling_", "xiaowei_", "team_", "gene_lock_meiling",
+    "gene_lock_xiaowei", "gene_lock_eddy"];
+
+  function isHiddenKey(key) {
+    if (HIDDEN_EXACT.has(key)) return true;
+    if (HIDDEN_SUFFIXES.some(s => key.endsWith(s))) return true;
+    if (NPC_PREFIXES.some(p => key.startsWith(p))) return true;
+    return false;
+  }
+
+  function humanizeKey(key) {
+    // CJK keys are already readable
+    if (/[\u4e00-\u9fff]/.test(key)) return key;
+    // snake_case → Title Case
+    return key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  // Collect visible extra fields
+  const extras = [];
   for (const [key, val] of Object.entries(state)) {
     if (definedKeys.has(key) || listKeys.has(key) || helperKeys.has(key)) continue;
-    if (key === "reward_points_delta") continue;
+    if (isHiddenKey(key)) continue;
     if (val == null || typeof val === "object") continue;
-    const div = document.createElement("div");
-    div.className = "char-field";
-    const label = document.createElement("label");
-    label.textContent = key;
-    const span = document.createElement("span");
-    span.textContent = String(val);
-    div.appendChild(label);
-    div.appendChild(span);
-    panel.appendChild(div);
+    extras.push([key, val]);
+  }
+
+  if (extras.length > 0) {
+    const details = document.createElement("details");
+    details.className = "extra-fields-section";
+    const summary = document.createElement("summary");
+    summary.textContent = `其他狀態 (${extras.length})`;
+    details.appendChild(summary);
+
+    for (const [key, val] of extras) {
+      const div = document.createElement("div");
+      div.className = "char-field extra-field";
+      const label = document.createElement("label");
+      label.textContent = humanizeKey(key);
+      const span = document.createElement("span");
+      span.textContent = String(val);
+      div.appendChild(label);
+      div.appendChild(span);
+      details.appendChild(div);
+    }
+
+    panel.appendChild(details);
   }
 
   for (const listDef of (schema.lists || [])) {

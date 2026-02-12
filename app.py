@@ -338,6 +338,27 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
     # Backfill current_phase for legacy branches
     if "current_phase" not in state:
         state["current_phase"] = "主神空間"
+
+    # Self-healing: strip known artifacts from persisted state
+    dirty = False
+    for key in list(state.keys()):
+        # Remove processing artifacts (_delta, _add, _remove for non-schema keys)
+        if key.endswith(("_delta", "_add", "_remove")):
+            schema = _load_character_schema(story_id)
+            known = _get_schema_known_keys(schema)
+            if key not in known:
+                del state[key]
+                dirty = True
+    # Remove single-character entries from lists
+    for key in list(state.keys()):
+        if isinstance(state[key], list):
+            cleaned = [x for x in state[key] if not isinstance(x, str) or len(x) > 1]
+            if len(cleaned) != len(state[key]):
+                state[key] = cleaned
+                dirty = True
+
+    if dirty:
+        log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
     _save_json(path, state)
     return state
 
@@ -1197,10 +1218,21 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 
     # Keys managed by other systems — never save to character state
     _SYSTEM_KEYS = {"world_day", "world_time", "branch_title"}
+    # Scene-transient keys that should never be persisted
+    _SCENE_KEYS = {
+        "location", "location_update", "location_details",
+        "threat_level", "combat_status", "escape_options", "escape_route",
+        "noise_level", "facility_status", "npc_status", "weapons_status",
+        "tool_status", "available_escape", "available_locations",
+        "status_update", "current_predicament", "mission_progress",
+    }
 
     # Save extra keys — only non-delta, non-handled, string/number fields
     for key, val in update.items():
-        if key in _SYSTEM_KEYS:
+        if key in _SYSTEM_KEYS or key in _SCENE_KEYS:
+            continue
+        # Reject keys ending with _add/_remove for non-schema lists
+        if (key.endswith("_add") or key.endswith("_remove")) and key not in handled_keys:
             continue
         if key not in handled_keys and isinstance(val, (str, int, float, bool)):
             state[key] = val
