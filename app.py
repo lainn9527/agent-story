@@ -211,16 +211,29 @@ def _story_character_state_path(story_id: str, branch_id: str) -> str:
 
 
 def _nsfw_preferences_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "nsfw_preferences.txt")
+    return os.path.join(_story_dir(story_id), "nsfw_preferences.json")
 
 
-def _load_nsfw_preferences(story_id: str) -> str:
+def _load_nsfw_preferences(story_id: str) -> dict:
+    """Return {"chips": [...], "custom": "..."} or empty dict."""
     path = _nsfw_preferences_path(story_id)
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except (FileNotFoundError, OSError):
-        return ""
+            return json.load(f)
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+
+def _format_nsfw_preferences(prefs: dict) -> str:
+    """Format chips + custom text into a prompt-ready string."""
+    parts = []
+    chips = prefs.get("chips", [])
+    if chips:
+        parts.append("、".join(chips))
+    custom = prefs.get("custom", "").strip()
+    if custom:
+        parts.append(custom)
+    return "。".join(parts) if parts else ""
 
 
 def _story_system_prompt_path(story_id: str) -> str:
@@ -517,9 +530,9 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             "- 場景進行中不要自行中斷或切換，持續描寫直到玩家主動推進劇情。\n"
             "- 角色的情感反應、對話和身體語言都要細膩呈現。\n"
         )
-        prefs = _load_nsfw_preferences(story_id)
-        if prefs:
-            pistol_block += f"- 玩家偏好設定：{prefs}\n"
+        prefs_text = _format_nsfw_preferences(_load_nsfw_preferences(story_id))
+        if prefs_text:
+            pistol_block += f"- 玩家偏好設定：{prefs_text}\n"
         result += pistol_block
 
     return result
@@ -4056,22 +4069,26 @@ def api_cheats_pistol_set():
 
 @app.route("/api/nsfw-preferences", methods=["GET"])
 def api_nsfw_preferences_get():
-    """Get NSFW preferences text for current story."""
+    """Get NSFW preferences (chips + custom) for current story."""
     story_id = _active_story_id()
-    return jsonify({"preferences": _load_nsfw_preferences(story_id)})
+    return jsonify(_load_nsfw_preferences(story_id))
 
 
 @app.route("/api/nsfw-preferences", methods=["POST"])
 def api_nsfw_preferences_set():
-    """Save NSFW preferences text for current story."""
+    """Save NSFW preferences (chips + custom) for current story."""
     body = request.get_json(force=True)
     story_id = _active_story_id()
-    text = body.get("preferences", "").strip()
+    prefs = {
+        "chips": body.get("chips", []),
+        "custom": body.get("custom", "").strip(),
+    }
     path = _nsfw_preferences_path(story_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    log.info("nsfw-preferences: saved %d chars for story=%s", len(text), story_id)
+        json.dump(prefs, f, ensure_ascii=False)
+    log.info("nsfw-preferences: saved %d chips + %d chars custom for story=%s",
+             len(prefs["chips"]), len(prefs["custom"]), story_id)
     return jsonify({"ok": True})
 
 

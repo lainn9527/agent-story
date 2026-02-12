@@ -2899,6 +2899,21 @@ function initAddonPanel() {
 
   // Prevent panel clicks from closing
   panel.addEventListener("click", (e) => e.stopPropagation());
+
+  // Pistol prefs modal: chip toggles + close handlers
+  const prefsModal = document.getElementById("pistol-prefs-modal");
+  if (prefsModal) {
+    prefsModal.querySelectorAll(".pistol-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        haptic();
+        chip.classList.toggle("selected");
+      });
+    });
+    document.getElementById("pistol-prefs-close")?.addEventListener("click", closePistolPrefsModal);
+    prefsModal.addEventListener("click", (e) => {
+      if (e.target === prefsModal) closePistolPrefsModal();
+    });
+  }
 }
 
 async function openAddonPanel() {
@@ -2983,14 +2998,11 @@ async function loadAddonPanelState() {
     console.error("loadAddonPanelState pistol error:", e);
   }
 
-  // Load NSFW preferences
-  try {
-    const res = await fetch("/api/nsfw-preferences");
-    const data = await res.json();
-    const ta = document.getElementById("addon-nsfw-prefs");
-    if (ta) ta.value = data.preferences || "";
-  } catch (e) {
-    console.error("loadAddonPanelState prefs error:", e);
+  // Show/hide pistol prefs button based on pistol state
+  const pistolPrefsBtn = document.getElementById("addon-pistol-prefs-btn");
+  const pistolBtn = document.getElementById("addon-pistol-btn");
+  if (pistolPrefsBtn && pistolBtn) {
+    pistolPrefsBtn.classList.toggle("hidden", !pistolBtn.classList.contains("active"));
   }
 
   updateAddonBtnIndicator();
@@ -3035,6 +3047,9 @@ async function togglePistolMode() {
     });
     btn.textContent = newState ? "ON" : "OFF";
     btn.classList.toggle("active", newState);
+    // Show/hide prefs button
+    const prefsBtn = document.getElementById("addon-pistol-prefs-btn");
+    if (prefsBtn) prefsBtn.classList.toggle("hidden", !newState);
     updatePistolBadge(newState);
     updateAddonBtnIndicator();
   } catch (e) {
@@ -3042,20 +3057,52 @@ async function togglePistolMode() {
   }
 }
 
-async function saveNsfwPreferences() {
-  const ta = document.getElementById("addon-nsfw-prefs");
-  const saveBtn = document.getElementById("addon-save-prefs-btn");
-  if (!ta) return;
+async function openPistolPrefsModal() {
+  const modal = document.getElementById("pistol-prefs-modal");
+  if (!modal) return;
+  closeAddonPanel();
+  // Load current prefs
+  try {
+    const res = await fetch("/api/nsfw-preferences");
+    const data = await res.json();
+    const selectedChips = data.chips || [];
+    const custom = data.custom || "";
+    // Reset all chips
+    modal.querySelectorAll(".pistol-chip").forEach(chip => {
+      chip.classList.toggle("selected", selectedChips.includes(chip.dataset.value));
+    });
+    const ta = document.getElementById("pistol-custom-prefs");
+    if (ta) ta.value = custom;
+  } catch (e) {
+    console.error("openPistolPrefsModal load error:", e);
+  }
+  modal.classList.remove("hidden");
+}
+
+function closePistolPrefsModal() {
+  const modal = document.getElementById("pistol-prefs-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function savePistolPrefs() {
+  const modal = document.getElementById("pistol-prefs-modal");
+  if (!modal) return;
+  const chips = [];
+  modal.querySelectorAll(".pistol-chip.selected").forEach(chip => {
+    chips.push(chip.dataset.value);
+  });
+  const ta = document.getElementById("pistol-custom-prefs");
+  const custom = ta ? ta.value : "";
   try {
     await fetch("/api/nsfw-preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preferences: ta.value }),
+      body: JSON.stringify({ chips, custom }),
     });
     showToast("偏好已儲存");
-    closeAddonPanel();
+    closePistolPrefsModal();
   } catch (e) {
-    console.error("saveNsfwPreferences error:", e);
+    console.error("savePistolPrefs error:", e);
   }
 }
 
@@ -3716,6 +3763,10 @@ document.addEventListener("keydown", (e) => {
     if (!document.getElementById("summary-modal").classList.contains("hidden")) {
       e.stopImmediatePropagation();
       closeSummaryModal();
+      return;
+    }
+    if (!document.getElementById("pistol-prefs-modal").classList.contains("hidden")) {
+      closePistolPrefsModal();
       return;
     }
     if (!document.getElementById("addon-panel").classList.contains("hidden")) {
