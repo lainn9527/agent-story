@@ -19,6 +19,7 @@
     <div id="branch-indicator" class="branch-indicator"></div>
     <div id="world-day-display"></div>
     <span id="cheat-badge">金手指</span>
+    <span id="pistol-badge">手槍</span>
     <a href="/lore" class="header-lore-link" title="世界設定知識庫">&#x1F4D6;</a>
   </header>
 
@@ -143,6 +144,39 @@
         <div id="input-area-inner">
           <textarea id="user-input" placeholder="輸入你的行動…" rows="1"></textarea>
           <button id="send-btn">&#10148;</button>
+        </div>
+        <button id="addon-panel-btn" title="附加功能">&#x2699;</button>
+        <div id="addon-panel" class="addon-panel hidden">
+          <div class="addon-section">
+            <div class="addon-section-title">模型選擇</div>
+            <div class="addon-field">
+              <label>提供者</label>
+              <select id="addon-provider-select"></select>
+            </div>
+            <div class="addon-field">
+              <label>模型</label>
+              <select id="addon-model-select"></select>
+            </div>
+          </div>
+          <div class="addon-section">
+            <div class="addon-section-title">金手指</div>
+            <div class="addon-toggle-field">
+              <span>骰子必勝</span>
+              <button id="addon-dice-btn" class="cheat-toggle" onclick="toggleAddonDiceCheat()">OFF</button>
+            </div>
+          </div>
+          <div class="addon-section">
+            <div class="addon-section-title">手槍模式</div>
+            <div class="addon-toggle-field">
+              <span>啟用</span>
+              <button id="addon-pistol-btn" class="cheat-toggle" onclick="togglePistolMode()">OFF</button>
+            </div>
+            <div class="addon-field">
+              <label>偏好設定</label>
+              <textarea id="addon-nsfw-prefs" rows="3" placeholder="描述你的偏好（可選）…"></textarea>
+            </div>
+            <button id="addon-save-prefs-btn" class="addon-save-btn" onclick="saveNsfwPreferences()">儲存偏好</button>
+          </div>
         </div>
       </div>
     </main>

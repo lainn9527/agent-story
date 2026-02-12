@@ -62,6 +62,19 @@ def set_dice_always_success(story_dir: str, branch_id: str, enabled: bool) -> No
     save_cheats(story_dir, branch_id, cheats)
 
 
+def get_pistol_mode(story_dir: str, branch_id: str) -> bool:
+    """Get the pistol mode (手槍模式) status for a branch."""
+    cheats = load_cheats(story_dir, branch_id)
+    return cheats.get("pistol_mode", False)
+
+
+def set_pistol_mode(story_dir: str, branch_id: str, enabled: bool) -> None:
+    """Toggle pistol mode (手槍模式)."""
+    cheats = load_cheats(story_dir, branch_id)
+    cheats["pistol_mode"] = enabled
+    save_cheats(story_dir, branch_id, cheats)
+
+
 def is_gm_command(text: str) -> bool:
     """Check if a message is a /gm command."""
     return text.strip().startswith("/gm")
