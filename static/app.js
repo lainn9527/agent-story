@@ -2904,9 +2904,20 @@ function initAddonPanel() {
   const prefsModal = document.getElementById("pistol-prefs-modal");
   if (prefsModal) {
     prefsModal.querySelectorAll(".pistol-chip").forEach(chip => {
-      chip.addEventListener("click", () => {
-        haptic();
-        chip.classList.toggle("selected");
+      chip.addEventListener("click", (e) => {
+        if (e.target.classList.contains("chip-delete")) {
+          haptic();
+          // Predefined chips: hide (persist via hidden_chips). Custom chips: remove from DOM.
+          if (chip.classList.contains("custom")) {
+            chip.remove();
+          } else {
+            chip.style.display = "none";
+            chip.classList.remove("selected");
+          }
+        } else {
+          haptic();
+          chip.classList.toggle("selected");
+        }
       });
     });
     document.getElementById("pistol-prefs-close")?.addEventListener("click", closePistolPrefsModal);
@@ -3080,9 +3091,15 @@ async function openPistolPrefsModal() {
     const selectedChips = data.chips || [];
     const custom = data.custom || "";
     const customChips = data.custom_chips || {};
+    const hiddenChips = data.hidden_chips || [];
 
-    // Remove old custom chips (keep predefined)
+    // Remove old custom chips
     modal.querySelectorAll(".pistol-chip.custom").forEach(el => el.remove());
+
+    // Hide/show predefined chips based on hidden_chips
+    modal.querySelectorAll(".pistol-chip:not(.custom)").forEach(chip => {
+      chip.style.display = hiddenChips.includes(chip.dataset.value) ? "none" : "";
+    });
 
     // Add custom chips to each group
     for (const [group, chips] of Object.entries(customChips)) {
@@ -3144,13 +3161,18 @@ async function savePistolPrefs() {
     if (!customChips[group]) customChips[group] = [];
     customChips[group].push(chip.dataset.value);
   });
+  // Collect hidden (deleted) predefined chips
+  const hiddenChips = [];
+  modal.querySelectorAll(".pistol-chip:not(.custom)").forEach(chip => {
+    if (chip.style.display === "none") hiddenChips.push(chip.dataset.value);
+  });
   const ta = document.getElementById("pistol-custom-prefs");
   const custom = ta ? ta.value : "";
   try {
     await fetch("/api/nsfw-preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chips, custom, custom_chips: customChips }),
+      body: JSON.stringify({ chips, custom, custom_chips: customChips, hidden_chips: hiddenChips }),
     });
     showToast("偏好已儲存");
     closePistolPrefsModal();

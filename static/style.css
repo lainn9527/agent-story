@@ -1134,7 +1134,7 @@ body {
   gap: 6px;
 }
 .pistol-chip {
-  padding: 5px 12px;
+  padding: 5px 8px 5px 12px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: transparent;
@@ -1144,6 +1144,9 @@ body {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .pistol-chip:hover {
   background: rgba(255, 255, 255, 0.06);
@@ -1153,12 +1156,6 @@ body {
   background: rgba(255, 130, 170, 0.2);
   border-color: #f8a;
   color: #fcc;
-}
-.pistol-chip.custom {
-  padding-right: 6px;
-  gap: 4px;
-  display: inline-flex;
-  align-items: center;
 }
 .pistol-chip .chip-delete {
   font-size: 0.7rem;
