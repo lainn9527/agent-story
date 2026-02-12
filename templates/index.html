@@ -164,13 +164,11 @@
             <div class="addon-section-title">手槍模式</div>
             <div class="addon-toggle-field">
               <span>啟用</span>
-              <button id="addon-pistol-btn" class="cheat-toggle" onclick="togglePistolMode()">OFF</button>
+              <div class="addon-pistol-controls">
+                <button id="addon-pistol-btn" class="cheat-toggle" onclick="togglePistolMode()">OFF</button>
+                <button id="addon-pistol-prefs-btn" class="pistol-prefs-btn hidden" onclick="openPistolPrefsModal()" title="偏好設定">&#x2699;</button>
+              </div>
             </div>
-            <div class="addon-field">
-              <label for="addon-nsfw-prefs">偏好設定</label>
-              <textarea id="addon-nsfw-prefs" rows="3" placeholder="描述你的偏好（可選）…"></textarea>
-            </div>
-            <button id="addon-save-prefs-btn" class="addon-save-btn" onclick="saveNsfwPreferences()">儲存偏好</button>
           </div>
         </div>
       </div>
@@ -267,6 +265,65 @@
         <button id="branch-tree-modal-close" class="summary-modal-close-btn">&times;</button>
       </div>
       <div id="branch-tree-container" class="branch-tree-container"></div>
+    </div>
+  </div>
+
+  <!-- Pistol Prefs Modal -->
+  <div id="pistol-prefs-modal" class="modal-overlay hidden">
+    <div class="modal-content pistol-prefs-modal-content">
+      <div class="pistol-prefs-header">
+        <h2>偏好設定</h2>
+        <button id="pistol-prefs-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div class="pistol-prefs-body">
+        <div class="pistol-chips-group">
+          <div class="pistol-chips-label">風格</div>
+          <div class="pistol-chips" data-group="style">
+            <button class="pistol-chip" data-value="浪漫">浪漫</button>
+            <button class="pistol-chip" data-value="激烈">激烈</button>
+            <button class="pistol-chip" data-value="溫柔">溫柔</button>
+            <button class="pistol-chip" data-value="粗暴">粗暴</button>
+            <button class="pistol-chip" data-value="慢節奏">慢節奏</button>
+          </div>
+        </div>
+        <div class="pistol-chips-group">
+          <div class="pistol-chips-label">元素</div>
+          <div class="pistol-chips" data-group="elements">
+            <button class="pistol-chip" data-value="前戲">前戲</button>
+            <button class="pistol-chip" data-value="愛撫">愛撫</button>
+            <button class="pistol-chip" data-value="口交">口交</button>
+            <button class="pistol-chip" data-value="後入">後入</button>
+            <button class="pistol-chip" data-value="騎乘">騎乘</button>
+            <button class="pistol-chip" data-value="正常位">正常位</button>
+            <button class="pistol-chip" data-value="站立">站立</button>
+            <button class="pistol-chip" data-value="道具">道具</button>
+          </div>
+        </div>
+        <div class="pistol-chips-group">
+          <div class="pistol-chips-label">描寫重點</div>
+          <div class="pistol-chips" data-group="focus">
+            <button class="pistol-chip" data-value="情感互動">情感互動</button>
+            <button class="pistol-chip" data-value="肉體描寫">肉體描寫</button>
+            <button class="pistol-chip" data-value="對話呻吟">對話呻吟</button>
+            <button class="pistol-chip" data-value="氛圍營造">氛圍營造</button>
+          </div>
+        </div>
+        <div class="pistol-chips-group">
+          <div class="pistol-chips-label">角色動態</div>
+          <div class="pistol-chips" data-group="dynamic">
+            <button class="pistol-chip" data-value="玩家主導">玩家主導</button>
+            <button class="pistol-chip" data-value="對方主導">對方主導</button>
+            <button class="pistol-chip" data-value="雙方主動">雙方主動</button>
+          </div>
+        </div>
+        <div class="pistol-chips-group">
+          <div class="pistol-chips-label">自訂補充</div>
+          <textarea id="pistol-custom-prefs" rows="2" placeholder="額外描述（可選）…"></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="pistol-prefs-save" class="modal-create-btn" onclick="savePistolPrefs()">儲存</button>
+      </div>
     </div>
   </div>
 
