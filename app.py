@@ -4082,6 +4082,7 @@ def api_nsfw_preferences_set():
     prefs = {
         "chips": body.get("chips", []),
         "custom": body.get("custom", "").strip(),
+        "custom_chips": body.get("custom_chips", {}),
     }
     path = _nsfw_preferences_path(story_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)

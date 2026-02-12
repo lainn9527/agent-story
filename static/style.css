@@ -1154,6 +1154,41 @@ body {
   border-color: #f8a;
   color: #fcc;
 }
+.pistol-chip.custom {
+  padding-right: 6px;
+  gap: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.pistol-chip .chip-delete {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  cursor: pointer;
+  margin-left: 2px;
+}
+.pistol-chip .chip-delete:hover {
+  opacity: 1;
+}
+.pistol-chip-add {
+  width: 30px;
+  height: 30px;
+  border: 1px dashed var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.pistol-chip-add:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
 #pistol-custom-prefs {
   width: 100%;
   padding: 8px;
