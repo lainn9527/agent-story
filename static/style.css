@@ -478,6 +478,34 @@ body {
   padding-left: 2px;
 }
 
+/* -- Extra fields collapsible section -- */
+.extra-fields-section {
+  margin-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.extra-fields-section summary {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 6px 0;
+  user-select: none;
+}
+
+.extra-fields-section summary:hover {
+  color: var(--text);
+}
+
+.extra-fields-section .extra-field label {
+  font-size: 0.78rem;
+  max-width: 50%;
+  word-break: break-all;
+}
+
+.extra-fields-section .extra-field span {
+  font-size: 0.78rem;
+}
+
 /* ---------- Chat Area ---------- */
 #chat-area {
   flex: 1;
