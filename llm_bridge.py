@@ -225,7 +225,50 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 
 
 # ---------------------------------------------------------------------------
-# Embedding (always uses Gemini — Claude CLI has no embedding API)
+# Embedding (local bge-m3 via fastembed — no API calls)
+# ---------------------------------------------------------------------------
+
+_embed_model = None
+_embed_lock = __import__("threading").Lock()
+
+
+def _get_embed_model():
+    """Lazy-load the fastembed model (singleton, thread-safe)."""
+    global _embed_model
+    if _embed_model is None:
+        with _embed_lock:
+            if _embed_model is None:
+                from fastembed import TextEmbedding
+                _embed_model = TextEmbedding("jinaai/jina-embeddings-v2-base-zh")
+                log.info("llm_bridge: loaded local embedding model jina-embeddings-v2-base-zh")
+    return _embed_model
+
+
+def embed_text(text: str, **_kwargs) -> list[float] | None:
+    """Embed a single text locally via jina-zh. Returns 768-dim vector or None."""
+    try:
+        model = _get_embed_model()
+        result = list(model.embed([text]))
+        return result[0].tolist() if result else None
+    except Exception as e:
+        log.warning("llm_bridge: embed_text failed — %s", e)
+        return None
+
+
+def embed_texts_batch(texts: list[str], **_kwargs) -> list[list[float]] | None:
+    """Batch-embed texts locally via jina-zh. Returns list of 768-dim vectors or None."""
+    if not texts:
+        return []
+    try:
+        model = _get_embed_model()
+        return [v.tolist() for v in model.embed(texts)]
+    except Exception as e:
+        log.warning("llm_bridge: embed_texts_batch failed — %s", e)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Gemini config gate (used by web search only)
 # ---------------------------------------------------------------------------
 
 def _get_gemini_cfg() -> dict | None:
@@ -242,24 +285,6 @@ def _get_gemini_cfg() -> dict | None:
     if not load_keys(g):
         return None
     return g
-
-
-def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float] | None:
-    """Embed a single text via Gemini. Returns 768-dim vector or None."""
-    g = _get_gemini_cfg()
-    if not g:
-        return None
-    from gemini_bridge import embed_text as _embed
-    return _embed(text, gemini_cfg=g, task_type=task_type)
-
-
-def embed_texts_batch(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]] | None:
-    """Batch-embed up to 100 texts via Gemini. Returns list of vectors or None."""
-    g = _get_gemini_cfg()
-    if not g:
-        return None
-    from gemini_bridge import embed_texts_batch as _batch
-    return _batch(texts, gemini_cfg=g, task_type=task_type)
 
 
 # ---------------------------------------------------------------------------
