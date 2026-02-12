@@ -3617,18 +3617,28 @@ async function sendMessage() {
         loadNpcs();
         loadEvents();
 
-        // Delayed re-fetch: background tag extraction may update state after streaming ends
-        const statusSnapshot = JSON.stringify(status);
-        setTimeout(async () => {
-          if (currentBranchId !== gmMsg.owner_branch_id) return; // user switched branch
-          const fresh = await API.status(currentBranchId);
-          if (JSON.stringify(fresh) !== statusSnapshot) {
-            renderCharacterStatus(fresh);
-            updateWorldDayDisplay(fresh.world_day);
-            loadNpcs();
-            loadEvents();
-          }
-        }, 5000);
+        // Poll for background tag extraction updates (state, NPCs, events)
+        // Extraction runs async and may take 10-30s depending on LLM provider
+        {
+          const snap = JSON.stringify(status);
+          const branchAtSend = currentBranchId;
+          let attempts = 0;
+          const pollInterval = setInterval(async () => {
+            attempts++;
+            if (currentBranchId !== branchAtSend || attempts > 6) {
+              clearInterval(pollInterval);
+              return;
+            }
+            const fresh = await API.status(branchAtSend);
+            if (JSON.stringify(fresh) !== snap) {
+              clearInterval(pollInterval);
+              renderCharacterStatus(fresh);
+              updateWorldDayDisplay(fresh.world_day);
+              loadNpcs();
+              loadEvents();
+            }
+          }, 5000);
+        }
 
         // Refresh branch list after background tag extraction (title generation)
         pollForBranchTitle(currentBranchId);
