@@ -2913,6 +2913,18 @@ function initAddonPanel() {
     prefsModal.addEventListener("click", (e) => {
       if (e.target === prefsModal) closePistolPrefsModal();
     });
+
+    // "+" buttons to add custom chips
+    prefsModal.querySelectorAll(".pistol-chip-add").forEach(addBtn => {
+      addBtn.addEventListener("click", async () => {
+        haptic();
+        const val = await showPrompt("輸入新選項：");
+        if (!val || !val.trim()) return;
+        const container = addBtn.closest(".pistol-chips");
+        const chip = _createCustomChip(val.trim());
+        container.insertBefore(chip, addBtn);
+      });
+    });
   }
 }
 
@@ -3067,7 +3079,23 @@ async function openPistolPrefsModal() {
     const data = await res.json();
     const selectedChips = data.chips || [];
     const custom = data.custom || "";
-    // Reset all chips
+    const customChips = data.custom_chips || {};
+
+    // Remove old custom chips (keep predefined)
+    modal.querySelectorAll(".pistol-chip.custom").forEach(el => el.remove());
+
+    // Add custom chips to each group
+    for (const [group, chips] of Object.entries(customChips)) {
+      const container = modal.querySelector(`.pistol-chips[data-group="${group}"]`);
+      if (!container) continue;
+      const addBtn = container.querySelector(".pistol-chip-add");
+      for (const val of chips) {
+        const chip = _createCustomChip(val);
+        container.insertBefore(chip, addBtn);
+      }
+    }
+
+    // Set selected state on all chips
     modal.querySelectorAll(".pistol-chip").forEach(chip => {
       chip.classList.toggle("selected", selectedChips.includes(chip.dataset.value));
     });
@@ -3077,6 +3105,23 @@ async function openPistolPrefsModal() {
     console.error("openPistolPrefsModal load error:", e);
   }
   modal.classList.remove("hidden");
+}
+
+function _createCustomChip(value) {
+  const chip = document.createElement("button");
+  chip.className = "pistol-chip custom selected";
+  chip.dataset.value = value;
+  chip.innerHTML = value + '<span class="chip-delete">&times;</span>';
+  chip.addEventListener("click", (e) => {
+    if (e.target.classList.contains("chip-delete")) {
+      haptic();
+      chip.remove();
+    } else {
+      haptic();
+      chip.classList.toggle("selected");
+    }
+  });
+  return chip;
 }
 
 function closePistolPrefsModal() {
@@ -3091,13 +3136,21 @@ async function savePistolPrefs() {
   modal.querySelectorAll(".pistol-chip.selected").forEach(chip => {
     chips.push(chip.dataset.value);
   });
+  // Collect custom chips per group for persistence
+  const customChips = {};
+  modal.querySelectorAll(".pistol-chip.custom").forEach(chip => {
+    const group = chip.closest(".pistol-chips")?.dataset.group;
+    if (!group) return;
+    if (!customChips[group]) customChips[group] = [];
+    customChips[group].push(chip.dataset.value);
+  });
   const ta = document.getElementById("pistol-custom-prefs");
   const custom = ta ? ta.value : "";
   try {
     await fetch("/api/nsfw-preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chips, custom }),
+      body: JSON.stringify({ chips, custom, custom_chips: customChips }),
     });
     showToast("偏好已儲存");
     closePistolPrefsModal();
