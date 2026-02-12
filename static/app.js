@@ -2840,6 +2840,7 @@ async function loadDiceCheatStatus() {
       btn.classList.toggle("active", active);
     }
     updateCheatBadge(active);
+    updateAddonBtnIndicator();
   } catch (e) {
     console.error("loadDiceCheatStatus error:", e);
   }
@@ -2859,6 +2860,13 @@ async function toggleDiceCheat() {
     btn.textContent = newState ? "ON" : "OFF";
     btn.classList.toggle("active", newState);
     updateCheatBadge(newState);
+    // Sync addon panel button
+    const addonBtn = document.getElementById("addon-dice-btn");
+    if (addonBtn) {
+      addonBtn.textContent = newState ? "ON" : "OFF";
+      addonBtn.classList.toggle("active", newState);
+    }
+    updateAddonBtnIndicator();
   } catch (e) {
     console.error("toggleDiceCheat error:", e);
   }
@@ -2897,12 +2905,16 @@ async function openAddonPanel() {
   const panel = document.getElementById("addon-panel");
   if (!panel) return;
   panel.classList.remove("hidden");
+  const btn = document.getElementById("addon-panel-btn");
+  if (btn) btn.setAttribute("aria-expanded", "true");
   await loadAddonPanelState();
 }
 
 function closeAddonPanel() {
   const panel = document.getElementById("addon-panel");
   if (panel) panel.classList.add("hidden");
+  const btn = document.getElementById("addon-panel-btn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
 }
 
 async function loadAddonPanelState() {
@@ -3089,6 +3101,7 @@ async function loadPistolModeStatus() {
     const res = await fetch(`/api/cheats/pistol?branch_id=${currentBranchId}`);
     const data = await res.json();
     updatePistolBadge(!!data.pistol_mode);
+    updateAddonBtnIndicator();
   } catch (e) {
     console.error("loadPistolModeStatus error:", e);
   }
@@ -3722,6 +3735,10 @@ document.addEventListener("keydown", (e) => {
     if (!document.getElementById("summary-modal").classList.contains("hidden")) {
       e.stopImmediatePropagation();
       closeSummaryModal();
+      return;
+    }
+    if (!document.getElementById("addon-panel").classList.contains("hidden")) {
+      closeAddonPanel();
       return;
     }
   }
