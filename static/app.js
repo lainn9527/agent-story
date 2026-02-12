@@ -2,6 +2,11 @@
    主神空間 RPG — Frontend Logic (multi-story + drawer UI)
    ============================================================ */
 
+/** Light haptic tap — silent no-op on unsupported browsers. */
+function haptic(ms = 10) {
+  if (navigator.vibrate) navigator.vibrate(ms);
+}
+
 function showToast(msg, duration = 2000) {
   const el = document.createElement("div");
   el.className = "toast-msg";
@@ -31,8 +36,8 @@ function showConfirm(msg) {
       document.removeEventListener("keydown", onKey);
       resolve(result);
     }
-    function onOk() { cleanup(true); }
-    function onCancel() { cleanup(false); }
+    function onOk() { haptic(); cleanup(true); }
+    function onCancel() { haptic(); cleanup(false); }
     function onOverlay(e) { if (e.target === overlay) cleanup(false); }
     function onKey(e) {
       if (e.key === "Enter") { e.preventDefault(); cleanup(true); }
@@ -61,7 +66,7 @@ function showAlert(msg) {
       document.removeEventListener("keydown", onKey);
       resolve();
     }
-    function onOk() { cleanup(); }
+    function onOk() { haptic(); cleanup(); }
     function onOverlay(e) { if (e.target === overlay) cleanup(); }
     function onKey(e) {
       if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); cleanup(); }
@@ -94,8 +99,8 @@ function showPrompt(msg, defaultValue = "") {
       document.removeEventListener("keydown", onKey);
       resolve(result);
     }
-    function onOk() { cleanup(input.value); }
-    function onCancel() { cleanup(null); }
+    function onOk() { haptic(); cleanup(input.value); }
+    function onCancel() { haptic(); cleanup(null); }
     function onOverlay(e) { if (e.target === overlay) cleanup(null); }
     function onKey(e) {
       if (e.key === "Enter") { e.preventDefault(); cleanup(input.value); }
@@ -1661,11 +1666,13 @@ function startEditing(msgEl, msg) {
   textarea.focus();
 
   cancelBtn.addEventListener("click", () => {
+    haptic();
     msgEl.classList.remove("editing");
     contentEl.innerHTML = originalHtml;
   });
 
   saveBtn.addEventListener("click", () => {
+    haptic();
     const newText = textarea.value.trim();
     if (!newText) return;
     if (newText === msg.content) {
@@ -1965,6 +1972,7 @@ function renderMessages(messages) {
       actionBtn.title = "編輯此訊息";
       actionBtn.addEventListener("click", (e) => {
         e.stopPropagation();
+        haptic();
         startEditing(el, msg);
       });
     } else {
@@ -1972,6 +1980,7 @@ function renderMessages(messages) {
       actionBtn.title = "重新生成";
       actionBtn.addEventListener("click", (e) => {
         e.stopPropagation();
+        haptic();
         regenerateGmMessage(msg, el);
       });
     }
@@ -3040,7 +3049,7 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
 // Send message
 // ---------------------------------------------------------------------------
 async function sendMessage() {
-
+  haptic();
   const text = $input.value.trim();
   if (!text || isSending) return;
 
