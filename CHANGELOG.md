@@ -5,6 +5,23 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.3] - 2026-02-12
+
+### Fixed
+- Fix character-by-character split in list fields when LLM returns string instead of array ([#72])
+- Fix missing spacing between label and value in character status panel ([#72])
+- Block scene-transient keys (location, threat_level, etc.) and non-schema `_add`/`_remove` keys from persisting in character state ([#72])
+- Filter system keys (world_day, world_time, branch_title) from character state ([#72])
+
+### Added
+- Collapsible "其他狀態" section for extra fields in character panel, auto-opens when new fields appear ([#72])
+- Client-side NPC key filtering (dynamically derived from npcs.json) hides NPC sub-state from player view ([#72])
+- Key name humanization: snake_case → Title Case, CJK keys shown as-is ([#72])
+- Load-time self-healing: auto-strips `_delta`/`_add`/`_remove` artifacts and single-char list entries ([#72])
+- Polling for async tag extraction updates: status panel refreshes within 5-30s after GM response ([#72])
+
+[#72]: https://github.com/lainn9527/agent-story/pull/72
+
 ## [0.14.2] - 2026-02-12
 
 ### Added
