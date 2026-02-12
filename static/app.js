@@ -3088,7 +3088,14 @@ async function openPistolPrefsModal() {
   try {
     const res = await fetch("/api/nsfw-preferences");
     const data = await res.json();
-    const selectedChips = data.chips || [];
+    // chips can be dict {group: [values]} or legacy flat array
+    const rawChips = data.chips || {};
+    let selectedSet;
+    if (Array.isArray(rawChips)) {
+      selectedSet = new Set(rawChips);
+    } else {
+      selectedSet = new Set(Object.values(rawChips).flat());
+    }
     const custom = data.custom || "";
     const customChips = data.custom_chips || {};
     const hiddenChips = data.hidden_chips || [];
@@ -3131,7 +3138,7 @@ async function openPistolPrefsModal() {
 
     // Set selected state on all chips
     modal.querySelectorAll(".pistol-chip").forEach(chip => {
-      chip.classList.toggle("selected", selectedChips.includes(chip.dataset.value));
+      chip.classList.toggle("selected", selectedSet.has(chip.dataset.value));
     });
     const ta = document.getElementById("pistol-custom-prefs");
     if (ta) ta.value = custom;
@@ -3166,9 +3173,15 @@ function closePistolPrefsModal() {
 async function savePistolPrefs() {
   const modal = document.getElementById("pistol-prefs-modal");
   if (!modal) return;
-  const chips = [];
+  // Collect selected chips organized by group
+  const chips = {};
+  const chipsFlat = [];
   modal.querySelectorAll(".pistol-chip.selected").forEach(chip => {
-    chips.push(chip.dataset.value);
+    const group = chip.closest(".pistol-chips")?.dataset.group;
+    if (!group) return;
+    if (!chips[group]) chips[group] = [];
+    chips[group].push(chip.dataset.value);
+    chipsFlat.push(chip.dataset.value);
   });
   // Collect custom chips per group for persistence
   const customChips = {};
@@ -3192,7 +3205,7 @@ async function savePistolPrefs() {
     const prevData = await prev.json();
     chipCounts = prevData.chip_counts || {};
   } catch (_) {}
-  for (const c of chips) {
+  for (const c of chipsFlat) {
     chipCounts[c] = (chipCounts[c] || 0) + 1;
   }
   try {

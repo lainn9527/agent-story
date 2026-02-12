@@ -224,16 +224,35 @@ def _load_nsfw_preferences(story_id: str) -> dict:
         return {}
 
 
+_CHIP_GROUP_LABELS = {
+    "style": "風格",
+    "positions": "體位",
+    "foreplay": "前戲/技巧",
+    "climax": "高潮/結束",
+    "props": "道具/情境",
+    "scene": "場景",
+    "focus": "描寫重點",
+    "dynamic": "角色動態",
+}
+
+
 def _format_nsfw_preferences(prefs: dict) -> str:
-    """Format chips + custom text into a prompt-ready string."""
-    parts = []
-    chips = prefs.get("chips", [])
-    if chips:
-        parts.append("、".join(chips))
+    """Format chips (by group) + custom text into a structured prompt string."""
+    chips = prefs.get("chips", {})
+    lines = []
+    # chips can be dict {group: [values]} or legacy list
+    if isinstance(chips, dict):
+        for group, values in chips.items():
+            if not values:
+                continue
+            label = _CHIP_GROUP_LABELS.get(group, group)
+            lines.append(f"  {label}：{'、'.join(values)}")
+    elif isinstance(chips, list) and chips:
+        lines.append(f"  {'、'.join(chips)}")
     custom = prefs.get("custom", "").strip()
     if custom:
-        parts.append(custom)
-    return "。".join(parts) if parts else ""
+        lines.append(f"  補充：{custom}")
+    return "\n".join(lines) if lines else ""
 
 
 def _story_system_prompt_path(story_id: str) -> str:
@@ -532,7 +551,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
         )
         prefs_text = _format_nsfw_preferences(_load_nsfw_preferences(story_id))
         if prefs_text:
-            pistol_block += f"- 玩家偏好設定：{prefs_text}\n"
+            pistol_block += f"- 玩家偏好設定：\n{prefs_text}\n"
         result += pistol_block
 
     return result
