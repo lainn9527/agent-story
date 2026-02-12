@@ -2035,6 +2035,7 @@ def api_branches_create():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    source_branch_id = parent_branch_id  # preserve for branch-level config copy
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
 
     if parent_branch_id not in branches:
@@ -2051,7 +2052,7 @@ def api_branches_create():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
-    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
+    copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2182,6 +2183,7 @@ def api_branches_edit():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    source_branch_id = parent_branch_id  # preserve for branch-level config copy
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
@@ -2203,7 +2205,7 @@ def api_branches_edit():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
-    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
+    copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2304,6 +2306,7 @@ def api_branches_edit_stream():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    source_branch_id = parent_branch_id  # preserve for branch-level config copy
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return Response(_sse_event({"type": "error", "message": "parent branch not found"}),
@@ -2327,7 +2330,7 @@ def api_branches_edit_stream():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
-    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
+    copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2442,6 +2445,7 @@ def api_branches_regenerate():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    source_branch_id = parent_branch_id  # preserve for branch-level config copy
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
@@ -2470,7 +2474,7 @@ def api_branches_regenerate():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
-    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
+    copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2556,6 +2560,7 @@ def api_branches_regenerate_stream():
     story_id = _active_story_id()
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    source_branch_id = parent_branch_id  # preserve for branch-level config copy
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return Response(_sse_event({"type": "error", "message": "parent branch not found"}),
@@ -2586,7 +2591,7 @@ def api_branches_regenerate_stream():
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
-    copy_cheats(_story_dir(story_id), parent_branch_id, branch_id)
+    copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
