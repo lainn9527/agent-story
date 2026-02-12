@@ -294,7 +294,7 @@ def _embed_single_async(story_id: str, topic: str, content: str):
         try:
             from llm_bridge import embed_text
             text = f"{topic}\n{content}"
-            vec = embed_text(text, task_type="RETRIEVAL_DOCUMENT")
+            vec = embed_text(text)
             if vec and len(vec) == EMBEDDING_DIM:
                 emb_bytes = np.array(vec, dtype=np.float32).tobytes()
                 text_hash = _compute_text_hash(topic, content)
@@ -358,7 +358,7 @@ def embed_all_entries(story_id: str):
         batch = rows[i:i + batch_size]
         texts = [f"{r['topic']}\n{r['content']}" for r in batch]
 
-        vectors = embed_texts_batch(texts, task_type="RETRIEVAL_DOCUMENT")
+        vectors = embed_texts_batch(texts)
         if not vectors:
             log.warning("lore_db: batch embed returned None at offset %d", i)
             continue
@@ -378,8 +378,6 @@ def embed_all_entries(story_id: str):
             conn.close()
 
         log.info("lore_db: embedded batch %d-%d/%d", i, i + len(batch), len(rows))
-        if i + batch_size < len(rows):
-            time.sleep(1)  # rate limit: 100 RPM
 
     _invalidate_cache(story_id)
     log.info("lore_db: embedding complete for story %s", story_id)
@@ -463,7 +461,7 @@ def _search_embedding(story_id: str, query: str, limit: int = 20) -> list[dict]:
         return []
 
     from llm_bridge import embed_text
-    query_vec = embed_text(query, task_type="RETRIEVAL_QUERY")
+    query_vec = embed_text(query)
     if not query_vec or len(query_vec) != EMBEDDING_DIM:
         return []
 
@@ -570,6 +568,7 @@ def search_hybrid(
         if boost_categories:
             for entry_id, entry in candidates.items():
                 if entry["category"] in boost_categories:
+                    # Boost phase-relevant categories to float above generic matches
                     rrf_scores[entry_id] *= 1.5
 
     # Sort by RRF score
@@ -580,8 +579,9 @@ def search_hybrid(
     tokens_used = 0
     for entry_id in sorted_ids:
         entry = candidates[entry_id]
-        # Estimate: 1 CJK char ≈ 1 token
-        entry_tokens = len(entry.get("content", "")) + len(entry.get("topic", "")) + 20  # header overhead
+        # Estimate: 1 CJK char ≈ 1 token, cap at 1200 (content is truncated at injection)
+        content_len = min(len(entry.get("content", "")), 1200)
+        entry_tokens = content_len + len(entry.get("topic", "")) + 20  # header overhead
         if tokens_used + entry_tokens > token_budget and results:
             break
         results.append(entry)
