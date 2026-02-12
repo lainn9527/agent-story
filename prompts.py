@@ -40,6 +40,9 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - 血統改造（入門級）：5000 點起
 - S 級支線獎勵通常為獨特道具或額外選項
 
+## ⚠️ 關鍵事實（絕對不可搞混）
+{critical_facts}
+
 ## 當前角色狀態
 {character_state}
 
@@ -55,9 +58,12 @@ SYSTEM_PROMPT_TEMPLATE = """\
 """
 
 
-def build_system_prompt(character_state: str, story_summary: str) -> str:
+def build_system_prompt(character_state: str, story_summary: str, critical_facts: str = "") -> str:
     """Return the full system prompt with dynamic sections filled in."""
+    if not critical_facts:
+        critical_facts = "（尚無關鍵事實記錄）"
     return SYSTEM_PROMPT_TEMPLATE.format(
         character_state=character_state,
         story_summary=story_summary,
+        critical_facts=critical_facts,
     )

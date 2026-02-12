@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("rpg")
 
-from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary, get_last_usage
+from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary, get_last_usage, get_provider
 import usage_db
 from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
 from image_gen import generate_image_async, get_image_status, get_image_path
@@ -311,6 +311,86 @@ _TEAM_RULES = {
 }
 
 
+def _build_critical_facts(story_id: str, branch_id: str) -> str:
+    """Build critical facts section for system prompt to prevent factual inconsistencies."""
+    lines = []
+
+    # 1. Current phase from character state
+    state = _load_character_state(story_id, branch_id)
+    if state.get("current_phase"):
+        lines.append(f"- 當前階段：{state['current_phase']}")
+
+    # 2. World time
+    wd = get_world_day(story_id, branch_id)
+    if wd:
+        day = wd.get("day", 1)
+        hour = wd.get("hour", 0)
+        if hour < 6:
+            period = "深夜"
+        elif hour < 9:
+            period = "清晨"
+        elif hour < 12:
+            period = "上午"
+        elif hour < 18:
+            period = "下午"
+        else:
+            period = "夜晚"
+        lines.append(f"- 當前時間：世界第 {day} 天·{period}")
+
+    # 3. NPC relationship matrix (grouped by role)
+    npcs = _load_npcs(story_id, branch_id)
+    rels = state.get("relationships", {})
+
+    if npcs:
+        allies, hostile, captured, neutral = [], [], [], []
+        for npc in npcs:
+            name = npc.get("name", "?")
+            role = npc.get("role", "")
+            # Prefer character_state relationship (more up-to-date), fall back to NPC data
+            rel = rels.get(name) or npc.get("relationship_to_player", "")
+            entry = f"{name}（{rel}）" if rel else name
+            role_lower = role.lower() if role else ""
+            if any(k in role_lower for k in ("隊友", "戰友", "同伴")):
+                allies.append(entry)
+            elif any(k in role_lower for k in ("敵", "對手")):
+                hostile.append(entry)
+            elif any(k in role_lower for k in ("俘", "囚")):
+                captured.append(entry)
+            else:
+                neutral.append(entry)
+        if allies:
+            lines.append(f"- 隊友：{'、'.join(allies)}")
+        if hostile:
+            lines.append(f"- 敵對：{'、'.join(hostile)}")
+        if captured:
+            lines.append(f"- 俘虜：{'、'.join(captured)}")
+        if neutral:
+            lines.append(f"- 其他NPC：{'、'.join(neutral)}")
+    elif rels:
+        # Fallback to character_state relationships when no NPC data
+        rel_parts = [f"{name}（{rel}）" for name, rel in rels.items()]
+        lines.append(f"- 人際關係：{'、'.join(rel_parts)}")
+
+    if not lines:
+        return "（尚無關鍵事實記錄）"
+    return "\n".join(lines)
+
+
+def _build_tool_instructions(story_id: str, branch_id: str) -> str:
+    """Build tool usage instructions for Claude CLI GM (Phase 2: fact-checking via Read/Grep)."""
+    npcs_path = _story_npcs_path(story_id, branch_id)
+    state_path = _story_character_state_path(story_id, branch_id)
+    world_day_path = os.path.join(_branch_dir(story_id, branch_id), "world_day.json")
+    return (
+        "\n\n## 資料查詢\n"
+        "你可以使用 Read 工具查看遊戲檔案來確認事實。\n"
+        "當你不確定某個 NPC 的關係、玩家的道具、或歷史事件時，請先查詢再回答。\n"
+        f"- NPC 資料：{npcs_path}\n"
+        f"- 角色狀態：{state_path}\n"
+        f"- 世界時間：{world_day_path}\n"
+    )
+
+
 def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main", narrative_recap: str = "") -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
     # Blank branches are fresh starts — no story summary or NPC context from parent
@@ -325,13 +405,14 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     prompt_path = _story_system_prompt_path(story_id)
     lore_text = _build_lore_text(story_id)
     npc_text = _build_npc_text(story_id, branch_id)
+    critical_facts = _build_critical_facts(story_id, branch_id)
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
     if os.path.exists(prompt_path):
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
-        return template.format(
+        result = template.format(
             character_state=state_text,
             story_summary=summary,
             world_lore=lore_text,
@@ -339,9 +420,17 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             team_rules=team_rules,
             narrative_recap=narrative_recap,
             other_agents="（目前無其他輪迴者資料）",
+            critical_facts=critical_facts,
         )
-    # Fallback to prompts.py template
-    return build_system_prompt(state_text, summary)
+    else:
+        # Fallback to prompts.py template
+        result = build_system_prompt(state_text, summary, critical_facts=critical_facts)
+
+    # Phase 2: Append tool instructions for Claude CLI only
+    if get_provider() == "claude_cli":
+        result += _build_tool_instructions(story_id, branch_id)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
