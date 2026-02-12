@@ -5,6 +5,26 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-02-12
+
+### Added
+- Embedding-based hybrid lore search with RRF (Reciprocal Rank Fusion) ranking ([#61])
+- Local embedding model (`jinaai/jina-embeddings-v2-base-zh`) via fastembed — zero API calls, ~11ms per query ([#61])
+- Token-budgeted lore injection (~3000 tokens) instead of fixed top-5 ([#61])
+- Location pinning: category boosting based on game phase (副本/主神空間/戰鬥) ([#61])
+- Duplicate lore detection endpoint `GET /api/lore/duplicates` ([#61])
+- Embedding stats endpoint `GET /api/lore/embedding-stats` ([#61])
+
+### Changed
+- System prompt lore section: replaced ~6-8K token TOC with compact category summary (~50 tokens) ([#61])
+- Auto-play defaults to `claude_cli` provider with zero Gemini usage ([#61])
+- Gemini access blocked at `llm_bridge` level when provider is overridden (single gate) ([#61])
+
+### Removed
+- Gemini embedding API code from `gemini_bridge.py` (replaced by local model) ([#61])
+
+[#61]: https://github.com/lainn9527/agent-story/pull/61
+
 ## [0.13.7] - 2026-02-12
 
 ### Fixed
