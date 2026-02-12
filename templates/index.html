@@ -145,16 +145,16 @@
           <textarea id="user-input" placeholder="輸入你的行動…" rows="1"></textarea>
           <button id="send-btn">&#10148;</button>
         </div>
-        <button id="addon-panel-btn" title="附加功能">&#x2699;</button>
+        <button id="addon-panel-btn" title="附加功能" aria-haspopup="true" aria-expanded="false">&#x2699;</button>
         <div id="addon-panel" class="addon-panel hidden">
           <div class="addon-section">
             <div class="addon-section-title">模型選擇</div>
             <div class="addon-field">
-              <label>提供者</label>
+              <label for="addon-provider-select">提供者</label>
               <select id="addon-provider-select"></select>
             </div>
             <div class="addon-field">
-              <label>模型</label>
+              <label for="addon-model-select">模型</label>
               <select id="addon-model-select"></select>
             </div>
           </div>
@@ -172,7 +172,7 @@
               <button id="addon-pistol-btn" class="cheat-toggle" onclick="togglePistolMode()">OFF</button>
             </div>
             <div class="addon-field">
-              <label>偏好設定</label>
+              <label for="addon-nsfw-prefs">偏好設定</label>
               <textarea id="addon-nsfw-prefs" rows="3" placeholder="描述你的偏好（可選）…"></textarea>
             </div>
             <button id="addon-save-prefs-btn" class="addon-save-btn" onclick="saveNsfwPreferences()">儲存偏好</button>

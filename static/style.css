@@ -951,6 +951,10 @@ body {
   color: var(--text);
   border-color: var(--text-dim);
 }
+#addon-panel-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 #addon-panel-btn.addon-active {
   border-color: #4a8;
   color: #6fc;
