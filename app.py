@@ -341,19 +341,30 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
 
     # Self-healing: strip known artifacts from persisted state
     dirty = False
+    schema = _load_character_schema(story_id)
+    known = _get_schema_known_keys(schema)
+    # Which list keys were affected by the string-iteration bug
+    buggy_list_keys = set()
+    for l in schema.get("lists", []):
+        if l.get("state_add_key"):
+            buggy_list_keys.add(l["key"])
+
     for key in list(state.keys()):
         # Remove processing artifacts (_delta, _add, _remove for non-schema keys)
-        if key.endswith(("_delta", "_add", "_remove")):
-            schema = _load_character_schema(story_id)
-            known = _get_schema_known_keys(schema)
-            if key not in known:
-                del state[key]
-                dirty = True
-    # Remove single-character entries from lists
-    for key in list(state.keys()):
-        if isinstance(state[key], list):
-            cleaned = [x for x in state[key] if not isinstance(x, str) or len(x) > 1]
-            if len(cleaned) != len(state[key]):
+        if key.endswith(("_delta", "_add", "_remove")) and key not in known:
+            del state[key]
+            dirty = True
+    # Remove single-character entries only from lists that have state_add_key
+    # (those affected by the string-iteration bug), and only when 3+ single-char
+    # entries exist (to avoid false positives on legitimate CJK single-char names)
+    for key in buggy_list_keys:
+        lst = state.get(key)
+        if not isinstance(lst, list):
+            continue
+        single_chars = [x for x in lst if isinstance(x, str) and len(x) == 1]
+        if len(single_chars) >= 3:
+            cleaned = [x for x in lst if not isinstance(x, str) or len(x) > 1]
+            if len(cleaned) != len(lst):
                 state[key] = cleaned
                 dirty = True
 
@@ -1173,6 +1184,8 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 elif not isinstance(rm_val, list):
                     rm_val = []
                 for rm_item in rm_val:
+                    if not isinstance(rm_item, str):
+                        continue
                     rm_name = rm_item.split(" — ")[0].strip()
                     lst = [x for x in lst if x.split(" — ")[0].strip() != rm_name]
                 state[key] = lst
@@ -1224,7 +1237,7 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         "threat_level", "combat_status", "escape_options", "escape_route",
         "noise_level", "facility_status", "npc_status", "weapons_status",
         "tool_status", "available_escape", "available_locations",
-        "status_update", "current_predicament", "mission_progress",
+        "status_update", "current_predicament",
     }
 
     # Save extra keys — only non-delta, non-handled, string/number fields

@@ -358,6 +358,8 @@ let siblingGroups = {};
 let currentStoryId = null;
 let stories = {};
 let characterSchema = {};
+let knownNpcNames = [];       // populated by loadNpcs(), used for extra-field filtering
+let _prevExtraFieldCount = 0; // track extras count for auto-open on new fields
 
 // Live polling state (auto-play branches)
 let _livePollingTimer = null;
@@ -2395,13 +2397,20 @@ function renderCharacterStatus(state) {
     "dice_modifier", "dice_always_success",
   ]);
   // NPC name prefixes — their data belongs in the NPC panel
-  const NPC_PREFIXES = ["meiling_", "xiaowei_", "team_", "gene_lock_meiling",
-    "gene_lock_xiaowei", "gene_lock_eddy"];
+  // Build NPC prefixes dynamically from knownNpcNames + common patterns
+  const npcPrefixes = ["team_"];
+  for (const name of knownNpcNames) {
+    // Generate common LLM patterns: "meiling_", "gene_lock_meiling", etc.
+    const lower = name.toLowerCase();
+    npcPrefixes.push(lower + "_");
+    npcPrefixes.push("gene_lock_" + lower);
+  }
 
   function isHiddenKey(key) {
     if (HIDDEN_EXACT.has(key)) return true;
     if (HIDDEN_SUFFIXES.some(s => key.endsWith(s))) return true;
-    if (NPC_PREFIXES.some(p => key.startsWith(p))) return true;
+    const keyLower = key.toLowerCase();
+    if (npcPrefixes.some(p => keyLower.startsWith(p))) return true;
     return false;
   }
 
@@ -2424,6 +2433,10 @@ function renderCharacterStatus(state) {
   if (extras.length > 0) {
     const details = document.createElement("details");
     details.className = "extra-fields-section";
+    // Auto-open when new fields appear (count increased since last render)
+    if (extras.length > _prevExtraFieldCount && _prevExtraFieldCount > 0) {
+      details.open = true;
+    }
     const summary = document.createElement("summary");
     summary.textContent = `其他狀態 (${extras.length})`;
     details.appendChild(summary);
@@ -2442,6 +2455,7 @@ function renderCharacterStatus(state) {
 
     panel.appendChild(details);
   }
+  _prevExtraFieldCount = extras.length;
 
   for (const listDef of (schema.lists || [])) {
     const h3 = document.createElement("h3");
@@ -2489,7 +2503,9 @@ function renderCharacterStatus(state) {
 async function loadNpcs() {
   try {
     const result = await API.npcs(currentBranchId);
-    renderNpcPanel(result.npcs || []);
+    const npcs = result.npcs || [];
+    knownNpcNames = npcs.map(n => n.name);
+    renderNpcPanel(npcs);
   } catch (e) { /* ignore */ }
 }
 
