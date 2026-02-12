@@ -4084,6 +4084,7 @@ def api_nsfw_preferences_set():
         "custom": body.get("custom", "").strip(),
         "custom_chips": body.get("custom_chips", {}),
         "hidden_chips": body.get("hidden_chips", []),
+        "chip_counts": body.get("chip_counts", {}),
     }
     path = _nsfw_preferences_path(story_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
