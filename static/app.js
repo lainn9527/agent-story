@@ -3068,14 +3068,8 @@ async function saveNsfwPreferences() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ preferences: ta.value }),
     });
-    if (saveBtn) {
-      saveBtn.textContent = "已儲存";
-      saveBtn.classList.add("saved");
-      setTimeout(() => {
-        saveBtn.textContent = "儲存偏好";
-        saveBtn.classList.remove("saved");
-      }, 2000);
-    }
+    showToast("偏好已儲存");
+    closeAddonPanel();
   } catch (e) {
     console.error("saveNsfwPreferences error:", e);
   }
