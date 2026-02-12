@@ -5,6 +5,16 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.7] - 2026-02-12
+
+### Fixed
+- Cheat settings (金手指) and branch config lost on edit/regen due to `_resolve_sibling_parent` overwriting source branch ([#71])
+
+### Changed
+- Mobile touch UX: larger touch targets (44px min), haptic feedback on buttons, active-state visual feedback ([#71])
+
+[#71]: https://github.com/lainn9527/agent-story/pull/71
+
 ## [0.13.6] - 2026-02-12
 
 ### Added
