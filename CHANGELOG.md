@@ -5,6 +5,22 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2] - 2026-02-12
+
+### Added
+- Addon panel (⚙) next to send button with quick-access model selection, dice cheat toggle, and pistol mode ([#73])
+- Pistol mode (手槍模式): per-branch toggle that injects intimate scene instructions into system prompt ([#73])
+- Pistol preferences modal with 134 quick-select chips across 8 categories (風格/體位/前戲/高潮/道具/場景/描寫重點/角色動態) ([#73])
+- Custom chip support: add/delete user-defined chips per category, persisted in JSON ([#73])
+- Frequency-based chip sorting: commonly used chips rise to top after every 3 uses ([#73])
+- Structured preference injection: chips formatted by category in system prompt for better LLM comprehension ([#73])
+- LLM pacing instructions: mental roadmap (前戲→升溫→高潮→餘韻), 1-3 elements per reply, 1500+ char minimum ([#73])
+- Combined provider+model tree-style dropdown with optgroup in addon panel ([#73])
+- Pink header badge for pistol mode, green glow on addon button when any addon active ([#73])
+- Per-story NSFW preferences stored as `nsfw_preferences.json` ([#73])
+
+[#73]: https://github.com/lainn9527/agent-story/pull/73
+
 ## [0.14.1] - 2026-02-12
 
 ### Added
