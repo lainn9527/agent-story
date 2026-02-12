@@ -3089,11 +3089,14 @@ function updatePistolBadge(active) {
 function updateAddonBtnIndicator() {
   const btn = document.getElementById("addon-panel-btn");
   if (!btn) return;
-  const diceBtn = document.getElementById("addon-dice-btn");
-  const pistolBtn = document.getElementById("addon-pistol-btn");
-  const anyActive = (diceBtn && diceBtn.classList.contains("active")) ||
-                    (pistolBtn && pistolBtn.classList.contains("active"));
-  btn.classList.toggle("addon-active", anyActive);
+  // Check addon panel buttons first, fall back to drawer/badge (always populated)
+  const diceActive = document.getElementById("addon-dice-btn")?.classList.contains("active")
+    || document.getElementById("dice-cheat-btn")?.classList.contains("active")
+    || false;
+  const pistolActive = document.getElementById("addon-pistol-btn")?.classList.contains("active")
+    || document.getElementById("pistol-badge")?.classList.contains("visible")
+    || false;
+  btn.classList.toggle("addon-active", diceActive || pistolActive);
 }
 
 async function loadPistolModeStatus() {
