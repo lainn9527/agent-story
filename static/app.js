@@ -3152,7 +3152,7 @@ function _createCustomChip(value) {
   const chip = document.createElement("button");
   chip.className = "pistol-chip custom selected";
   chip.dataset.value = value;
-  chip.innerHTML = value + '<span class="chip-delete">&times;</span>';
+  chip.innerHTML = escapeHtml(value) + '<span class="chip-delete">&times;</span>';
   chip.addEventListener("click", (e) => {
     if (e.target.classList.contains("chip-delete")) {
       haptic();
@@ -3881,10 +3881,12 @@ document.addEventListener("keydown", (e) => {
       return;
     }
     if (!document.getElementById("pistol-prefs-modal").classList.contains("hidden")) {
+      e.stopImmediatePropagation();
       closePistolPrefsModal();
       return;
     }
     if (!document.getElementById("addon-panel").classList.contains("hidden")) {
+      e.stopImmediatePropagation();
       closeAddonPanel();
       return;
     }
