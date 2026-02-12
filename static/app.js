@@ -3096,6 +3096,8 @@ async function openPistolPrefsModal() {
     // Remove old custom chips
     modal.querySelectorAll(".pistol-chip.custom").forEach(el => el.remove());
 
+    const chipCounts = data.chip_counts || {};
+
     // Hide/show predefined chips based on hidden_chips
     modal.querySelectorAll(".pistol-chip:not(.custom)").forEach(chip => {
       chip.style.display = hiddenChips.includes(chip.dataset.value) ? "none" : "";
@@ -3111,6 +3113,21 @@ async function openPistolPrefsModal() {
         container.insertBefore(chip, addBtn);
       }
     }
+
+    // Sort chips by usage frequency within each group
+    // Uses floor(count/3) as tier — chips only move after every 3 uses
+    modal.querySelectorAll(".pistol-chips").forEach(container => {
+      const addBtn = container.querySelector(".pistol-chip-add");
+      const chips = Array.from(container.querySelectorAll(".pistol-chip"));
+      chips.sort((a, b) => {
+        const tierA = Math.floor((chipCounts[a.dataset.value] || 0) / 3);
+        const tierB = Math.floor((chipCounts[b.dataset.value] || 0) / 3);
+        return tierB - tierA; // higher tier first
+      });
+      for (const chip of chips) {
+        container.insertBefore(chip, addBtn);
+      }
+    });
 
     // Set selected state on all chips
     modal.querySelectorAll(".pistol-chip").forEach(chip => {
@@ -3168,11 +3185,21 @@ async function savePistolPrefs() {
   });
   const ta = document.getElementById("pistol-custom-prefs");
   const custom = ta ? ta.value : "";
+  // Increment usage counts for selected chips
+  let chipCounts = {};
+  try {
+    const prev = await fetch("/api/nsfw-preferences");
+    const prevData = await prev.json();
+    chipCounts = prevData.chip_counts || {};
+  } catch (_) {}
+  for (const c of chips) {
+    chipCounts[c] = (chipCounts[c] || 0) + 1;
+  }
   try {
     await fetch("/api/nsfw-preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chips, custom, custom_chips: customChips, hidden_chips: hiddenChips }),
+      body: JSON.stringify({ chips, custom, custom_chips: customChips, hidden_chips: hiddenChips, chip_counts: chipCounts }),
     });
     showToast("偏好已儲存");
     closePistolPrefsModal();
