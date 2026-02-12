@@ -362,11 +362,11 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     if state.get("current_phase"):
         lines.append(f"- 當前階段：{state['current_phase']}")
 
-    # 2. World time
+    # 2. World time (get_world_day returns float: fractional days)
     wd = get_world_day(story_id, branch_id)
     if wd:
-        day = wd.get("day", 1)
-        hour = wd.get("hour", 0)
+        day = int(wd) + 1  # day 1-based
+        hour = int((wd % 1) * 24)
         if hour < 6:
             period = "深夜"
         elif hour < 9:
