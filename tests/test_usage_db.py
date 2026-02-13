@@ -5,6 +5,7 @@ Uses monkeypatched STORIES_DIR for filesystem isolation.
 """
 
 import os
+from unittest import mock
 
 import pytest
 
@@ -216,14 +217,12 @@ class TestLogFromBridge:
         assert summary["total"]["calls"] == 1
         assert summary["total"]["total_tokens"] == 150
 
-    def test_none_usage_returns_early(self, story_id):
+    @mock.patch("llm_bridge.get_last_usage", return_value=None)
+    def test_none_usage_returns_early(self, mock_get, story_id):
         # If usage is None AND get_last_usage returns None, should not log
         usage_db.log_from_bridge(story_id, "compaction", 1.0, usage=None)
-        # This will try to import llm_bridge.get_last_usage — mock it
         summary = usage_db.get_usage_summary(story_id, days=1)
-        # Either 0 calls (no usage) or 1 call depending on llm_bridge state
-        # The key is no exception raised
-        assert summary["total"]["calls"] >= 0
+        assert summary["total"]["calls"] == 0
 
     def test_elapsed_s_to_ms_conversion(self, story_id):
         usage = {

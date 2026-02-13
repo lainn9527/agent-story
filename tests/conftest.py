@@ -180,7 +180,7 @@ def story_dir(tmp_path):
     # stories.json
     stories_json = tmp_path / "data" / "stories.json"
     stories_json.write_text(
-        json.dumps({"active_story_id": SAMPLE_STORY_ID, "stories": [{"id": SAMPLE_STORY_ID, "name": "測試故事"}]}),
+        json.dumps({"active_story_id": SAMPLE_STORY_ID, "stories": {SAMPLE_STORY_ID: {"id": SAMPLE_STORY_ID, "name": "測試故事"}}}),
         encoding="utf-8",
     )
 

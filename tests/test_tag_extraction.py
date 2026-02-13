@@ -160,7 +160,7 @@ class TestExtractNpcTag:
         assert len(npcs) == 1
         assert npcs[0]["name"] == "小薇"
         assert npcs[0]["personality"]["openness"] == 7
-        assert "NPC" not in clean or "NPC" in "繼續"  # tag removed
+        assert "<!--NPC" not in clean  # tag removed
 
     def test_partial_npc_data(self):
         npc = {"name": "路人"}
