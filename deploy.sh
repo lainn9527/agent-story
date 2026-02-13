@@ -6,12 +6,10 @@ set -e
 
 PROD_DIR="/Users/eddylai/story-prod"
 
-echo "==> Fetching latest main..."
-git fetch origin main
-
 echo "==> Updating story-prod..."
 cd "$PROD_DIR"
-git checkout FETCH_HEAD 2>/dev/null || git fetch origin main && git checkout FETCH_HEAD
+git fetch origin main
+git checkout FETCH_HEAD
 
 echo "==> Restarting server on port 5051..."
 lsof -ti:5051 | xargs kill 2>/dev/null || true
