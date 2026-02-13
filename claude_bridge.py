@@ -14,6 +14,9 @@ CLAUDE_TIMEOUT = 300  # seconds (5 min, allows for complex responses)
 CLEAN_CWD = "/tmp"    # avoid loading project CLAUDE.md into context
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/Users/eddylai/.local/bin/claude")
 
+# Clean env for subprocess: remove CLAUDECODE to avoid nested-session detection
+_CLEAN_ENV = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
 
 def get_last_usage() -> dict | None:
     """Claude CLI does not provide token usage data. Always returns None."""
@@ -67,6 +70,7 @@ def call_claude_gm(
             text=True,
             timeout=CLAUDE_TIMEOUT,
             cwd=CLEAN_CWD,
+            env=_CLEAN_ENV,
         )
         elapsed = time.time() - t0
 
@@ -154,6 +158,7 @@ def call_claude_gm_stream(
             text=True,
             bufsize=1,  # line-buffered for streaming
             cwd=CLEAN_CWD,
+            env=_CLEAN_ENV,
         )
     except FileNotFoundError:
         log.info("    claude_bridge_stream: claude CLI not found")
@@ -296,6 +301,7 @@ def generate_story_summary(conversation_text: str, summary_path: str | None = No
             capture_output=True,
             text=True,
             timeout=180,
+            env=_CLEAN_ENV,
         )
 
         if result.returncode == 0 and result.stdout.strip():
