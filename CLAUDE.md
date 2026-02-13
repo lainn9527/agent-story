@@ -221,12 +221,13 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - System prompt uses double-braces `{{}}` for literal braces (Python `.format()`)
 
 ## Development Guidelines
-- **This machine is the production server.** Port 5051 is reserved for the live instance. When testing locally, always use a different port (e.g. `PORT=5052 python app.py`). Never bind to 5051 during development.
+- **Production runs from `/Users/eddylai/story-prod`** (a git worktree on port 5051). NEVER edit files there directly.
+- **NEVER edit source files in `/Users/eddylai/story` (main repo) directly.** This repo is for PR management and creating worktrees only. All code changes MUST happen in a feature worktree. There is a pre-commit hook on `main` that blocks direct commits as a safety net.
 - **Use `claude_cli` provider for testing.** Gemini free-tier keys are shared with production and rate-limited. Set `"provider": "claude_cli"` in your local `llm_config.json` to avoid burning Gemini quota.
 
 ### Git Workflow
 - **Default branch**: `main`
-- **Always use git worktree.** Create a new branch based on `main` in a worktree for every task. Never work directly on `main`.
+- **Always use git worktree.** Create a new branch based on `main` in a worktree for every task. Never work directly on `main`. This rule has been violated 5+ times — zero tolerance.
   ```bash
   git worktree add ../story-<branch-name> -b <branch-name> main
   ```
@@ -238,8 +239,8 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - **E2E testing (user-gated).** After all reviews pass, set up e2e testing for the user:
   1. Copy production data and config into the worktree (never symlink — avoids data pollution):
      ```bash
-     cp -r /Users/eddylai/story/data ../story-<branch-name>/data
-     cp /Users/eddylai/story/llm_config.json ../story-<branch-name>/llm_config.json
+     cp -r /Users/eddylai/story-prod/data ../story-<branch-name>/data
+     cp /Users/eddylai/story-prod/llm_config.json ../story-<branch-name>/llm_config.json
      ```
   2. Find a random available port and start the server:
      ```bash
@@ -254,6 +255,10 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
   git rebase main
   gh pr merge <pr-number> --rebase --delete-branch
   git worktree remove ../story-<branch-name>
+  ```
+  3. Deploy to production (fetch + restart server automatically):
+  ```bash
+  /Users/eddylai/story/deploy.sh
   ```
   **Never merge without user confirmation and version bump.**
 
