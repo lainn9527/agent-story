@@ -209,13 +209,13 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 
     # Claude CLI one-shot
     _tls.last_usage = None
-    from claude_bridge import CLAUDE_BIN
+    from claude_bridge import CLAUDE_BIN, _CLEAN_ENV
     model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     cmd = [CLAUDE_BIN, "-p", "--output-format", "json", "--model", model]
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
     try:
-        result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=120, env=_CLEAN_ENV)
         if result.returncode == 0:
             data = json.loads(result.stdout)
             return data.get("result", "").strip()
