@@ -5,6 +5,17 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.6] - 2026-02-13
+
+### Fixed
+- Fix Claude CLI nested-session crash when server is started from Claude Code session — strip `CLAUDECODE` env var from all subprocess calls ([#77])
+
+### Added
+- Rotating file logger (`server.log`, 5MB x 4 files) alongside console output ([#77])
+- Redirect `deploy.sh` stderr to `server_stderr.log` instead of `/dev/null` ([#77])
+
+[#77]: https://github.com/lainn9527/agent-story/pull/77
+
 ## [0.14.5] - 2026-02-13
 
 ### Added
