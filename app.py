@@ -3,6 +3,7 @@
 import copy
 import json
 import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -22,13 +23,29 @@ else:
 from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
 
 # ---------------------------------------------------------------------------
-# Logging
+# Logging — console + rotating file
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    format="[%(asctime)s] %(message)s",
+_log_fmt = logging.Formatter(
+    "[%(asctime)s] %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
 )
+
+# Console handler (for interactive use / tmux)
+_console_h = logging.StreamHandler()
+_console_h.setFormatter(_log_fmt)
+
+# Rotating file handler — 5 MB per file, keep 3 backups
+_log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.log")
+_file_h = logging.handlers.RotatingFileHandler(
+    _log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8",
+)
+_file_h.setFormatter(_log_fmt)
+
+# Root logger — captures Flask/Werkzeug + our "rpg" logger
+logging.root.setLevel(logging.INFO)
+logging.root.addHandler(_console_h)
+logging.root.addHandler(_file_h)
+
 log = logging.getLogger("rpg")
 
 from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary, get_last_usage, get_provider
