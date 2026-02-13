@@ -5,6 +5,18 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.5] - 2026-02-13
+
+### Added
+- Production deploy workflow: `deploy.sh` for one-command deploy after merge ([#76])
+- Production isolation: server runs from `story-prod` worktree, decoupled from main repo ([#76])
+- Pre-commit hook blocks direct commits to `main` branch ([#76])
+
+### Changed
+- CLAUDE.md: enforce worktree-only development, update E2E data paths and merge process ([#76])
+
+[#76]: https://github.com/lainn9527/agent-story/pull/76
+
 ## [0.14.4] - 2026-02-12
 
 ### Removed
