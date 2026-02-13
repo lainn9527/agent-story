@@ -497,25 +497,6 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     return "\n".join(lines)
 
 
-def _build_tool_instructions(story_id: str, branch_id: str) -> str:
-    """Build tool usage instructions for Claude CLI GM (Phase 2: fact-checking via Read/Grep)."""
-    npcs_path = _story_npcs_path(story_id, branch_id)
-    state_path = _story_character_state_path(story_id, branch_id)
-    # Construct path without _branch_dir() to avoid os.makedirs side effect
-    world_day_path = os.path.join(_story_dir(story_id), "branches", branch_id, "world_day.json")
-    lore_path = os.path.join(_story_dir(story_id), "world_lore.json")
-    return (
-        "\n\n## 資料查詢（確認事實用）\n"
-        "當你對 NPC 關係、道具、或過去事件記憶模糊時，可以先查閱資料再回答：\n"
-        f"- Read {npcs_path} — NPC 完整資料\n"
-        f"- Read {state_path} — 角色當前狀態與道具\n"
-        f"- Read {world_day_path} — 世界時間\n"
-        f"- Read {lore_path} — 世界設定\n"
-        "- 用 Grep 在上述檔案中搜尋特定關鍵字\n"
-        "只在不確定時查詢，不要每次都讀取。\n"
-    )
-
-
 def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main", narrative_recap: str = "") -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
     # Blank branches are fresh starts — no story summary or NPC context from parent
@@ -566,10 +547,6 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     else:
         # Fallback to prompts.py template
         result = build_system_prompt(state_text, summary, critical_facts=critical_facts)
-
-    # Phase 2: Append tool instructions for Claude CLI only
-    if get_provider() == "claude_cli":
-        result += _build_tool_instructions(story_id, branch_id)
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
     story_dir = _story_dir(story_id)
