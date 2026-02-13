@@ -54,7 +54,6 @@ def call_claude_gm(
         "--model", "claude-sonnet-4-5-20250929",
         "--system-prompt", system_prompt,
         "--output-format", "json",
-        "--allowedTools", "Read,Grep",
     ]
 
     log.info("    claude_bridge: calling CLI mode=stateless prompt_len=%d", len(prompt))
@@ -141,7 +140,6 @@ def call_claude_gm_stream(
         "--model", "claude-sonnet-4-5-20250929",
         "--system-prompt", system_prompt,
         "--output-format", "stream-json",
-        "--allowedTools", "Read,Grep",
     ]
 
     log.info("    claude_bridge_stream: calling CLI mode=stateless prompt_len=%d", len(prompt))
