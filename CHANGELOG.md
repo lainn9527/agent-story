@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.9] - 2026-02-13
+
+### Fixed
+- Clear narrative recap for blank branches — GM no longer references previous storylines in fresh games ([#83])
+
+[#83]: https://github.com/lainn9527/agent-story/pull/83
+
 ## [0.14.8] - 2026-02-13
 
 ### Fixed
