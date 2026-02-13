@@ -86,6 +86,52 @@
       </div>
     </div>
 
+    <!-- Dungeon Progress section -->
+    <div class="drawer-section" id="dungeon-section" style="display:none;">
+      <div class="drawer-section-title">
+        <span>⚔️ 副本進度</span>
+        <button id="dungeon-exit-btn" class="drawer-add-btn dungeon-exit-btn"
+                title="回歸主神空間（需主線 100%）" style="display:none;">
+          ↩
+        </button>
+      </div>
+
+      <!-- Progress overview -->
+      <div id="dungeon-overview" class="dungeon-overview">
+        <!-- Mainline progress bar -->
+        <div class="dungeon-progress-bar">
+          <div class="dungeon-progress-label">
+            <span>主線進度</span>
+            <span class="dungeon-progress-pct">0%</span>
+          </div>
+          <div class="dungeon-progress-track">
+            <div class="dungeon-progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
+        <!-- Exploration metrics -->
+        <div class="dungeon-metrics">
+          <span class="dungeon-metric-label">地圖探索</span>
+          <span class="dungeon-metric-value">0/0</span>
+        </div>
+      </div>
+
+      <!-- Mainline nodes -->
+      <div id="dungeon-mainline" class="dungeon-mainline">
+        <div class="dungeon-mainline-title">主線節點</div>
+        <div class="dungeon-nodes">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Map areas (collapsible) -->
+      <details id="dungeon-map" class="dungeon-map">
+        <summary class="dungeon-map-title">地圖區域 ▼</summary>
+        <div class="dungeon-areas">
+          <!-- Populated by JS -->
+        </div>
+      </details>
+    </div>
+
     <!-- NPC section -->
     <div class="drawer-section">
       <div class="drawer-section-title">
