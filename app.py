@@ -983,7 +983,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "可用分類：主神設定與規則/體系/商城/副本世界觀/場景/NPC/故事追蹤\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
-                f"已有事件標題（避免重複）：{titles_str}\n"
+                f"已有事件標題：{titles_str}\n"
+                "- 新事件：正常輸出\n"
+                "- 已有事件狀態變化（如伏筆被觸發、事件被解決）：**重新輸出該事件並更新 status**\n"
                 '格式：[{{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}}]\n'
                 "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
                 "可用狀態：planted/triggered/resolved\n\n"
@@ -1085,9 +1087,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     continue
                 if title not in existing_titles:
                     event["message_index"] = msg_index
-                    insert_event(story_id, event, branch_id)
+                    new_id = insert_event(story_id, event, branch_id)
                     existing_titles.add(title)
-                    existing_title_map[title] = {"id": None, "status": event.get("status", "planted")}
+                    existing_title_map[title] = {"id": new_id, "status": event.get("status", "planted")}
                     saved_counts["events"] += 1
                 else:
                     # Update status if it advanced (planted→triggered→resolved)
@@ -1494,7 +1496,7 @@ def _auto_prune_siblings(story_id: str, branch_id: str, current_msg_index: int) 
     # Build ancestor chain for current branch
     ancestor_set = set()
     cur = branch_id
-    while cur is not None:
+    while cur is not None and cur not in ancestor_set:
         ancestor_set.add(cur)
         b = branches.get(cur)
         if not b:
@@ -3009,9 +3011,14 @@ def api_branches_promote():
 
     ancestor_chain = []
     cur = branch_id
-    while cur is not None and cur != "main":
+    visited = set()
+    while cur is not None and cur != "main" and cur not in visited:
+        visited.add(cur)
         ancestor_chain.append(cur)
-        cur = branches[cur].get("parent_branch_id")
+        b = branches.get(cur)
+        if not b:
+            break
+        cur = b.get("parent_branch_id")
 
     _save_json(_story_messages_path(story_id, "main"), new_messages)
 
