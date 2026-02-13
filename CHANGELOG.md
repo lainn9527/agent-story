@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.7] - 2026-02-13
+
+### Fixed
+- Fix dice system crash when LLM writes non-string character state values (e.g. `"spirit": 80`) ([#80])
+
+[#80]: https://github.com/lainn9527/agent-story/pull/80
+
 ## [0.14.6] - 2026-02-13
 
 ### Fixed
