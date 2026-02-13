@@ -194,6 +194,18 @@ def get_event_titles(story_id: str, branch_id: str) -> set[str]:
     return titles
 
 
+def get_event_title_map(story_id: str, branch_id: str) -> dict[str, dict]:
+    """Return map of title → {id, status} for dedup with status update."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        "SELECT id, title, status FROM events WHERE branch_id = ?", (branch_id,)
+    ).fetchall()
+    result = {r["title"]: {"id": r["id"], "status": r["status"]} for r in rows}
+    conn.close()
+    return result
+
+
 def get_active_foreshadowing(story_id: str, branch_id: str) -> list[dict]:
     """Get planted events not yet triggered for a branch."""
     conn = _get_conn(story_id)
