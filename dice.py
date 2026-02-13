@@ -50,9 +50,9 @@ def _lookup_modifier(raw: str, table: list[tuple[str, int]]) -> int:
 
 def _get_modifiers(state: dict) -> tuple[int, int, int]:
     """Extract (physique_mod, spirit_mod, gene_lock_mod) from character state."""
-    physique = _lookup_modifier(state.get("physique", ""), _PHYSIQUE_TABLE)
-    spirit = _lookup_modifier(state.get("spirit", ""), _SPIRIT_TABLE)
-    gene_lock = _lookup_modifier(state.get("gene_lock", ""), _GENE_LOCK_TABLE)
+    physique = _lookup_modifier(str(state.get("physique", "")), _PHYSIQUE_TABLE)
+    spirit = _lookup_modifier(str(state.get("spirit", "")), _SPIRIT_TABLE)
+    gene_lock = _lookup_modifier(str(state.get("gene_lock", "")), _GENE_LOCK_TABLE)
     return physique, spirit, gene_lock
 
 
