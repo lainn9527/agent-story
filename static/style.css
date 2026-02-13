@@ -2572,3 +2572,266 @@ body {
   background: rgba(212, 168, 83, 0.12);
   color: var(--gold);
 }
+
+/* ========== Dungeon Progress Panel ========== */
+
+/* Progress overview */
+.dungeon-overview {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+/* Mainline progress bar */
+.dungeon-progress-bar {
+  margin-bottom: 8px;
+}
+
+.dungeon-progress-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.dungeon-progress-pct {
+  font-weight: 700;
+  color: var(--gold);
+  font-size: 0.85rem;
+}
+
+.dungeon-progress-track {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dungeon-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold) 0%, var(--accent) 100%);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+/* Exploration metrics */
+.dungeon-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.dungeon-metric-label {
+  margin-right: 4px;
+}
+
+.dungeon-metric-value {
+  font-weight: 700;
+  color: var(--gold);
+}
+
+/* Mainline nodes */
+.dungeon-mainline {
+  margin-bottom: 10px;
+}
+
+.dungeon-mainline-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.dungeon-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dungeon-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.2s;
+}
+
+.dungeon-node.completed {
+  opacity: 0.6;
+  border-left-color: var(--gold);
+}
+
+.dungeon-node.active {
+  border-left-color: var(--accent);
+  background: rgba(196, 112, 75, 0.05);
+}
+
+.dungeon-node.locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dungeon-node-icon {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dungeon-node.completed .dungeon-node-icon {
+  color: var(--gold);
+}
+
+.dungeon-node.active .dungeon-node-icon {
+  color: var(--accent);
+}
+
+.dungeon-node.locked .dungeon-node-icon {
+  color: var(--text-dim);
+}
+
+.dungeon-node-content {
+  flex: 1;
+}
+
+.dungeon-node-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.dungeon-node-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* Map areas (using <details> for collapse) */
+.dungeon-map {
+  margin-bottom: 8px;
+}
+
+.dungeon-map-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dungeon-areas {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.dungeon-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+}
+
+.dungeon-area-badge {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.dungeon-area.mainline .dungeon-area-badge {
+  background: rgba(184, 134, 11, 0.15);
+  color: var(--gold);
+}
+
+.dungeon-area.side .dungeon-area-badge {
+  background: rgba(100, 149, 237, 0.15);
+  color: #6495ed;
+}
+
+.dungeon-area-name {
+  flex: 1;
+  color: var(--text);
+}
+
+.dungeon-area-status {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* Exit button */
+.dungeon-exit-btn {
+  background: rgba(184, 134, 11, 0.08);
+  color: var(--gold);
+  border-color: var(--gold);
+  width: 32px;
+  height: 26px;
+  font-size: 0.9rem;
+}
+
+.dungeon-exit-btn:hover:not(:disabled) {
+  background: rgba(184, 134, 11, 0.15);
+}
+
+.dungeon-exit-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Responsive (mobile) */
+@media (max-width: 768px) {
+  .dungeon-progress-track {
+    height: 6px;
+  }
+
+  .dungeon-metrics {
+    font-size: 0.7rem;
+  }
+
+  .dungeon-node {
+    padding: 6px 8px;
+  }
+
+  .dungeon-node-title {
+    font-size: 0.8rem;
+  }
+
+  .dungeon-node-hint {
+    display: none;  /* Hide hints on mobile */
+  }
+
+  .dungeon-area {
+    padding: 5px 6px;
+    font-size: 0.75rem;
+  }
+
+  .dungeon-exit-btn {
+    font-size: 0.8rem;
+    width: 28px;
+    height: 24px;
+  }
+}

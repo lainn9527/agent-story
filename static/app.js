@@ -283,6 +283,16 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }).then(r => r.json()),
+
+  // Dungeon System
+  dungeonProgress: (branchId) =>
+    fetch(`/api/dungeon/progress?branch_id=${branchId || "main"}`).then(r => r.json()),
+  dungeonReturn: (branchId) =>
+    fetch("/api/dungeon/return", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: branchId }),
+    }).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -606,6 +616,7 @@ function openDrawer() {
   renderBranchList();
   loadNpcs();
   loadEvents();
+  loadDungeonProgress();
   loadSummaries();
   loadConfigPanel();
 }
@@ -1527,6 +1538,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   renderCharacterStatus(status);
   loadNpcs();
   loadEvents();
+  loadDungeonProgress();
   loadSummaries();
   loadDiceCheatStatus();
   loadPistolModeStatus();
@@ -2810,6 +2822,95 @@ function renderEventsPanel(events) {
 }
 
 // ---------------------------------------------------------------------------
+// Dungeon Progress Panel
+// ---------------------------------------------------------------------------
+
+async function loadDungeonProgress() {
+  try {
+    const result = await API.dungeonProgress(currentBranchId);
+    renderDungeonPanel(result);
+  } catch (e) {
+    console.warn("Failed to load dungeon progress:", e);
+  }
+}
+
+function renderDungeonPanel(data) {
+  const section = document.getElementById("dungeon-section");
+  const exitBtn = document.getElementById("dungeon-exit-btn");
+
+  if (!data.in_dungeon) {
+    section.style.display = "none";
+    return;
+  }
+
+  section.style.display = "block";
+
+  // Exit button
+  exitBtn.style.display = "inline-block";
+  exitBtn.disabled = !data.can_exit;
+  exitBtn.title = data.can_exit
+    ? "回歸主神空間"
+    : `需主線 100%（當前 ${data.mainline_progress}%）`;
+
+  // Render progress overview
+  document.querySelector(".dungeon-progress-pct").textContent = `${data.mainline_progress}%`;
+  document.querySelector(".dungeon-progress-fill").style.width = `${data.mainline_progress}%`;
+  document.querySelector(".dungeon-metric-value").textContent =
+    `${data.metrics.explored_areas}/${data.metrics.total_areas}`;
+
+  // Render mainline nodes (simplified: show completed + current + next)
+  const nodesContainer = document.querySelector(".dungeon-nodes");
+  nodesContainer.innerHTML = data.mainline_nodes.map(node => {
+    const iconMap = { completed: "✓", active: "◉", locked: "○" };
+    return `
+      <div class="dungeon-node ${node.status}">
+        <div class="dungeon-node-icon">${iconMap[node.status]}</div>
+        <div class="dungeon-node-content">
+          <div class="dungeon-node-title">${escapeHtml(node.title)}</div>
+          <div class="dungeon-node-hint">${escapeHtml(node.hint)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Render map areas
+  const areasContainer = document.querySelector(".dungeon-areas");
+  areasContainer.innerHTML = data.map_areas.map(area => {
+    const badgeMap = { mainline: "主", side: "支" };
+    return `
+      <div class="dungeon-area ${area.type}">
+        <div class="dungeon-area-badge">${badgeMap[area.type] || "?"}</div>
+        <div class="dungeon-area-name">${escapeHtml(area.name)}</div>
+        <div class="dungeon-area-status">
+          ${area.status === "explored" ? `探索度 ${area.exploration}%` : "已發現"}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+// Exit button event handler
+document.getElementById("dungeon-exit-btn").addEventListener("click", async () => {
+  if (!await showConfirm("確定要回歸主神空間嗎？回歸後副本進度將結算。")) return;
+
+  try {
+    const res = await API.dungeonReturn(currentBranchId);
+    if (res.success) {
+      showAlert(`回歸成功！獲得獎勵點數 ${res.reward_points}（難度縮放 ${res.scaling}x）`);
+      await loadMessages(currentBranchId);
+      loadDungeonProgress();
+      loadNpcs();
+      loadEvents();
+      scrollToBottom();
+    } else {
+      showAlert(res.message || "回歸失敗");
+    }
+  } catch (err) {
+    showAlert("網路錯誤：" + err.message);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Config Panel (provider / model switcher)
 // ---------------------------------------------------------------------------
 
@@ -3616,6 +3717,7 @@ async function sendMessage() {
         updateWorldDayDisplay(status.world_day);
         loadNpcs();
         loadEvents();
+        loadDungeonProgress();
 
         // Poll for background tag extraction updates (state, NPCs, events)
         // Extraction runs async and may take 10-30s depending on LLM provider
@@ -3634,6 +3736,7 @@ async function sendMessage() {
               clearInterval(pollInterval);
               renderCharacterStatus(fresh);
               updateWorldDayDisplay(fresh.world_day);
+              loadDungeonProgress();
               loadNpcs();
               loadEvents();
             }

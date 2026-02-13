@@ -72,6 +72,13 @@ from gm_cheats import (
     get_dice_always_success, set_dice_always_success,
     get_pistol_mode, set_pistol_mode,
 )
+from dungeon_system import (
+    ensure_dungeon_templates, initialize_dungeon_progress, archive_current_dungeon,
+    update_dungeon_progress, update_dungeon_area, validate_dungeon_progression,
+    build_dungeon_context, copy_dungeon_progress, get_dungeon_progress_snapshot,
+    _load_dungeon_templates, _load_dungeon_template, _load_dungeon_progress,
+    _parse_rank,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -529,6 +536,8 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
+    # Build dungeon context
+    dungeon_context = build_dungeon_context(story_id, branch_id)
     if os.path.exists(prompt_path):
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
@@ -541,6 +550,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
             narrative_recap=narrative_recap,
             other_agents="（目前無其他輪迴者資料）",
             critical_facts=critical_facts,
+            dungeon_context=dungeon_context,
         )
         # If template lacks {critical_facts} placeholder, inject before character state
         if critical_facts and "關鍵事實" not in result:
@@ -553,7 +563,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
                 result = facts_section + result
     else:
         # Fallback to prompts.py template
-        result = build_system_prompt(state_text, critical_facts=critical_facts)
+        result = build_system_prompt(state_text, critical_facts=critical_facts, dungeon_context=dungeon_context)
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
     story_dir = _story_dir(story_id)
@@ -1209,9 +1219,44 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "例如：「七首殺屍測試」「巷道右側突圍」「自省之眼覺醒」「進入蜀山副本」「商城兌換裝備」\n"
                 "要求：動作導向、簡潔、不帶標點符號。\n"
                 '格式：字串\n\n'
+            )
+
+            # Add dungeon progress section if currently in dungeon
+            dungeon_progress = _load_dungeon_progress(story_id, branch_id)
+            if dungeon_progress and dungeon_progress.get("current_dungeon"):
+                current = dungeon_progress["current_dungeon"]
+                template = _load_dungeon_template(story_id, current["dungeon_id"])
+                if template:
+                    # Get current node list for reference
+                    nodes_str = ", ".join([n["id"] for n in template["mainline"]["nodes"]])
+                    areas_str = ", ".join([a["id"] for a in template.get("areas", [])])
+
+                    prompt += (
+                        f"## 7. 副本進度（dungeon）\n"
+                        f"當前在副本【{template['name']}】中。分析 GM 文本中是否存在：\n"
+                        f"- 主線劇情節點的完成（如「成功封印伽椰子」）\n"
+                        f"- 新區域的發現或探索（如「進入二樓」、「深入地下室」）\n\n"
+                        f"參考節點 ID（依序）：{nodes_str}\n"
+                        f"參考區域 ID：{areas_str}\n\n"
+                        '格式：\n'
+                        '{\n'
+                        '  "mainline_progress_delta": 20,  // 主線進度增量（0-100）\n'
+                        '  "completed_nodes": ["node_2"],  // 新完成的節點 ID\n'
+                        '  "discovered_areas": ["umbrella_lab"],  // 新發現的區域 ID\n'
+                        '  "explored_area_updates": {\n'
+                        '    "umbrella_lab": 30  // 區域探索度增量（0-100）\n'
+                        '  }\n'
+                        '}\n\n'
+                        "**重要**：\n"
+                        "- 如果沒有明顯的劇情節點完成，不要輸出 completed_nodes\n"
+                        "- 如果沒有新區域發現，不要輸出 discovered_areas\n"
+                        "- 保守估計進度，避免過度推進（GM 可能只是鋪墊，尚未真正完成目標）\n\n"
+                    )
+
+            prompt += (
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}, "time": {"days": N}, "branch_title": "..."}\n'
+                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
@@ -1328,13 +1373,30 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     _save_tree(story_id, tree)
                     saved_counts["title"] = branch_title
 
+            # Dungeon progress — update mainline/area progress
+            dungeon_data = data.get("dungeon", {})
+            if dungeon_data and isinstance(dungeon_data, dict):
+                if dungeon_data.get("mainline_progress_delta") or dungeon_data.get("completed_nodes"):
+                    update_dungeon_progress(story_id, branch_id, {
+                        "progress_delta": dungeon_data.get("mainline_progress_delta", 0),
+                        "nodes_completed": dungeon_data.get("completed_nodes", [])
+                    })
+                    saved_counts["dungeon_progress"] = True
+                if dungeon_data.get("discovered_areas") or dungeon_data.get("explored_area_updates"):
+                    update_dungeon_area(story_id, branch_id, {
+                        "discovered_areas": dungeon_data.get("discovered_areas", []),
+                        "explored_area_updates": dungeon_data.get("explored_area_updates", {})
+                    })
+                    saved_counts["dungeon_area"] = True
+
             log.info(
-                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s, title %s",
+                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s, title %s, dungeon %s",
                 saved_counts["lore"], saved_counts["events"],
                 saved_counts["npcs"],
                 "updated" if saved_counts["state"] else "no change",
                 f"+{saved_counts['time']:.1f}d" if saved_counts.get("time") else "no change",
                 repr(saved_counts.get("title", "—")),
+                "updated" if saved_counts.get("dungeon_progress") or saved_counts.get("dungeon_area") else "no change",
             )
 
             # Trigger periodic lore organization if orphans have accumulated
@@ -1496,7 +1558,8 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     """Apply a STATE update dict to the branch's character state file.
 
     1. Immediately applies the raw update (never blocks)
-    2. Kicks off background LLM normalization for non-standard fields
+    2. Validates dungeon growth constraints (hard cap)
+    3. Kicks off background LLM normalization for non-standard fields
     """
     # Soft-validate current_phase (log only, never block)
     phase = update.get("current_phase")
@@ -1505,8 +1568,15 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
 
     schema = _load_character_schema(story_id)
 
+    # Capture old state for dungeon validation
+    old_state = copy.deepcopy(_load_character_state(story_id, branch_id))
+
     # Apply immediately with raw update
     _apply_state_update_inner(story_id, branch_id, update, schema)
+
+    # Hard constraint validation (dungeon system)
+    new_state = _load_character_state(story_id, branch_id)
+    validate_dungeon_progression(story_id, branch_id, new_state, old_state)
 
     # Background: normalize non-standard fields and re-apply
     _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
@@ -2086,6 +2156,7 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         "state_snapshot": _load_character_state(story_id, branch_id),
         "npcs_snapshot": _load_npcs(story_id, branch_id),
         "world_day_snapshot": get_world_day(story_id, branch_id),
+        "dungeon_progress_snapshot": get_dungeon_progress_snapshot(story_id, branch_id),
     }
 
     return gm_response, image_info, snapshots
@@ -2653,6 +2724,7 @@ def api_branches_create():
     _src_bl = _load_branch_lore(story_id, source_branch_id)
     if _src_bl:
         _save_branch_lore(story_id, branch_id, _src_bl)
+    copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2692,6 +2764,14 @@ def api_branches_blank():
     # Empty NPCs and messages
     _save_json(_story_npcs_path(story_id, branch_id), [])
     _save_json(_story_messages_path(story_id, branch_id), [])
+
+    # Initialize blank dungeon progress (no history)
+    from dungeon_system import _save_dungeon_progress
+    _save_dungeon_progress(story_id, branch_id, {
+        "history": [],
+        "current_dungeon": None,
+        "total_dungeons_completed": 0
+    })
 
     # Copy branch config from main
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, "main"))
@@ -2810,6 +2890,7 @@ def api_branches_edit():
     _src_bl = _load_branch_lore(story_id, source_branch_id)
     if _src_bl:
         _save_branch_lore(story_id, branch_id, _src_bl)
+    copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2939,6 +3020,7 @@ def api_branches_edit_stream():
     _src_bl = _load_branch_lore(story_id, source_branch_id)
     if _src_bl:
         _save_branch_lore(story_id, branch_id, _src_bl)
+    copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -3087,6 +3169,7 @@ def api_branches_regenerate():
     _src_bl = _load_branch_lore(story_id, source_branch_id)
     if _src_bl:
         _save_branch_lore(story_id, branch_id, _src_bl)
+    copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -3208,6 +3291,7 @@ def api_branches_regenerate_stream():
     _src_bl = _load_branch_lore(story_id, source_branch_id)
     if _src_bl:
         _save_branch_lore(story_id, branch_id, _src_bl)
+    copy_dungeon_progress(story_id, parent_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
@@ -3342,6 +3426,7 @@ def api_branches_promote():
     copy_cheats(_story_dir(story_id), branch_id, "main")
     # Merge branch lore from promoted branch into main (upsert, not overwrite)
     _merge_branch_lore_into(story_id, branch_id, "main")
+    copy_dungeon_progress(story_id, branch_id, "main")
 
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
@@ -3438,6 +3523,7 @@ def api_branches_merge():
     copy_cheats(_story_dir(story_id), branch_id, parent_id)
     # Merge branch lore from child into parent (upsert, not overwrite)
     _merge_branch_lore_into(story_id, branch_id, parent_id)
+    copy_dungeon_progress(story_id, branch_id, parent_id)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():
@@ -4798,8 +4884,212 @@ def api_usage():
     return jsonify(usage_db.get_usage_summary(story_id, days=days))
 
 
+# ---------------------------------------------------------------------------
+# Dungeon System API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/dungeon/enter", methods=["POST"])
+def api_dungeon_enter():
+    """Enter a new dungeon (initialize dungeon progress)."""
+    story_id = request.json.get("story_id", _active_story_id())
+    branch_id = request.json.get("branch_id") or _active_branch_id(story_id)
+    dungeon_id = request.json.get("dungeon_id")
+
+    if not dungeon_id:
+        return jsonify({"error": "dungeon_id required"}), 400
+
+    # Validate dungeon exists
+    template = _load_dungeon_template(story_id, dungeon_id)
+    if not template:
+        return jsonify({"error": f"Dungeon {dungeon_id} not found"}), 404
+
+    # Validate prerequisites
+    state = _load_character_state(story_id, branch_id)
+    player_rank = _parse_rank(state.get("等級", "E"))
+    required_rank = _parse_rank(template["prerequisites"].get("min_rank", "E"))
+    if player_rank < required_rank:
+        return jsonify({
+            "error": "prerequisite_not_met",
+            "message": f"需要 {template['prerequisites']['min_rank']} 級以上才能進入此副本"
+        }), 400
+
+    # Check if already in a dungeon
+    progress = _load_dungeon_progress(story_id, branch_id)
+    if progress and progress.get("current_dungeon"):
+        current_dungeon_id = progress["current_dungeon"]["dungeon_id"]
+        current_template = _load_dungeon_template(story_id, current_dungeon_id)
+        return jsonify({
+            "error": "already_in_dungeon",
+            "message": f"您已在副本【{current_template.get('name', current_dungeon_id)}】中，請先回歸主神空間"
+        }), 400
+
+    # Initialize dungeon progress
+    try:
+        initialize_dungeon_progress(story_id, branch_id, dungeon_id)
+    except Exception as e:
+        log.exception("Failed to initialize dungeon progress")
+        return jsonify({"error": str(e)}), 500
+
+    # Update character state
+    state["當前階段"] = "傳送中"
+    state["當前狀態"] = f"準備進入【{template['name']}】副本"
+    _save_character_state(story_id, branch_id, state)
+
+    # Advance world time (dungeon enter cost)
+    try:
+        from world_timer import advance_dungeon_enter
+        advance_dungeon_enter(story_id, branch_id, template["name"])
+    except ImportError:
+        pass  # world_timer module might not exist in older versions
+
+    return jsonify({"success": True, "dungeon": template})
+
+
+@app.route("/api/dungeon/progress", methods=["GET"])
+def api_dungeon_progress():
+    """Get current dungeon progress for a branch."""
+    story_id = request.args.get("story_id", _active_story_id())
+    branch_id = request.args.get("branch_id") or _active_branch_id(story_id)
+
+    progress = _load_dungeon_progress(story_id, branch_id)
+    if not progress or not progress.get("current_dungeon"):
+        return jsonify({"in_dungeon": False})
+
+    current = progress["current_dungeon"]
+    template = _load_dungeon_template(story_id, current["dungeon_id"])
+    if not template:
+        return jsonify({"error": "Template not found"}), 500
+
+    # Build nodes response (show completed + current + next)
+    completed_nodes = set(current.get("completed_nodes", []))
+    nodes_response = []
+    next_shown = False
+    for node in template["mainline"]["nodes"]:
+        if node["id"] in completed_nodes:
+            nodes_response.append({
+                "id": node["id"],
+                "title": node["title"],
+                "hint": "已完成",
+                "status": "completed"
+            })
+        elif not next_shown:
+            is_current = len(nodes_response) == len(completed_nodes)
+            nodes_response.append({
+                "id": node["id"],
+                "title": node["title"],
+                "hint": node.get("hint", ""),
+                "status": "active" if is_current else "locked"
+            })
+            if is_current:
+                next_shown = True
+
+    # Build areas response (only discovered areas)
+    discovered = set(current.get("discovered_areas", []))
+    explored = current.get("explored_areas", {})
+    areas_response = []
+    for area in template.get("areas", []):
+        if area["id"] in discovered:
+            areas_response.append({
+                "id": area["id"],
+                "name": area["name"],
+                "type": area["type"],
+                "status": "explored" if explored.get(area["id"], 0) > 0 else "discovered",
+                "exploration": explored.get(area["id"], 0)
+            })
+
+    return jsonify({
+        "in_dungeon": True,
+        "dungeon_id": current["dungeon_id"],
+        "dungeon_name": template["name"],
+        "difficulty": template["difficulty"],
+        "mainline_progress": current["mainline_progress"],
+        "exploration_progress": current["exploration_progress"],
+        "can_exit": current["mainline_progress"] >= 100,
+        "mainline_nodes": nodes_response,
+        "map_areas": areas_response,
+        "metrics": {
+            "explored_areas": len(discovered),
+            "total_areas": len(template.get("areas", [])),
+            "completed_nodes": len(completed_nodes),
+            "total_nodes": len(template["mainline"]["nodes"])
+        }
+    })
+
+
+@app.route("/api/dungeon/return", methods=["POST"])
+def api_dungeon_return():
+    """Return to Main God Space from current dungeon."""
+    story_id = request.json.get("story_id", _active_story_id())
+    branch_id = request.json.get("branch_id") or _active_branch_id(story_id)
+
+    progress = _load_dungeon_progress(story_id, branch_id)
+    if not progress or not progress.get("current_dungeon"):
+        return jsonify({
+            "error": "not_in_dungeon",
+            "message": "當前不在副本中"
+        }), 400
+
+    current = progress["current_dungeon"]
+    if current["mainline_progress"] < 100:
+        return jsonify({
+            "error": "incomplete_mainline",
+            "message": f"主線進度僅 {current['mainline_progress']}%，需達 100% 才能回歸",
+            "current_progress": current["mainline_progress"]
+        }), 400
+
+    # Calculate completion reward
+    template = _load_dungeon_template(story_id, current["dungeon_id"])
+    if not template:
+        return jsonify({"error": "Template not found"}), 500
+
+    rules = template["progression_rules"]
+    base = rules["base_reward"]
+    mainline_bonus = base * (rules["mainline_multiplier"] - 1) * (current["mainline_progress"] / 100)
+    exploration_bonus = base * (rules["exploration_multiplier"] - 1) * (current["exploration_progress"] / 100)
+    total_reward = int(base + mainline_bonus + exploration_bonus)
+
+    # Apply difficulty scaling (if player over-leveled)
+    state = _load_character_state(story_id, branch_id)
+    player_rank = state.get("等級", "E")
+    scaling = rules.get("difficulty_scaling", {}).get(player_rank, 1.0)
+    total_reward = int(total_reward * scaling)
+
+    # Archive dungeon
+    archive_current_dungeon(story_id, branch_id, exit_reason="normal")
+
+    # Update character state
+    state["當前階段"] = "主神空間"
+    state["當前狀態"] = f"副本結束，回歸主神空間。獲得獎勵點數 {total_reward}"
+    state["獎勵點數"] = state.get("獎勵點數", 0) + total_reward
+    _save_character_state(story_id, branch_id, state)
+
+    # Advance world time (recovery time)
+    try:
+        from world_timer import advance_dungeon_exit
+        advance_dungeon_exit(story_id, branch_id)
+    except ImportError:
+        pass
+
+    return jsonify({
+        "success": True,
+        "reward_points": total_reward,
+        "scaling": scaling
+    })
+
+
+def _init_dungeon_templates():
+    """Ensure dungeon templates exist for all stories on startup."""
+    if not os.path.exists(STORIES_DIR):
+        return
+    for story_dir_name in os.listdir(STORIES_DIR):
+        story_path = os.path.join(STORIES_DIR, story_dir_name)
+        if os.path.isdir(story_path):
+            ensure_dungeon_templates(story_dir_name)
+
+
 if __name__ == "__main__":
     _ensure_data_dir()
     _cleanup_incomplete_branches()
     _init_lore_indexes()
+    _init_dungeon_templates()
     app.run(debug=True, host='0.0.0.0', port=5051)

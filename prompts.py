@@ -46,6 +46,9 @@ SYSTEM_PROMPT_TEMPLATE = """\
 ## 當前角色狀態
 {character_state}
 
+## 當前副本狀態
+{dungeon_context}
+
 ## 重要指示
 - 保持故事連續性：角色關係、已獲道具、劇情伏筆都要延續。
 - 戰鬥和危險場景要有張力，但給玩家合理的應對空間。
@@ -55,11 +58,14 @@ SYSTEM_PROMPT_TEMPLATE = """\
 """
 
 
-def build_system_prompt(character_state: str, critical_facts: str = "") -> str:
+def build_system_prompt(character_state: str, critical_facts: str = "", dungeon_context: str = "") -> str:
     """Return the full system prompt with dynamic sections filled in."""
     if not critical_facts:
         critical_facts = "（尚無關鍵事實記錄）"
+    if not dungeon_context:
+        dungeon_context = "（目前不在副本中）"
     return SYSTEM_PROMPT_TEMPLATE.format(
         character_state=character_state,
         critical_facts=critical_facts,
+        dungeon_context=dungeon_context,
     )
