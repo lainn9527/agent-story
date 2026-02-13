@@ -256,11 +256,11 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
   gh pr merge <pr-number> --rebase --delete-branch
   git worktree remove ../story-<branch-name>
   ```
-  3. Deploy to production (fetch + restart server automatically):
+  3. **Ask the user before deploying.** Deploy restarts the production server (brief downtime). Only run after explicit user confirmation:
   ```bash
   /Users/eddylai/story/deploy.sh
   ```
-  **Never merge without user confirmation and version bump.**
+  **Never merge without user confirmation and version bump. Never deploy without user confirmation.**
 
 ## Versioning & Changelog
 - **Version file**: `VERSION` (single source of truth, read by `app.py` as `__version__`)
