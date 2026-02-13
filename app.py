@@ -939,7 +939,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
     def _do_extract():
         from llm_bridge import call_oneshot
-        from event_db import get_event_titles
+        from event_db import get_event_titles, get_event_title_map, update_event_status
 
         try:
             # Collect context for dedup
@@ -948,6 +948,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             topic_categories = {e.get("topic", ""): e.get("category", "") for e in lore}
             user_protected = {e.get("topic", "") for e in lore if e.get("edited_by") == "user"}
             existing_titles = get_event_titles(story_id, branch_id)
+            existing_title_map = get_event_title_map(story_id, branch_id)
 
             # Build schema summary for state extraction
             schema = _load_character_schema(story_id)
@@ -1076,14 +1077,29 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             if saved_counts["lore"]:
                 invalidate_prefix_cache(story_id)
 
-            # Events — dedup by title
+            # Events — dedup by title, update status if changed
+            _STATUS_ORDER = {"planted": 0, "triggered": 1, "resolved": 2, "abandoned": 2}
             for event in data.get("events", []):
                 title = event.get("title", "").strip()
-                if title and title not in existing_titles:
+                if not title:
+                    continue
+                if title not in existing_titles:
                     event["message_index"] = msg_index
                     insert_event(story_id, event, branch_id)
                     existing_titles.add(title)
+                    existing_title_map[title] = {"id": None, "status": event.get("status", "planted")}
                     saved_counts["events"] += 1
+                else:
+                    # Update status if it advanced (planted→triggered→resolved)
+                    new_status = event.get("status", "").strip()
+                    existing = existing_title_map.get(title, {})
+                    old_status = existing.get("status", "")
+                    event_id = existing.get("id")
+                    if (event_id and new_status and new_status != old_status
+                            and _STATUS_ORDER.get(new_status, -1) > _STATUS_ORDER.get(old_status, -1)):
+                        update_event_status(story_id, event_id, new_status)
+                        existing_title_map[title]["status"] = new_status
+                        saved_counts["events"] += 1
 
             # NPCs — _save_npc has built-in merge by name
             for npc in data.get("npcs", []):
@@ -1287,8 +1303,12 @@ def get_full_timeline(story_id: str, branch_id: str) -> list[dict]:
     # Build ancestor chain from branch_id up to root
     chain = []
     cur = branch_id
-    while cur is not None:
-        branch = branches[cur]
+    visited = set()
+    while cur is not None and cur not in visited:
+        branch = branches.get(cur)
+        if not branch:
+            break
+        visited.add(cur)
         chain.append(branch)
         cur = branch.get("parent_branch_id")
     chain.reverse()
@@ -1320,7 +1340,9 @@ def _resolve_sibling_parent(branches: dict, parent_branch_id: str, branch_point_
     Prevents linear chains from repeated edit/regen at branch origin.
     """
     current = parent_branch_id
-    while current in branches and current != "main":
+    visited = set()
+    while current in branches and current != "main" and current not in visited:
+        visited.add(current)
         branch = branches[current]
         parent_bp = branch.get("branch_point_index")
         if parent_bp is not None and branch_point_index <= parent_bp:
@@ -1337,7 +1359,7 @@ def _get_fork_points(story_id: str, branch_id: str) -> dict:
 
     ancestor_ids = set()
     cur = branch_id
-    while cur is not None:
+    while cur is not None and cur not in ancestor_ids:
         ancestor_ids.add(cur)
         branch = branches.get(cur)
         if not branch:
@@ -1369,7 +1391,9 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
 
     ancestor_ids = []
     cur = branch_id
-    while cur is not None:
+    visited = set()
+    while cur is not None and cur not in visited:
+        visited.add(cur)
         ancestor_ids.append(cur)
         b = branches.get(cur)
         if not b:
