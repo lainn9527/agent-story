@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.8] - 2026-02-13
+
+### Fixed
+- Fix `deploy.sh` fetching in wrong directory — `FETCH_HEAD` was stale, always one version behind ([#81])
+
+[#81]: https://github.com/lainn9527/agent-story/pull/81
+
 ## [0.14.7] - 2026-02-13
 
 ### Fixed
