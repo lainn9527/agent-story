@@ -521,6 +521,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     branch = tree.get("branches", {}).get(branch_id, {})
     if branch.get("blank"):
         summary = ""
+        narrative_recap = ""
 
     if not narrative_recap:
         narrative_recap = "（尚無回顧，完整對話記錄已提供。）"
