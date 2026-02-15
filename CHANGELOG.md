@@ -5,6 +5,20 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-02-15
+
+### Fixed
+- Branch tree infinite loop on circular parent references in timeline_tree.json ([#82])
+- Branch tree KeyError crash when parent branch is hard-deleted ([#82])
+- Event dedup blocking status progression — events now update from planted→triggered→resolved instead of being silently skipped ([#82])
+- Extraction prompt updated to instruct LLM to re-emit events with changed status ([#82])
+
+### Added
+- Comprehensive test suite: 273 tests across 13 files covering tag extraction, world timer, event DB, lore search, compaction, state updates, branch tree, context injection, async extraction, and API routes ([#82])
+- `event_db.get_event_title_map()` for status-aware event dedup ([#82])
+
+[#82]: https://github.com/lainn9527/agent-story/pull/82
+
 ## [0.14.9] - 2026-02-13
 
 ### Fixed
