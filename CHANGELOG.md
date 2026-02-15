@@ -5,6 +5,11 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-02-16
+
+### Changed
+- Strengthen lore extraction prompt to explicitly exclude character-specific content (personal stats, inventory, combat experiences) and require generic language without character names ([#88])
+
 ## [0.16.0] - 2026-02-16
 
 ### Added
