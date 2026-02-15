@@ -527,7 +527,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
         narrative_recap = "（尚無回顧，完整對話記錄已提供。）"
 
     prompt_path = _story_system_prompt_path(story_id)
-    lore_text = _build_lore_text(story_id)
+    lore_text = _build_lore_text(story_id, branch_id)
     # Load NPCs once — used by both npc_text and critical_facts
     npcs = _load_npcs(story_id, branch_id)
     npc_text = _build_npc_text(story_id, branch_id)
@@ -764,6 +764,134 @@ def _load_lore(story_id: str) -> list[dict]:
     return _load_json(_story_lore_path(story_id), [])
 
 
+# ---------------------------------------------------------------------------
+# Helpers — Branch lore (per-branch auto-extracted lore)
+# ---------------------------------------------------------------------------
+
+def _branch_lore_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "branch_lore.json")
+
+
+def _load_branch_lore(story_id: str, branch_id: str) -> list[dict]:
+    return _load_json(_branch_lore_path(story_id, branch_id), [])
+
+
+def _save_branch_lore(story_id: str, branch_id: str, lore: list[dict]):
+    _save_json(_branch_lore_path(story_id, branch_id), lore)
+
+
+def _save_branch_lore_entry(story_id: str, branch_id: str, entry: dict,
+                            prefix_registry: dict | None = None):
+    """Save a lore entry to branch_lore.json. Upsert by topic.
+
+    Similar to _save_lore_entry but writes to per-branch storage,
+    skips lore.db indexing (branch lore uses linear search).
+    """
+    topic = entry.get("topic", "").strip()
+    if not topic:
+        return
+
+    # Auto-classify orphan topic before saving
+    category = entry.get("category", "")
+    if "：" not in topic and category:
+        organized = try_classify_topic(topic, category, story_id, prefix_registry=prefix_registry)
+        if organized:
+            log.info("    branch_lore auto-classify: '%s' → '%s'", topic, organized)
+            topic = organized
+            entry["topic"] = topic
+
+    lore = _load_branch_lore(story_id, branch_id)
+    for i, existing in enumerate(lore):
+        if existing.get("topic") == topic:
+            if "category" not in entry and "category" in existing:
+                entry["category"] = existing["category"]
+            if "source" not in entry and "source" in existing:
+                entry["source"] = existing["source"]
+            if "edited_by" not in entry and "edited_by" in existing:
+                entry["edited_by"] = existing["edited_by"]
+            lore[i] = entry
+            _save_branch_lore(story_id, branch_id, lore)
+            return
+    lore.append(entry)
+    _save_branch_lore(story_id, branch_id, lore)
+
+
+def _search_branch_lore(story_id: str, branch_id: str, query: str,
+                         token_budget: int = 1500) -> str:
+    """Search branch_lore.json using CJK bigram scoring. Returns formatted text."""
+    lore = _load_branch_lore(story_id, branch_id)
+    if not lore:
+        return ""
+
+    cjk_re = re.compile(r'[\u4e00-\u9fff]+')
+
+    def _bigrams(text):
+        bgs = set()
+        for run in cjk_re.findall(text):
+            for i in range(len(run) - 1):
+                bgs.add(run[i:i + 2])
+        return bgs
+
+    query_bgs = _bigrams(query)
+    # Also use query words for non-CJK matching
+    query_lower = query.lower()
+
+    scored = []
+    for e in lore:
+        topic = e.get("topic", "")
+        content = e.get("content", "")
+        category = e.get("category", "")
+        text = f"{category} {topic} {content}"
+
+        score = 0.0
+        text_bgs = _bigrams(text)
+        if query_bgs and text_bgs:
+            overlap = query_bgs & text_bgs
+            score = len(overlap) / max(len(query_bgs), 1)
+
+        # Boost for substring match in topic
+        if query_lower and query_lower in topic.lower():
+            score += 2.0
+
+        if score > 0:
+            scored.append((score, e))
+
+    scored.sort(key=lambda x: -x[0])
+
+    # Token-budgeted output
+    lines = []
+    used_tokens = 0
+    for _, e in scored:
+        content = e.get("content", "")
+        est_tokens = len(content) // 2  # rough CJK estimate
+        if used_tokens + est_tokens > token_budget and lines:
+            break
+        if len(content) > 1200:
+            content = content[:1200] + "…（截斷）"
+        lines.append(f"#### {e.get('category', '')}：{e.get('topic', '')}")
+        lines.append(content)
+        lines.append("")
+        used_tokens += est_tokens
+
+    if not lines:
+        return ""
+    return "[相關分支設定]\n" + "\n".join(lines)
+
+
+def _get_branch_lore_toc(story_id: str, branch_id: str) -> str:
+    """Build a simple TOC of branch lore topics for dedup in extraction prompt."""
+    lore = _load_branch_lore(story_id, branch_id)
+    if not lore:
+        return ""
+    lines = []
+    for e in lore:
+        topic = e.get("topic", "")
+        cat = e.get("category", "")
+        if topic:
+            lines.append(f"- {cat}：{topic}")
+    return "\n".join(lines)
+
+
 def _find_similar_topic(new_topic: str, new_category: str,
                         topic_categories: dict[str, str], threshold: float = 0.5) -> str | None:
     """Find an existing topic with high CJK bigram overlap, scoped to same category."""
@@ -841,7 +969,7 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
         upsert_lore_entry(story_id, entry)
 
 
-def _build_lore_text(story_id: str) -> str:
+def _build_lore_text(story_id: str, branch_id: str = "main") -> str:
     """Build compact lore summary for system prompt.
 
     Instead of the full TOC (~6-8K tokens), provides a compressed category
@@ -859,6 +987,10 @@ def _build_lore_text(story_id: str) -> str:
     note = f"世界設定共 {count} 條，會根據每回合對話內容自動檢索並注入相關條目。"
     if cat_summary:
         note += f"\n知識分類：{cat_summary}"
+    # Note branch-specific lore count if any
+    branch_lore = _load_branch_lore(story_id, branch_id)
+    if branch_lore:
+        note += f"\n另有 {len(branch_lore)} 條分支專屬設定（本次冒險中累積的觀察與發現）。"
     return note
 
 
@@ -942,10 +1074,17 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
         from event_db import get_event_titles, get_event_title_map, update_event_status
 
         try:
-            # Collect context for dedup
+            # Collect context for dedup — include both base and branch lore
             toc = get_lore_toc(story_id)
+            branch_toc = _get_branch_lore_toc(story_id, branch_id)
+            if branch_toc:
+                toc += "\n（分支設定）\n" + branch_toc
             lore = _load_lore(story_id)
+            branch_lore = _load_branch_lore(story_id, branch_id)
+            # Merge topics from both layers for similarity matching
             topic_categories = {e.get("topic", ""): e.get("category", "") for e in lore}
+            branch_topic_categories = {e.get("topic", ""): e.get("category", "") for e in branch_lore}
+            all_topic_categories = {**topic_categories, **branch_topic_categories}
             user_protected = {e.get("topic", "") for e in lore if e.get("edited_by") == "user"}
             existing_titles = get_event_titles(story_id, branch_id)
             existing_title_map = get_event_title_map(story_id, branch_id)
@@ -1052,27 +1191,27 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             # Build prefix registry once for the batch (avoids per-entry rebuild)
             prefix_reg = build_prefix_registry(story_id)
 
-            # Lore — similarity guard to prevent fragmentation
+            # Lore — save to branch_lore (not base), similarity guard to prevent fragmentation
             for entry in data.get("lore", []):
                 topic = entry.get("topic", "").strip()
                 category = entry.get("category", "").strip()
                 if not topic:
                     continue
-                # If exact topic exists, upsert handles it.
+                # If exact topic exists in branch or base, upsert handles it.
                 # If not, check for a similar existing topic (same category) to merge into.
-                if topic not in topic_categories:
-                    similar = _find_similar_topic(topic, category, topic_categories)
+                if topic not in all_topic_categories:
+                    similar = _find_similar_topic(topic, category, all_topic_categories)
                     if similar:
                         log.info("    lore merge: '%s' → '%s'", topic, similar)
                         entry["topic"] = similar
-                # Skip if resolved topic is user-edited (protect manual edits)
+                # Skip if resolved topic is user-edited in base (protect manual edits)
                 resolved_topic = entry.get("topic", topic)
                 if resolved_topic in user_protected:
                     log.info("    lore skip (user-edited): '%s'", resolved_topic)
                     continue
                 entry["edited_by"] = "auto"
-                _save_lore_entry(story_id, entry, prefix_registry=prefix_reg)
-                topic_categories[entry.get("topic", topic)] = category
+                _save_branch_lore_entry(story_id, branch_id, entry, prefix_registry=prefix_reg)
+                all_topic_categories[entry.get("topic", topic)] = category
                 saved_counts["lore"] += 1
 
             # Invalidate prefix cache if new lore was saved
@@ -1760,9 +1899,8 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
             "excerpt": gm_response[:100],
             "timestamp": datetime.now().isoformat(),
         }
-        # edited_by intentionally omitted: _save_lore_entry preserves existing
-        # "user" provenance, so real-time GM tags update content but keep protection.
-        _save_lore_entry(story_id, lore_entry)
+        lore_entry["edited_by"] = "auto"
+        _save_branch_lore_entry(story_id, branch_id, lore_entry)
 
     gm_response, npc_updates = _extract_npc_tag(gm_response)
     for npc_update in npc_updates:
@@ -1857,9 +1995,14 @@ def _build_augmented_message(
         }
 
     parts = []
+    # Search base lore (via lore.db indexed search)
     lore = search_relevant_lore(story_id, user_text, context=lore_context)
     if lore:
         parts.append(lore)
+    # Search branch lore (linear CJK bigram search, smaller dataset)
+    branch_lore = _search_branch_lore(story_id, branch_id, user_text)
+    if branch_lore:
+        parts.append(branch_lore)
     if not is_blank:
         events = search_relevant_events(story_id, user_text, branch_id, limit=3)
         if events:
@@ -2355,6 +2498,10 @@ def api_branches_create():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
+    # Copy branch lore from source (child inherits parent's branch-specific lore)
+    _src_bl = _load_branch_lore(story_id, source_branch_id)
+    if _src_bl:
+        _save_branch_lore(story_id, branch_id, _src_bl)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2508,6 +2655,10 @@ def api_branches_edit():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
+    # Copy branch lore from source (child inherits parent's branch-specific lore)
+    _src_bl = _load_branch_lore(story_id, source_branch_id)
+    if _src_bl:
+        _save_branch_lore(story_id, branch_id, _src_bl)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2633,6 +2784,10 @@ def api_branches_edit_stream():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
+    # Copy branch lore from source (child inherits parent's branch-specific lore)
+    _src_bl = _load_branch_lore(story_id, source_branch_id)
+    if _src_bl:
+        _save_branch_lore(story_id, branch_id, _src_bl)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -2777,6 +2932,10 @@ def api_branches_regenerate():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
+    # Copy branch lore from source (child inherits parent's branch-specific lore)
+    _src_bl = _load_branch_lore(story_id, source_branch_id)
+    if _src_bl:
+        _save_branch_lore(story_id, branch_id, _src_bl)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -2894,6 +3053,10 @@ def api_branches_regenerate_stream():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
+    # Copy branch lore from source (child inherits parent's branch-specific lore)
+    _src_bl = _load_branch_lore(story_id, source_branch_id)
+    if _src_bl:
+        _save_branch_lore(story_id, branch_id, _src_bl)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     branches[branch_id] = {
@@ -3026,6 +3189,10 @@ def api_branches_promote():
     copy_recap_to_branch(story_id, branch_id, "main", -1)
     copy_world_day(story_id, branch_id, "main")
     copy_cheats(_story_dir(story_id), branch_id, "main")
+    # Copy branch lore from promoted branch to main
+    _promo_bl = _load_branch_lore(story_id, branch_id)
+    if _promo_bl:
+        _save_branch_lore(story_id, "main", _promo_bl)
 
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
@@ -3120,6 +3287,10 @@ def api_branches_merge():
     copy_recap_to_branch(story_id, branch_id, parent_id, -1)
     copy_world_day(story_id, branch_id, parent_id)
     copy_cheats(_story_dir(story_id), branch_id, parent_id)
+    # Copy branch lore from child to parent
+    _merge_bl = _load_branch_lore(story_id, branch_id)
+    if _merge_bl:
+        _save_branch_lore(story_id, parent_id, _merge_bl)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():
@@ -3504,12 +3675,25 @@ def lore_page():
 
 @app.route("/api/lore/all")
 def api_lore_all():
-    """Return all lore entries grouped by category."""
+    """Return all lore entries grouped by category, with layer info."""
     story_id = _active_story_id()
-    lore = _load_lore(story_id)
+    branch_id = request.args.get("branch_id")
+    if not branch_id:
+        tree = _load_tree(story_id)
+        branch_id = tree.get("active_branch_id", "main")
+    # Base lore (per-story)
+    base = _load_lore(story_id)
+    for e in base:
+        e["layer"] = "base"
+    # Branch lore (per-branch)
+    branch = _load_branch_lore(story_id, branch_id)
+    for e in branch:
+        e["layer"] = "branch"
+    all_entries = base + branch
     # Collect categories in order of first appearance
-    categories = list(dict.fromkeys(e.get("category", "其他") for e in lore))
-    return jsonify({"ok": True, "entries": lore, "categories": categories})
+    categories = list(dict.fromkeys(e.get("category", "其他") for e in all_entries))
+    return jsonify({"ok": True, "entries": all_entries, "categories": categories,
+                     "branch_id": branch_id})
 
 
 @app.route("/api/lore/entry", methods=["POST"])
@@ -3585,6 +3769,153 @@ def api_lore_entry_delete():
         _save_json(_story_lore_path(story_id), new_lore)
         delete_lore_entry(story_id, topic)
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Branch lore CRUD + Promotion
+# ---------------------------------------------------------------------------
+
+@app.route("/api/lore/branch/entry", methods=["DELETE"])
+def api_branch_lore_entry_delete():
+    """Delete a branch lore entry by topic."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    topic = body.get("topic", "").strip()
+    branch_id = body.get("branch_id", "")
+    if not topic or not branch_id:
+        return jsonify({"ok": False, "error": "topic and branch_id required"}), 400
+
+    lore = _load_branch_lore(story_id, branch_id)
+    new_lore = [e for e in lore if e.get("topic") != topic]
+    if len(new_lore) == len(lore):
+        return jsonify({"ok": False, "error": "entry not found"}), 404
+    _save_branch_lore(story_id, branch_id, new_lore)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lore/promote/review", methods=["POST"])
+def api_lore_promote_review():
+    """Use LLM to review branch lore entries and propose promotion actions."""
+    from llm_bridge import call_oneshot
+
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "")
+    if not branch_id:
+        return jsonify({"ok": False, "error": "branch_id required"}), 400
+
+    branch_lore = _load_branch_lore(story_id, branch_id)
+    if not branch_lore:
+        return jsonify({"ok": True, "proposals": []})
+
+    # Build base lore TOC for context
+    base_toc = get_lore_toc(story_id)
+
+    # Format branch entries for review
+    entries_text = ""
+    for i, e in enumerate(branch_lore):
+        entries_text += f"\n### 條目 {i+1}\n"
+        entries_text += f"分類: {e.get('category', '')}\n"
+        entries_text += f"主題: {e.get('topic', '')}\n"
+        entries_text += f"內容: {e.get('content', '')}\n"
+
+    prompt = (
+        "你是一個 RPG 世界設定審核員。以下是從某個分支冒險中自動提取的設定條目。\n"
+        "請判斷每個條目是否適合提升為永久世界設定（base lore），還是只是特定角色的經驗。\n\n"
+        f"## 已有的永久世界設定\n{base_toc}\n\n"
+        f"## 待審核的分支設定\n{entries_text}\n\n"
+        "## 審核規則\n"
+        "對每個條目選擇一個動作：\n"
+        "- **promote**: 純粹的世界觀設定（體系規則、副本背景、場景描述、NPC通用資料等），可以直接提升\n"
+        "- **rewrite**: 混合內容（包含世界設定但也含有特定角色名稱/經歷），需要改寫後提升。"
+        "提供 rewritten_content，移除角色特定內容，只保留通用世界設定\n"
+        "- **reject**: 純粹的角色經驗（角色完成了X、角色獲得了Y、角色的狀態等），不適合提升\n\n"
+        "## 輸出格式\n"
+        "JSON 陣列，每個元素：\n"
+        '[{"index": 0, "action": "promote|rewrite|reject", "reason": "簡短理由", '
+        '"rewritten_content": "改寫後內容（僅 rewrite 時提供）"}]\n'
+        "只輸出 JSON。"
+    )
+
+    t0 = time.time()
+    result = call_oneshot(prompt)
+    _log_llm_usage(story_id, "oneshot", time.time() - t0)
+
+    if not result:
+        return jsonify({"ok": False, "error": "LLM call failed"}), 500
+
+    result = result.strip()
+    if result.startswith("```"):
+        lines = result.split("\n")
+        lines = [l for l in lines if not l.startswith("```")]
+        result = "\n".join(lines)
+
+    try:
+        proposals = json.loads(result)
+    except json.JSONDecodeError:
+        m = re.search(r'\[.*\]', result, re.DOTALL)
+        if not m:
+            return jsonify({"ok": False, "error": "failed to parse LLM response"}), 500
+        proposals = json.loads(m.group())
+
+    # Enrich proposals with entry data
+    enriched = []
+    for p in proposals:
+        idx = p.get("index", -1)
+        if 0 <= idx < len(branch_lore):
+            entry = branch_lore[idx]
+            enriched.append({
+                "index": idx,
+                "action": p.get("action", "reject"),
+                "reason": p.get("reason", ""),
+                "topic": entry.get("topic", ""),
+                "category": entry.get("category", ""),
+                "content": entry.get("content", ""),
+                "rewritten_content": p.get("rewritten_content", ""),
+            })
+
+    return jsonify({"ok": True, "proposals": enriched})
+
+
+@app.route("/api/lore/promote", methods=["POST"])
+def api_lore_promote():
+    """Promote a branch lore entry to base lore (world_lore.json)."""
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "")
+    topic = body.get("topic", "").strip()
+    content_override = body.get("content", "").strip()  # for rewrite action
+    if not branch_id or not topic:
+        return jsonify({"ok": False, "error": "branch_id and topic required"}), 400
+
+    # Find in branch lore
+    branch_lore = _load_branch_lore(story_id, branch_id)
+    entry = None
+    for e in branch_lore:
+        if e.get("topic") == topic:
+            entry = e
+            break
+    if not entry:
+        return jsonify({"ok": False, "error": "entry not found in branch lore"}), 404
+
+    # Prepare base entry
+    base_entry = {
+        "category": entry.get("category", "其他"),
+        "topic": topic,
+        "content": content_override or entry.get("content", ""),
+        "edited_by": "user",  # promoted = user-curated
+    }
+    if "source" in entry:
+        base_entry["source"] = entry["source"]
+
+    # Save to base lore
+    _save_lore_entry(story_id, base_entry)
+
+    # Remove from branch lore
+    new_branch_lore = [e for e in branch_lore if e.get("topic") != topic]
+    _save_branch_lore(story_id, branch_id, new_branch_lore)
+
+    return jsonify({"ok": True, "entry": base_entry})
 
 
 _LORE_PROPOSE_RE = re.compile(
