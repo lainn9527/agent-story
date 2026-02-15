@@ -220,6 +220,26 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 - CJK search uses bigram (2-char) + trigram (3-char) keyword scoring, not FTS5 tokenizer
 - System prompt uses double-braces `{{}}` for literal braces (Python `.format()`)
 
+## Testing
+- **Run**: `python3 -m pytest tests/ -q`
+- **Framework**: pytest, `tests/` directory, shared fixtures in `conftest.py`
+- **Isolation**: All tests use `tmp_path` — no production data touched. LLM calls mocked via `unittest.mock.patch`.
+- **Full plan**: See `doc/TESTING_PLAN.md` for detailed coverage map and TBD items.
+
+### What to test for new features
+- **New tag type or regex**: Add cases in `test_tag_extraction.py` — valid extraction, malformed input, tag stripping from clean text
+- **New DB module (SQLite)**: CRUD operations, search with CJK bigrams, empty/edge inputs, branch filtering
+- **State update logic**: Normal case, LLM quirks (string-instead-of-list, wrong types), delta with negative values, field that doesn't exist
+- **Branch tree changes**: Linear chain, forked chain, blank branches, **circular parent references** (must not hang), **missing parent** (must not crash)
+- **New API route**: Response shape matches what frontend expects, error cases (missing params, 404), auth/validation
+- **Async extraction changes**: Mock `call_oneshot`, verify dedup logic, test with ≥200 char CJK text (shorter text is skipped)
+- **Context injection changes**: Verify section presence and format in augmented message
+
+### Testing patterns
+- Monkeypatch module-level constants: `STORIES_DIR`, `BASE_DIR`, `DATA_DIR`, `_LLM_CONFIG_PATH`
+- `_SyncThread` subclass to run background threads synchronously (see `test_extract_tags_async.py`)
+- Use `conftest.py:story_dir` fixture for per-story directory setup with all required files
+
 ## Development Guidelines
 - **Production runs from `/Users/eddylai/story-prod`** (a git worktree on port 5051). NEVER edit files there directly.
 - **NEVER edit source files in `/Users/eddylai/story` (main repo) directly.** This repo is for PR management and creating worktrees only. All code changes MUST happen in a feature worktree. There is a pre-commit hook on `main` that blocks direct commits as a safety net.
@@ -231,7 +251,7 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
   ```bash
   git worktree add ../story-<branch-name> -b <branch-name> main
   ```
-- **Test before merging.** After implementation, run tests and include test results in the PR. For testing, you can use auto-play (`python auto_play.py`) or create a new branch with a `test` prefix in the web UI.
+- **Test before merging.** Run `python3 -m pytest tests/ -q` and include results in the PR. For e2e testing, use auto-play (`python auto_play.py`) or create a test branch in the web UI.
 - **Open a PR** when the work is ready for review.
 - **PR Review process**: Spawn 4 subagents (BE, FE, UI/UX, Game Director) to review the PR and leave comments via `gh pr review` / `gh pr comment`.
   - If any reviewer leaves actionable comments, address them and reply on the same comment thread.
