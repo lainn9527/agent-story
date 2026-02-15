@@ -5,6 +5,28 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-02-16
+
+### Added
+- **Branch lore system**: Auto-extracted lore now saved to per-branch `branch_lore.json` instead of polluting shared `world_lore.json` ([#84])
+- Branch lore search with CJK bigram matching, injected as `[相關分支設定]` in context ([#84])
+- LLM-powered promotion workflow: review branch lore entries as promote/rewrite/reject, then promote to base lore ([#84])
+- Lore console UI: "分支知識" section with teal badges, "審核提升" button for promotion flow ([#84])
+- `DELETE /api/lore/branch/entry`, `POST /api/lore/promote`, `POST /api/lore/promote/review` API routes ([#84])
+- `GET /api/lore/all` now returns entries with `layer: "base"|"branch"` field ([#84])
+- 40 new tests for branch lore helpers, API routes, branch operations, and context injection ([#84])
+
+### Changed
+- Inline `<!--LORE-->` tags and `_extract_tags_async()` now write to branch lore instead of base lore ([#84])
+- Branch fork/edit/regen/promote/merge operations copy or merge branch lore ([#84])
+- Blank branches start with empty branch lore (no inheritance from parent) ([#84])
+
+### Fixed
+- Thread safety for concurrent branch lore writes via per-branch locks ([#84])
+- Promote/merge uses upsert-merge semantics instead of overwriting target branch lore ([#84])
+
+[#84]: https://github.com/lainn9527/agent-story/pull/84
+
 ## [0.15.0] - 2026-02-15
 
 ### Fixed
