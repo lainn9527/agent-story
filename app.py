@@ -57,7 +57,6 @@ from npc_evolution import should_run_evolution, run_npc_evolution_async, get_rec
 from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
 from parser import parse_conversation, save_parsed
-from prompts import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
 from compaction import (
     load_recap, save_recap, get_recap_text, should_compact, compact_async,
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
@@ -80,6 +79,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORIES_REGISTRY_PATH = os.path.join(DATA_DIR, "stories.json")
+TEMPLATE_DIR = os.path.join(BASE_DIR, "story_templates")
 
 # Legacy paths — used only during migration
 CONVERSATION_PATH = os.path.join(BASE_DIR, "Grok_conversation.md")
@@ -112,43 +112,16 @@ def _log_llm_usage(story_id: str, call_type: str, elapsed_s: float, branch_id: s
         log.debug("usage_db: failed to log — %s", e)
 
 
-DEFAULT_CHARACTER_STATE = {
-    "name": "Eddy",
-    "current_phase": "主神空間",
-    "gene_lock": "未開啟（進度 15%）",
-    "physique": "普通人類（稍強）",
-    "spirit": "普通人類（偏高）",
-    "reward_points": 5000,
-    "inventory": ["封印之鏡（紀念品）", "自省之鏡玉佩", "鎮魂符×3"],
-    "completed_missions": ["咒怨 — 完美通關 8/8"],
-    "relationships": {
-        "小薇": "信任/曖昧",
-        "阿豪": "兄弟情",
-        "美玲": "好感",
-        "Jack": "戰友",
-        "小林": "崇拜",
-        "佐藤神主": "約定",
-    },
-    "current_status": "即將返回主神空間，5000點待兌換",
-}
+def _load_template(filename, fallback=None):
+    """Load a file from story_templates/ (git-tracked defaults)."""
+    p = os.path.join(TEMPLATE_DIR, filename)
+    if filename.endswith(".json"):
+        return _load_json(p, fallback if fallback is not None else {})
+    if os.path.exists(p):
+        with open(p, "r", encoding="utf-8") as f:
+            return f.read()
+    return fallback
 
-DEFAULT_CHARACTER_SCHEMA = {
-    "fields": [
-        {"key": "name", "label": "姓名", "type": "text"},
-        {"key": "current_phase", "label": "階段", "type": "text"},
-        {"key": "gene_lock", "label": "基因鎖", "type": "text"},
-        {"key": "physique", "label": "體質", "type": "text"},
-        {"key": "spirit", "label": "精神力", "type": "text"},
-        {"key": "reward_points", "label": "獎勵點", "type": "number", "highlight": True, "suffix": " 點"},
-        {"key": "current_status", "label": "狀態", "type": "text"},
-    ],
-    "lists": [
-        {"key": "inventory", "label": "道具欄", "state_add_key": "inventory_add", "state_remove_key": "inventory_remove"},
-        {"key": "completed_missions", "label": "已完成任務", "state_add_key": "completed_missions_add"},
-        {"key": "relationships", "label": "人際關係", "type": "map"},
-    ],
-    "direct_overwrite_keys": ["gene_lock", "physique", "spirit", "current_status", "current_phase"],
-}
 
 VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}
 
@@ -320,7 +293,10 @@ def _load_summary(story_id: str) -> str:
 
 def _load_character_schema(story_id: str) -> dict:
     path = _story_character_schema_path(story_id)
-    return _load_json(path, DEFAULT_CHARACTER_SCHEMA)
+    schema = _load_json(path, {})
+    if not schema:
+        schema = _load_template("character_schema.json", {})
+    return schema
 
 
 def _blank_character_state(story_id: str) -> dict:
@@ -351,7 +327,7 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
         default_path = _story_default_character_state_path(story_id)
         state = _load_json(default_path, {})
     if not state:
-        state = copy.deepcopy(DEFAULT_CHARACTER_STATE)
+        state = _load_template("default_character_state.json", {})
     # Backfill current_phase for legacy branches
     if "current_phase" not in state:
         state["current_phase"] = "主神空間"
@@ -540,9 +516,13 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
+    # Load template: per-story file → story_templates/ default
     if os.path.exists(prompt_path):
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
+    else:
+        template = _load_template("system_prompt.txt")
+    if template:
         result = template.format(
             character_state=state_text,
             story_summary=summary,
@@ -563,8 +543,8 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             else:
                 result = facts_section + result
     else:
-        # Fallback to prompts.py template
-        result = build_system_prompt(state_text, summary, critical_facts=critical_facts)
+        log.error("No system prompt template found for story %s", story_id)
+        result = f"You are a GM. Character state:\n{state_text}\n\nStory summary:\n{summary}"
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
     story_dir = _story_dir(story_id)
@@ -1807,21 +1787,12 @@ def _migrate_to_stories():
         if not os.path.exists(dst):
             shutil.copy2(legacy_char, dst)
 
-    # Generate system_prompt.txt from prompts.py template
-    prompt_path = _story_system_prompt_path(story_id)
-    if not os.path.exists(prompt_path):
-        with open(prompt_path, "w", encoding="utf-8") as f:
-            f.write(SYSTEM_PROMPT_TEMPLATE)
-
-    # Generate character_schema.json
-    schema_path = _story_character_schema_path(story_id)
-    if not os.path.exists(schema_path):
-        _save_json(schema_path, DEFAULT_CHARACTER_SCHEMA)
-
-    # Generate default_character_state.json
-    default_state_path = _story_default_character_state_path(story_id)
-    if not os.path.exists(default_state_path):
-        _save_json(default_state_path, DEFAULT_CHARACTER_STATE)
+    # Copy template files from story_templates/ if missing
+    for fname in ("system_prompt.txt", "character_schema.json", "default_character_state.json"):
+        dst = os.path.join(story_dir, fname)
+        src = os.path.join(TEMPLATE_DIR, fname)
+        if not os.path.exists(dst) and os.path.exists(src):
+            shutil.copy2(src, dst)
 
     # Ensure parsed_conversation.json exists
     parsed_path = _story_parsed_path(story_id)
@@ -1977,11 +1948,11 @@ def _find_state_at_index(story_id: str, branch_id: str, target_index: int) -> di
             continue
         if "state_snapshot" in msg:
             return msg["state_snapshot"]
-    # Fallback: story default → global default
+    # Fallback: story default → git-tracked template
     default_path = _story_default_character_state_path(story_id)
     state = _load_json(default_path, {})
     if not state:
-        state = copy.deepcopy(DEFAULT_CHARACTER_STATE)
+        state = _load_template("default_character_state.json", {})
     return state
 
 
@@ -3489,27 +3460,21 @@ def api_stories_create():
     story_dir = _story_dir(story_id)
     os.makedirs(story_dir, exist_ok=True)
 
-    # System prompt
+    # Copy template files as defaults, then override with user-provided values
+    for fname in ("system_prompt.txt", "character_schema.json", "default_character_state.json"):
+        dst = os.path.join(story_dir, fname)
+        src = os.path.join(TEMPLATE_DIR, fname)
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+
+    # Override with user-provided values
     if system_prompt_text:
         with open(_story_system_prompt_path(story_id), "w", encoding="utf-8") as f:
             f.write(system_prompt_text)
-
-    # Character schema
     if character_schema:
         _save_json(_story_character_schema_path(story_id), character_schema)
-    else:
-        # Minimal default schema
-        _save_json(_story_character_schema_path(story_id), {
-            "fields": [{"key": "name", "label": "姓名", "type": "text"}],
-            "lists": [],
-            "direct_overwrite_keys": [],
-        })
-
-    # Default character state
     if default_state:
         _save_json(_story_default_character_state_path(story_id), default_state)
-    else:
-        _save_json(_story_default_character_state_path(story_id), {"name": "—"})
 
     # Empty parsed conversation
     _save_json(_story_parsed_path(story_id), [])
@@ -3534,8 +3499,8 @@ def api_stories_create():
     # Empty main messages
     _save_json(_story_messages_path(story_id, "main"), [])
 
-    # Initial character state for main branch
-    ds = default_state if default_state else {"name": "—"}
+    # Initial character state for main branch — use provided or load from story's default
+    ds = default_state if default_state else _load_json(_story_default_character_state_path(story_id), {})
     _save_json(_story_character_state_path(story_id, "main"), ds)
 
     # Register in stories.json
