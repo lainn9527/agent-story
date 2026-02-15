@@ -790,10 +790,9 @@ body.lore-page {
   color: #7fc4db;
 }
 
-/* Branch entries have a subtle left border */
+/* Branch entries have a subtle background tint (avoids border-left conflict with selection) */
 .lore-entry.branch-entry {
-  border-left: 2px solid #3a6070;
-  padding-left: 10px;
+  background: rgba(58, 96, 112, 0.08);
 }
 
 /* Branch section header */

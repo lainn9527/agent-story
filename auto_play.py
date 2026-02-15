@@ -63,6 +63,8 @@ from app import (
     _find_world_day_at_index,
     _load_branch_config,
     _save_branch_config,
+    _load_branch_lore,
+    _save_branch_lore,
     RECENT_MESSAGE_COUNT,
     _IMG_RE,
 )
@@ -296,6 +298,10 @@ def setup(config: AutoPlayConfig) -> tuple[str, str]:
             story_id, config.parent_branch_id, config.branch_point_index
         )
         set_world_day(story_id, branch_id, forked_world_day)
+        # Copy branch lore from parent
+        parent_bl = _load_branch_lore(story_id, config.parent_branch_id)
+        if parent_bl:
+            _save_branch_lore(story_id, branch_id, parent_bl)
 
     # Initialize empty messages
     _save_json(_story_messages_path(story_id, branch_id), [])
