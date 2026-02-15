@@ -373,7 +373,9 @@
       btn.addEventListener("click", (ev) => {
         ev.stopPropagation();
         const topic = btn.dataset.topic;
-        const entry = allEntries.find((e) => e.topic === topic);
+        const entryEl = btn.closest(".lore-entry");
+        const layer = entryEl ? entryEl.dataset.layer : "base";
+        const entry = allEntries.find((e) => e.topic === topic && (e.layer || "base") === layer);
         if (entry) openModal(entry);
       });
     });

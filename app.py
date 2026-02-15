@@ -768,6 +768,19 @@ def _load_lore(story_id: str) -> list[dict]:
 # Helpers — Branch lore (per-branch auto-extracted lore)
 # ---------------------------------------------------------------------------
 
+_branch_lore_locks: dict[str, threading.Lock] = {}
+_branch_lore_locks_meta = threading.Lock()
+
+
+def _get_branch_lore_lock(story_id: str, branch_id: str) -> threading.Lock:
+    """Get or create a per-branch lock for branch_lore.json writes."""
+    key = f"{story_id}:{branch_id}"
+    with _branch_lore_locks_meta:
+        if key not in _branch_lore_locks:
+            _branch_lore_locks[key] = threading.Lock()
+        return _branch_lore_locks[key]
+
+
 def _branch_lore_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "branch_lore.json")
 
@@ -786,6 +799,7 @@ def _save_branch_lore_entry(story_id: str, branch_id: str, entry: dict,
 
     Similar to _save_lore_entry but writes to per-branch storage,
     skips lore.db indexing (branch lore uses linear search).
+    Thread-safe via per-branch lock.
     """
     topic = entry.get("topic", "").strip()
     if not topic:
@@ -800,20 +814,39 @@ def _save_branch_lore_entry(story_id: str, branch_id: str, entry: dict,
             topic = organized
             entry["topic"] = topic
 
-    lore = _load_branch_lore(story_id, branch_id)
-    for i, existing in enumerate(lore):
-        if existing.get("topic") == topic:
-            if "category" not in entry and "category" in existing:
-                entry["category"] = existing["category"]
-            if "source" not in entry and "source" in existing:
-                entry["source"] = existing["source"]
-            if "edited_by" not in entry and "edited_by" in existing:
-                entry["edited_by"] = existing["edited_by"]
-            lore[i] = entry
-            _save_branch_lore(story_id, branch_id, lore)
-            return
-    lore.append(entry)
-    _save_branch_lore(story_id, branch_id, lore)
+    lock = _get_branch_lore_lock(story_id, branch_id)
+    with lock:
+        lore = _load_branch_lore(story_id, branch_id)
+        for i, existing in enumerate(lore):
+            if existing.get("topic") == topic:
+                if "category" not in entry and "category" in existing:
+                    entry["category"] = existing["category"]
+                if "source" not in entry and "source" in existing:
+                    entry["source"] = existing["source"]
+                if "edited_by" not in entry and "edited_by" in existing:
+                    entry["edited_by"] = existing["edited_by"]
+                lore[i] = entry
+                _save_branch_lore(story_id, branch_id, lore)
+                return
+        lore.append(entry)
+        _save_branch_lore(story_id, branch_id, lore)
+
+
+def _merge_branch_lore_into(story_id: str, src_branch_id: str, dst_branch_id: str):
+    """Merge source branch_lore into destination (upsert by topic, not overwrite)."""
+    src = _load_branch_lore(story_id, src_branch_id)
+    if not src:
+        return
+    dst = _load_branch_lore(story_id, dst_branch_id)
+    dst_topics = {e.get("topic", ""): i for i, e in enumerate(dst)}
+    for e in src:
+        t = e.get("topic", "")
+        if t in dst_topics:
+            dst[dst_topics[t]] = e
+        else:
+            dst.append(e)
+            dst_topics[t] = len(dst) - 1
+    _save_branch_lore(story_id, dst_branch_id, dst)
 
 
 def _search_branch_lore(story_id: str, branch_id: str, query: str,
@@ -3189,10 +3222,8 @@ def api_branches_promote():
     copy_recap_to_branch(story_id, branch_id, "main", -1)
     copy_world_day(story_id, branch_id, "main")
     copy_cheats(_story_dir(story_id), branch_id, "main")
-    # Copy branch lore from promoted branch to main
-    _promo_bl = _load_branch_lore(story_id, branch_id)
-    if _promo_bl:
-        _save_branch_lore(story_id, "main", _promo_bl)
+    # Merge branch lore from promoted branch into main (upsert, not overwrite)
+    _merge_branch_lore_into(story_id, branch_id, "main")
 
     src_char = _story_character_state_path(story_id, branch_id)
     dst_char = _story_character_state_path(story_id, "main")
@@ -3287,10 +3318,8 @@ def api_branches_merge():
     copy_recap_to_branch(story_id, branch_id, parent_id, -1)
     copy_world_day(story_id, branch_id, parent_id)
     copy_cheats(_story_dir(story_id), branch_id, parent_id)
-    # Copy branch lore from child to parent
-    _merge_bl = _load_branch_lore(story_id, branch_id)
-    if _merge_bl:
-        _save_branch_lore(story_id, parent_id, _merge_bl)
+    # Merge branch lore from child into parent (upsert, not overwrite)
+    _merge_branch_lore_into(story_id, branch_id, parent_id)
 
     # 5. Reparent child's children to parent
     for bid, b in branches.items():
@@ -3856,7 +3885,10 @@ def api_lore_promote_review():
         m = re.search(r'\[.*\]', result, re.DOTALL)
         if not m:
             return jsonify({"ok": False, "error": "failed to parse LLM response"}), 500
-        proposals = json.loads(m.group())
+        try:
+            proposals = json.loads(m.group())
+        except json.JSONDecodeError:
+            return jsonify({"ok": False, "error": "failed to parse LLM response"}), 500
 
     # Enrich proposals with entry data
     enriched = []
@@ -4299,6 +4331,10 @@ def api_saves_load(save_id):
     else:
         copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
+    # Copy branch lore from parent
+    parent_bl = _load_branch_lore(story_id, parent_branch_id)
+    if parent_bl:
+        _save_branch_lore(story_id, branch_id, parent_bl)
 
     save_name = save.get("name", "存檔")
     branches[branch_id] = {
