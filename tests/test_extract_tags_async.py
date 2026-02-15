@@ -270,8 +270,8 @@ class TestAsyncEventDedup:
 
 class TestAsyncLoreExtraction:
     @mock.patch("llm_bridge.call_oneshot")
-    def test_new_lore_inserted(self, mock_llm, story_id, setup_story):
-        """New lore entries should be saved to world_lore.json."""
+    def test_new_lore_saved_to_branch(self, mock_llm, story_id, setup_story):
+        """New auto-extracted lore should be saved to branch_lore.json (not base)."""
         llm_response = json.dumps({
             "lore": [{"category": "體系", "topic": "新體系", "content": "這是新的體系說明"}],
         })
@@ -279,10 +279,15 @@ class TestAsyncLoreExtraction:
 
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
 
-        lore_path = setup_story / "world_lore.json"
-        lore = json.loads(lore_path.read_text(encoding="utf-8"))
-        topics = [e["topic"] for e in lore]
+        # Should be in branch_lore.json, not world_lore.json
+        branch_lore_path = setup_story / "branches" / "main" / "branch_lore.json"
+        branch_lore = json.loads(branch_lore_path.read_text(encoding="utf-8"))
+        topics = [e["topic"] for e in branch_lore]
         assert "新體系" in topics
+
+        # Base lore should remain empty
+        base_lore = json.loads((setup_story / "world_lore.json").read_text(encoding="utf-8"))
+        assert len(base_lore) == 0
 
     @mock.patch("llm_bridge.call_oneshot")
     def test_user_edited_lore_protected(self, mock_llm, story_id, setup_story):
