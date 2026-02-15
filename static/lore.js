@@ -18,6 +18,8 @@
   let isStreaming = false;
   let editingEntry = null; // null = create, {topic, ...} = edit
   let streamAbortController = null;
+  let activeBranchId = ""; // current branch for branch lore
+  let isPromoting = false; // promotion review in progress
 
   // ------------------------------------------------------------------
   // DOM refs
@@ -85,6 +87,7 @@
     if (data.ok) {
       allEntries = data.entries || [];
       categories = data.categories || [];
+      activeBranchId = data.branch_id || "";
     }
     return data;
   }
@@ -198,8 +201,12 @@
     const label = displayName || e.topic;
     const sel = selectedTopics.has(e.topic) ? " selected" : "";
     const checked = checkedTopics.has(e.topic) ? " checked" : "";
-    let html = `<div class="lore-entry${sel}" data-topic="${escapeHtml(e.topic)}">`;
+    const layerClass = e.layer === "branch" ? " branch-entry" : "";
+    let html = `<div class="lore-entry${sel}${layerClass}" data-topic="${escapeHtml(e.topic)}" data-layer="${e.layer || 'base'}">`;
     html += `<span class="lore-entry-topic">${escapeHtml(label)}</span>`;
+    if (e.layer === "branch") {
+      html += `<span class="lore-layer-badge branch">分支</span>`;
+    }
     html += `<input type="checkbox" class="lore-entry-check" data-topic="${escapeHtml(e.topic)}" aria-label="選取 ${escapeHtml(label)}"${checked}>`;
     html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
     html += `</div>`;
@@ -218,31 +225,17 @@
     return html;
   }
 
-  function renderLoreList(filter) {
-    const q = (filter || "").toLowerCase();
-    const filtered = q
-      ? allEntries.filter(
-          (e) =>
-            e.topic.toLowerCase().includes(q) ||
-            (e.content || "").toLowerCase().includes(q) ||
-            e.category.toLowerCase().includes(q)
-        )
-      : allEntries;
-
+  function renderCategoryGroup(entries, html) {
     // Group by category
     const groups = new Map();
-    for (const e of filtered) {
+    for (const e of entries) {
       const cat = e.category || "其他";
       if (!groups.has(cat)) groups.set(cat, []);
       groups.get(cat).push(e);
     }
-
-    // Sort categories alphabetically
     const orderedCats = [...groups.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
-
-    let html = "";
     for (const cat of orderedCats) {
-      const entries = groups.get(cat);
+      const catEntries = groups.get(cat);
       const isException = collapsedCats.has(cat);
       const isOpen = allCollapsed ? isException : !isException;
       const collapsed = isOpen ? "" : " collapsed";
@@ -250,12 +243,12 @@
       html += `<div class="lore-cat-header" data-cat="${escapeHtml(cat)}">`;
       html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
       html += `${escapeHtml(cat)}`;
-      html += `<span class="lore-cat-count">(${entries.length})</span>`;
+      html += `<span class="lore-cat-count">(${catEntries.length})</span>`;
       html += `</div>`;
       html += `<div class="lore-cat-entries">`;
 
-      entries.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
-      const items = buildSubGroups(entries);
+      catEntries.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
+      const items = buildSubGroups(catEntries);
       for (const item of items) {
         if (item.type === "subgroup") {
           const subKey = cat + "/" + item.prefix;
@@ -278,7 +271,44 @@
           html += renderEntryHtml(item.e);
         }
       }
+      html += `</div></div>`;
+    }
+    return html;
+  }
 
+  function renderLoreList(filter) {
+    const q = (filter || "").toLowerCase();
+    const filtered = q
+      ? allEntries.filter(
+          (e) =>
+            e.topic.toLowerCase().includes(q) ||
+            (e.content || "").toLowerCase().includes(q) ||
+            e.category.toLowerCase().includes(q)
+        )
+      : allEntries;
+
+    // Separate base and branch entries
+    const baseEntries = filtered.filter((e) => e.layer !== "branch");
+    const branchEntries = filtered.filter((e) => e.layer === "branch");
+
+    let html = "";
+    html = renderCategoryGroup(baseEntries, html);
+
+    // Branch lore section
+    if (branchEntries.length > 0) {
+      const branchKey = "__branch_section__";
+      const branchException = collapsedCats.has(branchKey);
+      const branchOpen = allCollapsed ? branchException : !branchException;
+      const branchCollapsed = branchOpen ? "" : " collapsed";
+      html += `<div class="lore-branch-section${branchCollapsed}">`;
+      html += `<div class="lore-branch-header" data-cat="${branchKey}">`;
+      html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
+      html += `分支知識`;
+      html += `<span class="lore-cat-count">(${branchEntries.length})</span>`;
+      html += `<button class="lore-promote-btn" title="審核並提升為永久設定">審核提升</button>`;
+      html += `</div>`;
+      html += `<div class="lore-branch-entries">`;
+      html = renderCategoryGroup(branchEntries, html);
       html += `</div></div>`;
     }
 
@@ -288,13 +318,22 @@
 
     $loreList.innerHTML = html;
 
-    // Bind click handlers — categories
-    $loreList.querySelectorAll(".lore-cat-header").forEach((el) => {
-      el.addEventListener("click", () => {
+    // Bind click handlers — categories (and branch section header)
+    $loreList.querySelectorAll(".lore-cat-header, .lore-branch-header").forEach((el) => {
+      el.addEventListener("click", (ev) => {
+        if (ev.target.closest(".lore-promote-btn")) return;
         const cat = el.dataset.cat;
         el.parentElement.classList.toggle("collapsed");
         if (collapsedCats.has(cat)) collapsedCats.delete(cat);
         else collapsedCats.add(cat);
+      });
+    });
+
+    // Bind promote button
+    $loreList.querySelectorAll(".lore-promote-btn").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        reviewAndPromote();
       });
     });
 
@@ -360,7 +399,7 @@
     if (oldSource) oldSource.remove();
 
     if (entry) {
-      $modalTitle.textContent = "編輯設定";
+      $modalTitle.textContent = entry.layer === "branch" ? "編輯分支設定" : "編輯設定";
       $modalDelete.style.display = "";
       populateCategoryDropdown(entry.category);
       $modalTopic.value = entry.topic;
@@ -412,6 +451,11 @@
     }
 
     if (editingEntry) {
+      if (editingEntry.layer === "branch") {
+        // Branch entries are read-only in the modal (promote or delete only)
+        alert("分支設定無法直接編輯。請使用「審核提升」功能。");
+        return;
+      }
       const updates = { category, content };
       if (topic !== editingEntry.topic) updates.new_topic = topic;
       const res = await updateEntry(editingEntry.topic, updates);
@@ -434,7 +478,16 @@
   async function deleteFromModal() {
     if (!editingEntry) return;
     if (!confirm(`確定要刪除「${editingEntry.topic}」？`)) return;
-    const res = await deleteEntry(editingEntry.topic);
+    let res;
+    if (editingEntry.layer === "branch") {
+      res = await fetch("/api/lore/branch/entry", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: editingEntry.topic, branch_id: activeBranchId }),
+      }).then((r) => r.json());
+    } else {
+      res = await deleteEntry(editingEntry.topic);
+    }
     if (!res.ok) {
       alert(res.error || "刪除失敗");
       return;
@@ -460,6 +513,175 @@
     }
     updateBatchBar();
     renderLoreList($searchInput.value);
+  }
+
+  // ------------------------------------------------------------------
+  // Branch lore promotion
+  // ------------------------------------------------------------------
+  async function reviewAndPromote() {
+    if (isPromoting || !activeBranchId) return;
+    const branchEntries = allEntries.filter((e) => e.layer === "branch");
+    if (branchEntries.length === 0) return;
+
+    isPromoting = true;
+    // Show reviewing state in chat panel
+    appendChatMessage("assistant", "正在審核分支知識...");
+
+    try {
+      const res = await fetch("/api/lore/promote/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch_id: activeBranchId }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        appendChatMessage("assistant", `審核失敗：${data.error || "未知錯誤"}`);
+        isPromoting = false;
+        return;
+      }
+
+      const proposals = data.proposals || [];
+      if (proposals.length === 0) {
+        appendChatMessage("assistant", "沒有需要審核的分支設定。");
+        isPromoting = false;
+        return;
+      }
+
+      // Group proposals by action
+      const promote = proposals.filter((p) => p.action === "promote");
+      const rewrite = proposals.filter((p) => p.action === "rewrite");
+      const reject = proposals.filter((p) => p.action === "reject");
+
+      let summary = `## 審核結果\n`;
+      summary += `- 可直接提升：${promote.length} 條\n`;
+      summary += `- 需改寫提升：${rewrite.length} 條\n`;
+      summary += `- 建議保留在分支：${reject.length} 條\n`;
+
+      const { div: msgDiv } = appendChatMessage("assistant", summary);
+
+      // Render proposal cards
+      const cardsDiv = document.createElement("div");
+      cardsDiv.className = "proposal-cards";
+      for (const p of proposals) {
+        cardsDiv.appendChild(createPromoteCard(p));
+      }
+      msgDiv.appendChild(cardsDiv);
+    } catch (err) {
+      appendChatMessage("assistant", `連線錯誤：${err.message}`);
+    }
+    isPromoting = false;
+  }
+
+  function createPromoteCard(proposal) {
+    const card = document.createElement("div");
+    card.className = "proposal-card";
+
+    const actionLabels = { promote: "提升", rewrite: "改寫提升", reject: "保留分支" };
+    const actionColors = { promote: "add", rewrite: "edit", reject: "delete" };
+    const action = proposal.action || "reject";
+    const badgeClass = actionColors[action] || "delete";
+    const badgeText = actionLabels[action] || action;
+
+    let html = `<div class="proposal-header">`;
+    html += `<span class="proposal-badge ${escapeHtml(badgeClass)}">${escapeHtml(badgeText)}</span>`;
+    html += `<span class="proposal-topic">${escapeHtml(proposal.topic || "")}</span>`;
+    if (proposal.category) {
+      html += ` <span style="color:var(--text-dim);font-size:0.8rem;">(${escapeHtml(proposal.category)})</span>`;
+    }
+    html += `</div>`;
+
+    if (proposal.reason) {
+      html += `<div class="proposal-reason" style="color:var(--text-dim);font-size:0.85rem;margin:4px 0;">${escapeHtml(proposal.reason)}</div>`;
+    }
+
+    // Show content (or rewritten content for rewrite action)
+    const displayContent = action === "rewrite" && proposal.rewritten_content
+      ? proposal.rewritten_content
+      : proposal.content || "";
+    if (displayContent) {
+      const full = escapeHtml(displayContent);
+      const short = escapeHtml(truncate(displayContent, 200));
+      const needsExpand = displayContent.length > 200;
+      html += `<div class="proposal-content">${needsExpand ? short : full}</div>`;
+      if (needsExpand) {
+        html += `<button class="proposal-expand-btn">展開全文</button>`;
+      }
+    }
+
+    if (action !== "reject") {
+      html += `<div class="proposal-actions">`;
+      html += `<button class="btn-accept">採用</button>`;
+      html += `<button class="btn-reject">忽略</button>`;
+      html += `</div>`;
+    } else {
+      html += `<div class="proposal-actions">`;
+      html += `<span style="color:var(--text-dim);font-size:0.8rem;">不適合提升</span>`;
+      html += `</div>`;
+    }
+
+    card.innerHTML = html;
+
+    // Expand/collapse
+    const expandBtn = card.querySelector(".proposal-expand-btn");
+    if (expandBtn) {
+      let expanded = false;
+      const contentDiv = card.querySelector(".proposal-content");
+      const full = escapeHtml(displayContent);
+      const short = escapeHtml(truncate(displayContent, 200));
+      expandBtn.addEventListener("click", () => {
+        expanded = !expanded;
+        contentDiv.innerHTML = expanded ? full : short;
+        expandBtn.textContent = expanded ? "收起" : "展開全文";
+      });
+    }
+
+    // Accept: promote to base
+    card.addEventListener("click", async (ev) => {
+      if (!ev.target.closest(".btn-accept")) return;
+      const actionsDiv = card.querySelector(".proposal-actions");
+      actionsDiv.innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem;">提升中...</span>';
+      try {
+        const body = {
+          branch_id: activeBranchId,
+          topic: proposal.topic,
+        };
+        // For rewrite, send the rewritten content
+        if (action === "rewrite" && proposal.rewritten_content) {
+          body.content = proposal.rewritten_content;
+        }
+        const res = await fetch("/api/lore/promote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          card.classList.add("applied");
+          actionsDiv.innerHTML = '<span style="color:#7fdb96;font-size:0.8rem;">已提升</span>';
+          await refreshLoreList();
+        } else {
+          actionsDiv.innerHTML =
+            `<span style="color:#db7f7f;font-size:0.8rem;">${escapeHtml(data.error || "失敗")}</span> ` +
+            '<button class="btn-accept" style="margin-left:8px;">重試</button>';
+        }
+      } catch {
+        actionsDiv.innerHTML =
+          '<span style="color:#db7f7f;font-size:0.8rem;">連線錯誤</span> ' +
+          '<button class="btn-accept" style="margin-left:8px;">重試</button>';
+      }
+    });
+
+    // Reject
+    const rejectBtn = card.querySelector(".btn-reject");
+    if (rejectBtn) {
+      rejectBtn.addEventListener("click", () => {
+        card.classList.add("rejected");
+        card.querySelector(".proposal-actions").innerHTML =
+          '<span style="color:var(--text-dim);font-size:0.8rem;">已忽略</span>';
+      });
+    }
+
+    return card;
   }
 
   // ------------------------------------------------------------------
@@ -907,7 +1129,17 @@
       for (let i = 0; i < topics.length; i++) {
         $batchDeleteBtn.textContent = `刪除中 ${i + 1}/${topics.length}...`;
         try {
-          const res = await deleteEntry(topics[i]);
+          const entry = allEntries.find((e) => e.topic === topics[i]);
+          let res;
+          if (entry && entry.layer === "branch") {
+            res = await fetch("/api/lore/branch/entry", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ topic: topics[i], branch_id: activeBranchId }),
+            }).then((r) => r.json());
+          } else {
+            res = await deleteEntry(topics[i]);
+          }
           if (res.ok) {
             checkedTopics.delete(topics[i]);
             selectedTopics.delete(topics[i]);
