@@ -5,6 +5,17 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-02-16
+
+### Changed
+- **Dice rebalance**: lower outcome thresholds (80/50/30 → 70/40/20) for a more balanced success curve ([#91])
+- Expand attribute lookup keywords to match actual GM descriptions — physique (+8 keywords), spirit (+7), gene lock shorthand (`一階`~`四階`) ([#91])
+
+### Added
+- **Beginner bonus**: first 10 turns get linearly decaying dice bonus (+10 → +1), easing new players into the game ([#91])
+
+[#91]: https://github.com/lainn9527/agent-story/pull/91
+
 ## [0.16.3] - 2026-02-16
 
 ### Removed
