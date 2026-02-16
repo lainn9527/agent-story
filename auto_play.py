@@ -51,7 +51,6 @@ from app import (
     _story_default_character_state_path,
     _blank_character_state,
     _load_character_state,
-    _load_summary,
     _build_story_system_prompt,
     get_full_timeline,
     _build_augmented_message,
@@ -390,10 +389,9 @@ def execute_turn(
 
     # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]

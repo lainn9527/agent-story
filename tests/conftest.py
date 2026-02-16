@@ -97,9 +97,6 @@ SAMPLE_SYSTEM_PROMPT = """你是一個 RPG 遊戲的 GM（遊戲主持人）。
 ## 角色狀態
 {character_state}
 
-## 故事摘要
-{story_summary}
-
 ## 敘事回顧
 {narrative_recap}
 
