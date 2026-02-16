@@ -40,7 +40,6 @@ def setup_story(tmp_path, story_id):
     prompt = (
         "你是GM。\n"
         "## 角色狀態\n{character_state}\n"
-        "## 故事摘要\n{story_summary}\n"
         "## 敘事回顧\n{narrative_recap}\n"
         "## 世界設定\n{world_lore}\n"
         "## NPC\n{npc_profiles}\n"
@@ -79,9 +78,6 @@ def setup_story(tmp_path, story_id):
 
     # World lore
     (story_dir / "world_lore.json").write_text("[]", encoding="utf-8")
-
-    # Story summary
-    (story_dir / "story_summary.txt").write_text("故事摘要內容", encoding="utf-8")
 
     return story_dir
 
@@ -151,23 +147,23 @@ class TestBuildStorySystemPrompt:
     def test_no_residual_placeholders(self, story_id, setup_story):
         state_text = json.dumps({"name": "測試者"}, ensure_ascii=False)
         prompt = app_module._build_story_system_prompt(
-            story_id, state_text, "摘要", branch_id="main", narrative_recap="回顧"
+            story_id, state_text, branch_id="main", narrative_recap="回顧"
         )
         # No unfilled placeholders
-        for placeholder in ["{character_state}", "{story_summary}", "{narrative_recap}",
+        for placeholder in ["{character_state}", "{narrative_recap}",
                             "{world_lore}", "{npc_profiles}"]:
             assert placeholder not in prompt
 
     def test_character_state_injected(self, story_id, setup_story):
         state_text = json.dumps({"name": "英雄", "reward_points": 9999}, ensure_ascii=False)
         prompt = app_module._build_story_system_prompt(
-            story_id, state_text, "摘要", branch_id="main"
+            story_id, state_text, branch_id="main"
         )
         assert "英雄" in prompt
         assert "9999" in prompt
 
     def test_narrative_recap_default(self, story_id, setup_story):
         prompt = app_module._build_story_system_prompt(
-            story_id, "{}", "", branch_id="main"
+            story_id, "{}", branch_id="main"
         )
         assert "尚無回顧" in prompt

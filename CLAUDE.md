@@ -162,7 +162,6 @@ Standalone script where two AI instances play the game autonomously — a GM and
 ## System Prompt Placeholders
 The `system_prompt.txt` template uses these placeholders:
 - `{character_state}` — Current character state JSON
-- `{story_summary}` — Story summary text
 - `{narrative_recap}` — Rolling narrative recap from conversation compaction
 - `{world_lore}` — Lore TOC (compact, not full content)
 - `{npc_profiles}` — Formatted NPC profiles
@@ -198,7 +197,7 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 | `gemini` | `gemini.api_keys[]`, `gemini.model` | SSE via `streamGenerateContent` | Free tier / pay-per-token |
 | `claude_cli` | `claude_cli.model` | NDJSON via `--output-format stream-json` | Included in Claude subscription |
 
-- `llm_bridge.py` exports `call_claude_gm`, `call_claude_gm_stream`, `generate_story_summary`, `call_oneshot`
+- `llm_bridge.py` exports `call_claude_gm`, `call_claude_gm_stream`, `call_oneshot`
 - `app.py` and `npc_evolution.py` import from `llm_bridge` (never directly from provider bridges)
 - Adding a new provider: create `<provider>_bridge.py`, add dispatch branch in `llm_bridge.py`
 

@@ -48,7 +48,7 @@ logging.root.addHandler(_file_h)
 
 log = logging.getLogger("rpg")
 
-from llm_bridge import call_claude_gm, call_claude_gm_stream, generate_story_summary, get_last_usage, get_provider
+from llm_bridge import call_claude_gm, call_claude_gm_stream, get_last_usage, get_provider
 import usage_db
 from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
 from image_gen import generate_image_async, get_image_status, get_image_path
@@ -86,7 +86,6 @@ CONVERSATION_PATH = os.path.join(BASE_DIR, "Grok_conversation.md")
 LEGACY_PARSED_PATH = os.path.join(DATA_DIR, "parsed_conversation.json")
 LEGACY_TREE_PATH = os.path.join(DATA_DIR, "timeline_tree.json")
 LEGACY_CHARACTER_STATE_PATH = os.path.join(DATA_DIR, "character_state.json")
-LEGACY_SUMMARY_PATH = os.path.join(DATA_DIR, "story_summary.txt")
 LEGACY_NEW_MESSAGES_PATH = os.path.join(DATA_DIR, "new_messages.json")
 
 
@@ -209,10 +208,6 @@ def _story_parsed_path(story_id: str) -> str:
     return os.path.join(_story_dir(story_id), "parsed_conversation.json")
 
 
-def _story_summary_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "story_summary.txt")
-
-
 def _branch_dir(story_id: str, branch_id: str) -> str:
     d = os.path.join(_story_dir(story_id), "branches", branch_id)
     os.makedirs(d, exist_ok=True)
@@ -306,16 +301,6 @@ def _load_tree(story_id: str) -> dict:
 
 def _save_tree(story_id: str, tree: dict):
     _save_json(_story_tree_path(story_id), tree)
-
-
-def _load_summary(story_id: str) -> str:
-    path = _story_summary_path(story_id)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-            if text:
-                return text
-    return ""
 
 
 def _load_character_schema(story_id: str) -> dict:
@@ -514,13 +499,12 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     return "\n".join(lines)
 
 
-def _build_story_system_prompt(story_id: str, state_text: str, summary: str, branch_id: str = "main", narrative_recap: str = "") -> str:
+def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = "main", narrative_recap: str = "") -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
-    # Blank branches are fresh starts — no story summary or NPC context from parent
+    # Blank branches are fresh starts — no narrative context from parent
     tree = _load_tree(story_id)
     branch = tree.get("branches", {}).get(branch_id, {})
     if branch.get("blank"):
-        summary = ""
         narrative_recap = ""
 
     if not narrative_recap:
@@ -545,7 +529,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
             template = f.read()
         result = template.format(
             character_state=state_text,
-            story_summary=summary,
+            story_summary="",
             world_lore=lore_text,
             npc_profiles=npc_text,
             team_rules=team_rules,
@@ -564,7 +548,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, summary: str, bra
                 result = facts_section + result
     else:
         # Fallback to prompts.py template
-        result = build_system_prompt(state_text, summary, critical_facts=critical_facts)
+        result = build_system_prompt(state_text, critical_facts=critical_facts)
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
     story_dir = _story_dir(story_id)
@@ -1795,7 +1779,6 @@ def _migrate_to_stories():
     moves = {
         "timeline_tree.json": "timeline_tree.json",
         "parsed_conversation.json": "parsed_conversation.json",
-        "story_summary.txt": "story_summary.txt",
         "new_messages.json": "new_messages.json",
     }
     for src_name, dst_name in moves.items():
@@ -2130,19 +2113,7 @@ def api_init():
     active_branch = tree.get("active_branch_id", "main")
     _load_character_state(story_id, active_branch)
 
-    # 5. Story summary
-    summary = _load_summary(story_id)
-    if not summary and os.path.exists(CONVERSATION_PATH):
-        summary_path = _story_summary_path(story_id)
-        def _gen_summary():
-            with open(CONVERSATION_PATH, "r", encoding="utf-8") as f:
-                full_text = f.read()
-            t0 = time.time()
-            generate_story_summary(full_text, summary_path)
-            _log_llm_usage(story_id, "summary", time.time() - t0)
-        threading.Thread(target=_gen_summary, daemon=True).start()
-
-    # 6. Ensure main messages file exists
+    # 5. Ensure main messages file exists
     main_msgs_path = _story_messages_path(story_id, "main")
     if not os.path.exists(main_msgs_path):
         _save_json(main_msgs_path, [])
@@ -2156,7 +2127,6 @@ def api_init():
         "ok": True,
         "original_count": len(original),
         "active_branch_id": active_branch,
-        "has_summary": bool(summary),
         "active_story_id": story_id,
         "story_name": story_meta.get("name", story_id),
         "character_schema": character_schema,
@@ -2288,10 +2258,9 @@ def api_send():
     # 2. Build system prompt (with narrative recap)
     t0 = time.time()
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     # 3. Gather recent context
@@ -2401,10 +2370,9 @@ def api_send_stream():
 
     # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
@@ -2736,10 +2704,9 @@ def api_branches_edit():
     t0 = time.time()
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -2866,10 +2833,9 @@ def api_branches_edit_stream():
     # Build prompt context
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state)
     if dice_result:
@@ -3004,10 +2970,9 @@ def api_branches_regenerate():
     t0 = time.time()
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -3125,10 +3090,9 @@ def api_branches_regenerate_stream():
     # Build prompt context
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
-    summary = _load_summary(story_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, summary, branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state)
 
@@ -3587,7 +3551,6 @@ def api_stories_switch():
     tree = _load_tree(story_id)
     active_branch = tree.get("active_branch_id", "main")
     original = _load_json(_story_parsed_path(story_id), [])
-    summary = _load_summary(story_id)
     story_meta = registry["stories"][story_id]
     character_schema = _load_character_schema(story_id)
 
@@ -3597,7 +3560,6 @@ def api_stories_switch():
         "story_name": story_meta.get("name", story_id),
         "active_branch_id": active_branch,
         "original_count": len(original),
-        "has_summary": bool(summary),
         "character_schema": character_schema,
     })
 

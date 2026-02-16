@@ -77,7 +77,7 @@ def setup_story(tmp_path, story_id):
 
     # System prompt
     (story_dir / "system_prompt.txt").write_text(
-        "你是GM。\n{character_state}\n{story_summary}\n{narrative_recap}\n"
+        "你是GM。\n{character_state}\n{narrative_recap}\n"
         "{world_lore}\n{npc_profiles}\n{team_rules}\n{other_agents}\n{critical_facts}",
         encoding="utf-8",
     )
@@ -130,9 +130,6 @@ def setup_story(tmp_path, story_id):
     (story_dir / "world_lore.json").write_text(
         json.dumps(base_lore, ensure_ascii=False), encoding="utf-8"
     )
-
-    # Story summary
-    (story_dir / "story_summary.txt").write_text("測試摘要", encoding="utf-8")
 
     # Parsed conversation (base messages)
     parsed = [
