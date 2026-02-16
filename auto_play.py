@@ -397,8 +397,9 @@ def execute_turn(
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
 
     # 4. Augment player message with lore/events/NPC activities/dice
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(
-        story_id, branch_id, player_text, state
+        story_id, branch_id, player_text, state, turn_count=tc
     )
     if dice_result:
         player_msg["dice"] = dice_result

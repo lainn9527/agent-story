@@ -9,11 +9,13 @@ from typing import Optional
 _PHYSIQUE_TABLE: list[tuple[str, int]] = [
     # Tier 3 — superhuman / transcendent
     ("超級戰士", 10),
+    ("超級士兵", 10),
     ("始祖", 10),
     ("超凡", 10),
     ("完美適應", 10),
     # Tier 2 — enhanced human
     ("強化人類", 3),
+    ("人類極限", 3),
     ("永久提升", 3),
     ("大幅提升", 3),
     ("極大提升", 3),
@@ -49,9 +51,13 @@ _SPIRIT_TABLE: list[tuple[str, int]] = [
 
 _GENE_LOCK_TABLE: list[tuple[str, int]] = [
     ("第四階", 30),
+    ("四階", 30),
     ("第三階", 20),
+    ("三階", 20),
     ("第二階", 10),
+    ("二階", 10),
     ("第一階", 5),
+    ("一階", 5),
     ("未開啟", 0),
 ]
 
