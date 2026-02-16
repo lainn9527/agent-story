@@ -5,6 +5,15 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-02-16
+
+### Removed
+- **`story_summary` system** — removed entirely to fix cross-branch context leakage. Blank branch children (edit/regen forks) no longer inherit main-story summary. `narrative_recap` (per-branch, rolling) already covers the same ground. ([#92])
+- Removed `generate_story_summary()` from all 3 LLM bridges (`llm_bridge.py`, `claude_bridge.py`, `gemini_bridge.py`) ([#92])
+- Removed `has_summary` from `/api/init` and `/api/stories/switch` API responses ([#92])
+
+[#92]: https://github.com/lainn9527/agent-story/pull/92
+
 ## [0.16.2] - 2026-02-16
 
 ### Added
