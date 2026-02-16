@@ -817,15 +817,15 @@ def find_duplicates(story_id: str, threshold: float = 0.90) -> list[dict]:
     for idx in order:
         i, j = int(i_indices[idx]), int(j_indices[idx])
         a = conn.execute(
-            "SELECT category, topic, content FROM lore WHERE id=?", (ids[i],)
+            "SELECT category, subcategory, topic, content FROM lore WHERE id=?", (ids[i],)
         ).fetchone()
         b = conn.execute(
-            "SELECT category, topic, content FROM lore WHERE id=?", (ids[j],)
+            "SELECT category, subcategory, topic, content FROM lore WHERE id=?", (ids[j],)
         ).fetchone()
         if a and b:
             enriched.append({
-                "entry_a": {"category": a["category"], "topic": a["topic"], "content": a["content"][:200]},
-                "entry_b": {"category": b["category"], "topic": b["topic"], "content": b["content"][:200]},
+                "entry_a": {"category": a["category"], "subcategory": a["subcategory"] or "", "topic": a["topic"], "content": a["content"][:200]},
+                "entry_b": {"category": b["category"], "subcategory": b["subcategory"] or "", "topic": b["topic"], "content": b["content"][:200]},
                 "similarity": round(float(sims[idx]), 4),
             })
     conn.close()
