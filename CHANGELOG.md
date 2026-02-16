@@ -5,10 +5,31 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-02-16
+
+### Added
+- **Subcategory field** for hierarchical lore organization — entries now support optional `subcategory` for two-level grouping (e.g. `副本世界觀 > 生化危機`, `體系 > 技能`) ([#90])
+- Frontend lore console renders category > subcategory tree with collapsible subgroups ([#90])
+- `道具` added to allowed lore extraction categories ([#90])
+
+### Changed
+- `技能` and `基本屬性` are now subcategories under `體系` instead of top-level categories ([#90])
+- Extraction prompt updated with subcategory guidance for `副本世界觀` (mandatory dungeon name) and `體系` (optional skill/attribute classification) ([#90])
+- `lore_db.py`: SQLite schema migration adds `subcategory` column, all search/index/TOC functions updated ([#90])
+
+### Fixed
+- Subcategory preserved across all save/update/promote/apply code paths (previously silently dropped) ([#90])
+- Branch lore search output now includes subcategory in formatted label, matching base lore search ([#90])
+- `find_duplicates` and `lore_chat` system prompt now include subcategory in output/grouping ([#90])
+
+[#90]: https://github.com/lainn9527/agent-story/pull/90
+
 ## [0.16.1] - 2026-02-16
 
 ### Changed
 - Strengthen lore extraction prompt to explicitly exclude character-specific content (personal stats, inventory, combat experiences) and require generic language without character names ([#88])
+
+[#88]: https://github.com/lainn9527/agent-story/pull/88
 
 ## [0.16.0] - 2026-02-16
 
