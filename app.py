@@ -825,6 +825,8 @@ def _save_branch_lore_entry(story_id: str, branch_id: str, entry: dict,
                     entry["source"] = existing["source"]
                 if "edited_by" not in entry and "edited_by" in existing:
                     entry["edited_by"] = existing["edited_by"]
+                if "subcategory" not in entry and "subcategory" in existing:
+                    entry["subcategory"] = existing["subcategory"]
                 lore[i] = entry
                 _save_branch_lore(story_id, branch_id, lore)
                 return
@@ -901,7 +903,11 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
             break
         if len(content) > 1200:
             content = content[:1200] + "…（截斷）"
-        lines.append(f"#### {e.get('category', '')}：{e.get('topic', '')}")
+        cat_label = e.get("category", "")
+        sub = e.get("subcategory", "")
+        if sub:
+            cat_label = f"{cat_label}/{sub}"
+        lines.append(f"#### {cat_label}：{e.get('topic', '')}")
         lines.append(content)
         lines.append("")
         used_tokens += est_tokens
@@ -995,6 +1001,8 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
                 # Preserve edited_by provenance if not provided in new entry
                 if "edited_by" not in entry and "edited_by" in existing:
                     entry["edited_by"] = existing["edited_by"]
+                if "subcategory" not in entry and "subcategory" in existing:
+                    entry["subcategory"] = existing["subcategory"]
                 lore[i] = entry
                 _save_json(_story_lore_path(story_id), lore)
                 upsert_lore_entry(story_id, entry)
@@ -3749,6 +3757,9 @@ def api_lore_entry_create():
         if e.get("topic") == topic:
             return jsonify({"ok": False, "error": f"topic '{topic}' already exists"}), 409
     entry = {"category": category, "topic": topic, "content": content, "edited_by": "user"}
+    subcategory = body.get("subcategory", "").strip()
+    if subcategory:
+        entry["subcategory"] = subcategory
     _save_lore_entry(story_id, entry)
     return jsonify({"ok": True, "entry": entry})
 
@@ -3778,6 +3789,8 @@ def api_lore_entry_update():
                         return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
                     delete_lore_entry(story_id, topic)
                 updated = {"category": new_category, "topic": new_topic, "content": new_content, "edited_by": "user"}
+                if e.get("subcategory"):
+                    updated["subcategory"] = e["subcategory"]
                 if "source" in e:
                     updated["source"] = e["source"]
                 lore[i] = updated
@@ -3945,6 +3958,8 @@ def api_lore_promote():
         "content": content_override or entry.get("content", ""),
         "edited_by": "user",  # promoted = user-curated
     }
+    if entry.get("subcategory"):
+        base_entry["subcategory"] = entry["subcategory"]
     if "source" in entry:
         base_entry["source"] = entry["source"]
 
@@ -3980,11 +3995,13 @@ def api_lore_chat_stream():
     groups = OrderedDict()
     for e in lore:
         cat = e.get("category", "其他")
-        if cat not in groups:
-            groups[cat] = []
-        groups[cat].append(e)
-    for cat, entries in groups.items():
-        lore_text_parts.append(f"### 【{cat}】")
+        sub = e.get("subcategory", "")
+        key = f"{cat}/{sub}" if sub else cat
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(e)
+    for key, entries in groups.items():
+        lore_text_parts.append(f"### 【{key}】")
         for e in entries:
             lore_text_parts.append(f"#### {e['topic']}")
             lore_text_parts.append(e.get("content", ""))
@@ -4093,6 +4110,8 @@ def api_lore_apply():
                 "content": p.get("content", ""),
                 "edited_by": "user",
             }
+            if p.get("subcategory"):
+                entry["subcategory"] = p["subcategory"]
             _save_lore_entry(story_id, entry)
             applied.append({"action": "add", "topic": topic})
         elif action == "edit":
@@ -4102,6 +4121,8 @@ def api_lore_apply():
                 "content": p.get("content", ""),
                 "edited_by": "user",
             }
+            if p.get("subcategory"):
+                entry["subcategory"] = p["subcategory"]
             _save_lore_entry(story_id, entry)
             applied.append({"action": "edit", "topic": topic})
         elif action == "delete":
