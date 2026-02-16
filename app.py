@@ -2010,6 +2010,7 @@ def _find_world_day_at_index(story_id: str, branch_id: str, target_index: int) -
 def _build_augmented_message(
     story_id: str, branch_id: str, user_text: str,
     character_state: dict | None = None,
+    turn_count: int = 0,
 ) -> tuple[str, dict | None]:
     """Add lore + events + NPC activities + dice context to user message.
 
@@ -2051,7 +2052,8 @@ def _build_augmented_message(
         cheat_mod = get_dice_modifier(story_dir, branch_id)
         always_win = get_dice_always_success(story_dir, branch_id)
         dice_result = roll_fate(character_state, cheat_modifier=cheat_mod,
-                                always_success=always_win)
+                                always_success=always_win,
+                                turn_count=turn_count)
         parts.append(format_dice_context(dice_result))
 
     if parts:
@@ -2268,7 +2270,8 @@ def api_send():
 
     # 3b. Search relevant lore/events/activities and prepend to user message
     t0 = time.time()
-    augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state)
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
+    augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state, turn_count=tc)
     if dice_result:
         player_msg["dice"] = dice_result
         _save_json(delta_path, delta_msgs)
@@ -2376,7 +2379,8 @@ def api_send_stream():
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state)
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
+    augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state, turn_count=tc)
     if dice_result:
         player_msg["dice"] = dice_result
         _save_json(delta_path, delta_msgs)
@@ -2711,7 +2715,8 @@ def api_branches_edit():
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state)
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
+    augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state, turn_count=tc)
     if dice_result:
         user_msg["dice"] = dice_result
         _save_json(_story_messages_path(story_id, branch_id), delta)
@@ -2837,7 +2842,8 @@ def api_branches_edit_stream():
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state)
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
+    augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state, turn_count=tc)
     if dice_result:
         user_msg["dice"] = dice_result
         _save_json(_story_messages_path(story_id, branch_id), delta)
@@ -2977,7 +2983,8 @@ def api_branches_regenerate():
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
-    augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state)
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
+    augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
@@ -3094,7 +3101,8 @@ def api_branches_regenerate_stream():
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state)
+    tc = sum(1 for m in full_timeline if m.get("role") == "user")
+    augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
 
     gm_msg_index = branch_point_index + 1
 

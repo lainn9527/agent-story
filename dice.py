@@ -94,22 +94,31 @@ _OUTCOMES = {
 }
 
 
+BEGINNER_BONUS_TURNS = 10
+
+
 def roll_fate(state: dict, cheat_modifier: int = 0,
-              always_success: bool = False) -> dict:
+              always_success: bool = False,
+              turn_count: int = 0) -> dict:
     """Roll a d100 fate die with attribute modifiers.
 
     Args:
         state: Character state dict for attribute-based modifiers.
         cheat_modifier: Extra modifier from /gm dice command (金手指).
         always_success: When True, outcomes are always positive (金手指).
+        turn_count: Number of player turns so far (1-based).
+            Turns 1–10 get a linearly decaying beginner bonus.
 
     Returns a dict with all dice info for storage and display.
     """
     p_mod, s_mod, g_mod = _get_modifiers(state)
     attr_bonus = (p_mod + s_mod) // 2 + g_mod
 
+    # Beginner bonus: +10 at turn 1, +9 at turn 2, ..., +1 at turn 10, 0 after
+    beginner_bonus = max(0, BEGINNER_BONUS_TURNS + 1 - turn_count) if turn_count > 0 else 0
+
     raw = random.randint(1, 100)
-    effective = raw + attr_bonus + cheat_modifier
+    effective = raw + attr_bonus + cheat_modifier + beginner_bonus
 
     if always_success:
         # 金手指模式: 只出正面結果
@@ -144,6 +153,8 @@ def roll_fate(state: dict, cheat_modifier: int = 0,
         "effective": effective,
         "outcome": outcome,
     }
+    if beginner_bonus:
+        result["beginner_bonus"] = beginner_bonus
     if cheat_modifier:
         result["cheat_modifier"] = cheat_modifier
     if always_success:
