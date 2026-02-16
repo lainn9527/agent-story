@@ -226,16 +226,20 @@
   }
 
   function renderCategoryGroup(entries, html) {
-    // Group by category
+    // Group by category → subcategory
     const groups = new Map();
     for (const e of entries) {
       const cat = e.category || "其他";
-      if (!groups.has(cat)) groups.set(cat, []);
-      groups.get(cat).push(e);
+      if (!groups.has(cat)) groups.set(cat, new Map());
+      const subMap = groups.get(cat);
+      const sub = e.subcategory || "";
+      if (!subMap.has(sub)) subMap.set(sub, []);
+      subMap.get(sub).push(e);
     }
     const orderedCats = [...groups.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
     for (const cat of orderedCats) {
-      const catEntries = groups.get(cat);
+      const subMap = groups.get(cat);
+      const totalCount = [...subMap.values()].reduce((s, arr) => s + arr.length, 0);
       const isException = collapsedCats.has(cat);
       const isOpen = allCollapsed ? isException : !isException;
       const collapsed = isOpen ? "" : " collapsed";
@@ -243,32 +247,55 @@
       html += `<div class="lore-cat-header" data-cat="${escapeHtml(cat)}">`;
       html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
       html += `${escapeHtml(cat)}`;
-      html += `<span class="lore-cat-count">(${catEntries.length})</span>`;
+      html += `<span class="lore-cat-count">(${totalCount})</span>`;
       html += `</div>`;
       html += `<div class="lore-cat-entries">`;
 
-      catEntries.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
-      const items = buildSubGroups(catEntries);
-      for (const item of items) {
-        if (item.type === "subgroup") {
-          const subKey = cat + "/" + item.prefix;
+      const orderedSubs = [...subMap.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+      for (const sub of orderedSubs) {
+        const subEntries = subMap.get(sub);
+        if (sub) {
+          // Render subcategory as a collapsible subgroup
+          const subKey = cat + "::" + sub;
           const subException = collapsedCats.has(subKey);
           const subOpen = allCollapsed ? subException : !subException;
           const subCollapsed = subOpen ? "" : " collapsed";
           html += `<div class="lore-subgroup${subCollapsed}">`;
           html += `<div class="lore-subgroup-header" data-subkey="${escapeHtml(subKey)}">`;
           html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
-          html += `${escapeHtml(item.prefix)}`;
-          html += `<span class="lore-cat-count">(${item.entries.length})</span>`;
+          html += `${escapeHtml(sub)}`;
+          html += `<span class="lore-cat-count">(${subEntries.length})</span>`;
           html += `</div>`;
           html += `<div class="lore-subgroup-entries">`;
-          for (const e of item.entries) {
-            const { suffix } = parseTopicPrefix(e.topic);
-            html += renderEntryHtml(e, suffix);
-          }
+          subEntries.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
+          for (const e of subEntries) html += renderEntryHtml(e);
           html += `</div></div>`;
         } else {
-          html += renderEntryHtml(item.e);
+          // No subcategory — render with topic-prefix subgroups as before
+          subEntries.sort((a, b) => a.topic.localeCompare(b.topic, "zh-Hant"));
+          const items = buildSubGroups(subEntries);
+          for (const item of items) {
+            if (item.type === "subgroup") {
+              const subKey = cat + "/" + item.prefix;
+              const subException = collapsedCats.has(subKey);
+              const subOpen = allCollapsed ? subException : !subException;
+              const subCollapsed = subOpen ? "" : " collapsed";
+              html += `<div class="lore-subgroup${subCollapsed}">`;
+              html += `<div class="lore-subgroup-header" data-subkey="${escapeHtml(subKey)}">`;
+              html += `<span class="lore-cat-arrow">&#x25BC;</span> `;
+              html += `${escapeHtml(item.prefix)}`;
+              html += `<span class="lore-cat-count">(${item.entries.length})</span>`;
+              html += `</div>`;
+              html += `<div class="lore-subgroup-entries">`;
+              for (const e of item.entries) {
+                const { suffix } = parseTopicPrefix(e.topic);
+                html += renderEntryHtml(e, suffix);
+              }
+              html += `</div></div>`;
+            } else {
+              html += renderEntryHtml(item.e);
+            }
+          }
         }
       }
       html += `</div></div>`;
@@ -283,7 +310,8 @@
           (e) =>
             e.topic.toLowerCase().includes(q) ||
             (e.content || "").toLowerCase().includes(q) ||
-            e.category.toLowerCase().includes(q)
+            e.category.toLowerCase().includes(q) ||
+            (e.subcategory || "").toLowerCase().includes(q)
         )
       : allEntries;
 

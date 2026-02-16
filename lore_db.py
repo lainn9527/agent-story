@@ -81,8 +81,8 @@ def _ensure_tables(conn: sqlite3.Connection):
             VALUES (new.id, new.topic, new.content, new.category, new.tags);
         END;
     """)
-    # Safe migration: add embedding columns if not yet present
-    for col, typ in [("embedding", "BLOB"), ("text_hash", "TEXT")]:
+    # Safe migration: add columns if not yet present
+    for col, typ in [("embedding", "BLOB"), ("text_hash", "TEXT"), ("subcategory", "TEXT DEFAULT ''")]:
         try:
             conn.execute(f"ALTER TABLE lore ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:
@@ -207,6 +207,7 @@ def rebuild_index(story_id: str):
         current_topics.add(topic)
         text_hash = _compute_text_hash(topic, content)
         category = entry.get("category", "其他")
+        subcategory = entry.get("subcategory", "")
         tags_str = ",".join(tags)
 
         existing = conn.execute(
@@ -216,19 +217,19 @@ def rebuild_index(story_id: str):
             if existing["text_hash"] != text_hash:
                 # Content changed — update text, clear embedding for re-embed
                 conn.execute(
-                    "UPDATE lore SET category=?, content=?, tags=?, text_hash=?, embedding=NULL WHERE topic=?",
-                    (category, content, tags_str, text_hash, topic),
+                    "UPDATE lore SET category=?, subcategory=?, content=?, tags=?, text_hash=?, embedding=NULL WHERE topic=?",
+                    (category, subcategory, content, tags_str, text_hash, topic),
                 )
             else:
                 # Content unchanged — update metadata only, keep embedding
                 conn.execute(
-                    "UPDATE lore SET category=?, tags=? WHERE topic=?",
-                    (category, tags_str, topic),
+                    "UPDATE lore SET category=?, subcategory=?, tags=? WHERE topic=?",
+                    (category, subcategory, tags_str, topic),
                 )
         else:
             conn.execute(
-                "INSERT INTO lore (category, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?)",
-                (category, topic, content, tags_str, text_hash),
+                "INSERT INTO lore (category, subcategory, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                (category, subcategory, topic, content, tags_str, text_hash),
             )
 
     # Remove entries no longer in world_lore.json
@@ -264,17 +265,18 @@ def upsert_entry(story_id: str, entry: dict):
     existing = conn.execute("SELECT id, text_hash FROM lore WHERE topic = ?", (topic,)).fetchone()
 
     hash_changed = True
+    subcategory = entry.get("subcategory", "")
     if existing:
         if existing["text_hash"] == new_hash:
             hash_changed = False
         conn.execute(
-            "UPDATE lore SET category=?, content=?, tags=?, text_hash=? WHERE topic=?",
-            (entry.get("category", "其他"), content, ",".join(tags), new_hash, topic),
+            "UPDATE lore SET category=?, subcategory=?, content=?, tags=?, text_hash=? WHERE topic=?",
+            (entry.get("category", "其他"), subcategory, content, ",".join(tags), new_hash, topic),
         )
     else:
         conn.execute(
-            "INSERT INTO lore (category, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?)",
-            (entry.get("category", "其他"), topic, content, ",".join(tags), new_hash),
+            "INSERT INTO lore (category, subcategory, topic, content, tags, text_hash) VALUES (?, ?, ?, ?, ?, ?)",
+            (entry.get("category", "其他"), subcategory, topic, content, ",".join(tags), new_hash),
         )
     conn.commit()
     conn.close()
@@ -420,7 +422,7 @@ def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
         keywords = {query}
 
     # Score each entry by how many keywords match
-    rows = conn.execute("SELECT id, category, topic, content, tags FROM lore").fetchall()
+    rows = conn.execute("SELECT id, category, subcategory, topic, content, tags FROM lore").fetchall()
     scored = []
     for row in rows:
         text = f"{row['topic']} {row['content']} {row['tags']}"
@@ -438,6 +440,7 @@ def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
             scored.append({
                 "id": row["id"],
                 "category": row["category"],
+                "subcategory": row["subcategory"] or "",
                 "topic": row["topic"],
                 "content": row["content"],
                 "tags": row["tags"],
@@ -487,13 +490,14 @@ def _search_embedding(story_id: str, query: str, limit: int = 20) -> list[dict]:
     results = []
     for row_id, score in zip(matched_ids, scores):
         row = conn.execute(
-            "SELECT id, category, topic, content, tags FROM lore WHERE id=?",
+            "SELECT id, category, subcategory, topic, content, tags FROM lore WHERE id=?",
             (row_id,),
         ).fetchone()
         if row:
             results.append({
                 "id": row["id"],
                 "category": row["category"],
+                "subcategory": row["subcategory"] or "",
                 "topic": row["topic"],
                 "content": row["content"],
                 "tags": row["tags"],
@@ -603,12 +607,12 @@ def search_by_tags(story_id: str, tags: list[str], limit: int = 10) -> list[dict
     params = [f"%{tag}%" for tag in tags] + [limit]
 
     rows = conn.execute(
-        f"SELECT category, topic, content, tags FROM lore WHERE ({placeholders}) LIMIT ?",
+        f"SELECT category, subcategory, topic, content, tags FROM lore WHERE ({placeholders}) LIMIT ?",
         params,
     ).fetchall()
 
     results = [
-        {"category": r["category"], "topic": r["topic"], "content": r["content"], "tags": r["tags"]}
+        {"category": r["category"], "subcategory": r["subcategory"] or "", "topic": r["topic"], "content": r["content"], "tags": r["tags"]}
         for r in rows
     ]
     conn.close()
@@ -619,9 +623,9 @@ def get_all_entries(story_id: str) -> list[dict]:
     """Get all indexed lore entries (non-待建立 only)."""
     conn = _get_conn(story_id)
     _ensure_tables(conn)
-    rows = conn.execute("SELECT category, topic, content, tags FROM lore ORDER BY id").fetchall()
+    rows = conn.execute("SELECT category, subcategory, topic, content, tags FROM lore ORDER BY id").fetchall()
     results = [
-        {"category": r["category"], "topic": r["topic"], "content": r["content"], "tags": r["tags"]}
+        {"category": r["category"], "subcategory": r["subcategory"] or "", "topic": r["topic"], "content": r["content"], "tags": r["tags"]}
         for r in rows
     ]
     conn.close()
@@ -679,7 +683,7 @@ def get_toc(story_id: str) -> str:
     conn = _get_conn(story_id)
     _ensure_tables(conn)
     rows = conn.execute(
-        "SELECT category, topic, tags FROM lore ORDER BY id"
+        "SELECT category, subcategory, topic, tags FROM lore ORDER BY id"
     ).fetchall()
     conn.close()
 
@@ -688,37 +692,47 @@ def get_toc(story_id: str) -> str:
 
     from collections import OrderedDict
 
-    # Group rows by category
-    cat_rows: dict[str, list] = OrderedDict()
+    # Group rows by category → subcategory
+    cat_sub_rows: dict[str, dict[str, list]] = OrderedDict()
     for r in rows:
         cat = r["category"]
-        if cat not in cat_rows:
-            cat_rows[cat] = []
-        cat_rows[cat].append(r)
+        subcat = r["subcategory"] or ""
+        if cat not in cat_sub_rows:
+            cat_sub_rows[cat] = OrderedDict()
+        if subcat not in cat_sub_rows[cat]:
+            cat_sub_rows[cat][subcat] = []
+        cat_sub_rows[cat][subcat].append(r)
 
     lines = []
-    for cat, entries in cat_rows.items():
+    for cat, sub_groups in cat_sub_rows.items():
         lines.append(f"### 【{cat}】")
 
-        # Build tree: prefix → list of suffixes
-        # A topic like "A：B：C" yields tree node A > B > C
-        tree: dict = OrderedDict()  # nested ordered dicts
-        for r in entries:
-            parts = r["topic"].split("：")
-            node = tree
-            for i, part in enumerate(parts):
-                if part not in node:
-                    node[part] = OrderedDict()
-                node = node[part]
+        for subcat, entries in sub_groups.items():
+            if subcat:
+                lines.append(f"  [{subcat}]")
+                base_depth = 1
+            else:
+                base_depth = 0
 
-        def _render(node: dict, depth: int):
-            indent = "  " * depth
-            for key, child in node.items():
-                lines.append(f"{indent}- {key}")
-                if child:
-                    _render(child, depth + 1)
+            # Build tree: prefix → list of suffixes
+            # A topic like "A：B：C" yields tree node A > B > C
+            tree: dict = OrderedDict()  # nested ordered dicts
+            for r in entries:
+                parts = r["topic"].split("：")
+                node = tree
+                for i, part in enumerate(parts):
+                    if part not in node:
+                        node[part] = OrderedDict()
+                    node = node[part]
 
-        _render(tree, 0)
+            def _render(node: dict, depth: int):
+                indent = "  " * depth
+                for key, child in node.items():
+                    lines.append(f"{indent}- {key}")
+                    if child:
+                        _render(child, depth + 1)
+
+            _render(tree, base_depth)
         lines.append("")
 
     return "\n".join(lines).strip()
@@ -760,7 +774,8 @@ def search_relevant_lore(
         content = _INLINE_META_RE.sub("", e["content"]).strip()
         if len(content) > 1200:
             content = content[:1200] + "…（截斷）"
-        lines.append(f"#### {e['category']}：{e['topic']}")
+        cat_label = f"{e['category']}/{e['subcategory']}" if e.get('subcategory') else e['category']
+        lines.append(f"#### {cat_label}：{e['topic']}")
         lines.append(content)
         lines.append("")
 

@@ -920,8 +920,10 @@ def _get_branch_lore_toc(story_id: str, branch_id: str) -> str:
     for e in lore:
         topic = e.get("topic", "")
         cat = e.get("category", "")
+        subcat = e.get("subcategory", "")
         if topic:
-            lines.append(f"- {cat}：{topic}")
+            prefix = f"{cat}/{subcat}" if subcat else cat
+            lines.append(f"- {prefix}：{topic}")
     return "\n".join(lines)
 
 
@@ -1155,8 +1157,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 如果已有設定中有密切相關的主題，**更新該條目**（使用完全相同的 topic 名稱）\n"
                 "- 每個條目只涵蓋一個具體概念，content 控制在 200-800 字\n"
                 f"已有設定（優先更新而非新建）：\n{toc}\n"
-                '格式：[{{"category": "分類", "topic": "主題", "content": "完整描述"}}]\n'
-                "可用分類：主神設定與規則/體系/商城/副本世界觀/場景/NPC/故事追蹤\n\n"
+                '格式：[{{"category": "分類", "subcategory": "子分類(選填)", "topic": "主題", "content": "完整描述"}}]\n'
+                "可用分類：主神設定與規則/體系/技能/基本屬性/商城/副本世界觀/場景/NPC/故事追蹤\n"
+                "- 體系：框架級概念（如基因鎖）；技能：單一可習得能力（如戰術直覺）；基本屬性：角色基礎數值（如體質）\n"
+                "- 副本世界觀：必須填 subcategory 為副本名（如「生化危機」「咒怨」）\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
                 f"已有事件標題：{titles_str}\n"
