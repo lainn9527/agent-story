@@ -7,17 +7,43 @@ from typing import Optional
 # ── Attribute level → modifier mapping ──────────────────────────
 
 _PHYSIQUE_TABLE: list[tuple[str, int]] = [
+    # Tier 3 — superhuman / transcendent
     ("超級戰士", 10),
+    ("始祖", 10),
+    ("超凡", 10),
+    ("完美適應", 10),
+    # Tier 2 — enhanced human
     ("強化人類", 3),
+    ("永久提升", 3),
+    ("大幅提升", 3),
+    ("極大提升", 3),
+    ("巔峰", 3),
+    ("進一步增強", 3),
+    # Tier 1 — slightly above average
     ("稍強", 1),
+    ("微幅提升", 1),
+    ("基礎優化", 1),
+    # Tier 0
     ("普通", 0),
 ]
 
 _SPIRIT_TABLE: list[tuple[str, int]] = [
+    # Tier 3 — transcendent
     ("超強", 10),
+    ("心靈鋼鐵", 10),
+    ("神性", 10),
+    ("昇華", 10),
+    ("免疫", 10),
+    # Tier 2 — strong
     ("強大", 5),
+    ("永久提升", 5),
+    ("大幅提升", 5),
+    ("巔峰", 5),
+    # Tier 1 — above average
     ("偏高", 1),
     ("中等偏上", 1),
+    ("微幅提升", 1),
+    # Tier 0
     ("普通", 0),
 ]
 
@@ -95,16 +121,16 @@ def roll_fate(state: dict, cheat_modifier: int = 0,
         else:
             outcome = "勉強成功"
     else:
-        # 正常模式
+        # 正常模式 — thresholds: 70/40/20 (shifted down from 80/50/30)
         if raw >= 96:
             outcome = "大成功"
         elif raw <= 5:
             outcome = "大失敗"
-        elif effective >= 80:
+        elif effective >= 70:
             outcome = "成功"
-        elif effective >= 50:
+        elif effective >= 40:
             outcome = "勉強成功"
-        elif effective >= 30:
+        elif effective >= 20:
             outcome = "失敗"
         else:
             outcome = "嚴重失敗"
