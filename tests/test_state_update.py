@@ -131,6 +131,47 @@ class TestInventoryAdd:
         state = _load_state(tmp_path, story_id)
         assert state["inventory"].count("封印之鏡") == 1
 
+    def test_add_replaces_same_base_name(self, tmp_path, story_id, setup_state):
+        """Adding evolved item should auto-replace the old version with same base name."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["死生之刃·日耀輪轉"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_add": ["死生之刃·日耀輪轉（靈魂加固版）"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "死生之刃·日耀輪轉（靈魂加固版）" in state["inventory"]
+        assert "死生之刃·日耀輪轉" not in state["inventory"]
+
+    def test_add_replaces_multiple_old_versions(self, tmp_path, story_id, setup_state):
+        """Adding new version should replace ALL old versions with same base name."""
+        setup_state("main", {**INITIAL_STATE, "inventory": [
+            "死生之刃·日耀輪轉",
+            "死生之刃·日耀輪轉（初步成型）",
+        ]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_add": ["死生之刃·日耀輪轉（靈魂加固版）"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        inv = state["inventory"]
+        assert "死生之刃·日耀輪轉（靈魂加固版）" in inv
+        assert len([x for x in inv if "死生之刃·日耀輪轉" in x]) == 1
+
+    def test_add_does_not_replace_different_base_name(self, tmp_path, story_id, setup_state):
+        """Items with different base names should coexist."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生）", "封印之鏡"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_add": ["定界珠（死）"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        # Both 定界珠 variants share base name — old replaced by new
+        assert "定界珠（死）" in state["inventory"]
+        assert "封印之鏡" in state["inventory"]
+
 
 class TestExtractItemBaseName:
     """Test _extract_item_base_name helper for flexible name matching."""
