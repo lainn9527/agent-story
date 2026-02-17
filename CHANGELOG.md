@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.4] - 2026-02-18
+
+### Fixed
+- **Lore 刪除誤殺**: `DELETE /api/lore/entry` 只用 topic 比對，刪除「進擊的巨人/介紹」時會連帶刪除所有 topic 為「介紹」的條目（32 條遺失）；改為 (subcategory, topic) 聯合比對，前端同步傳送 subcategory ([#105])
+
+[#105]: https://github.com/lainn9527/agent-story/pull/105
+
 ## [0.20.3] - 2026-02-18
 
 ### Fixed
