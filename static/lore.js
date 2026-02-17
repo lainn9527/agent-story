@@ -111,11 +111,11 @@
     return res.json();
   }
 
-  async function deleteEntry(topic) {
+  async function deleteEntry(topic, subcategory) {
     const res = await fetch("/api/lore/entry", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic }),
+      body: JSON.stringify({ topic, subcategory: subcategory || "" }),
     });
     return res.json();
   }
@@ -517,10 +517,10 @@
       res = await fetch("/api/lore/branch/entry", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: editingEntry.topic, branch_id: activeBranchId }),
+        body: JSON.stringify({ topic: editingEntry.topic, subcategory: editingEntry.subcategory || "", branch_id: activeBranchId }),
       }).then((r) => r.json());
     } else {
-      res = await deleteEntry(editingEntry.topic);
+      res = await deleteEntry(editingEntry.topic, editingEntry.subcategory);
     }
     if (!res.ok) {
       alert(res.error || "刪除失敗");
@@ -1169,10 +1169,10 @@
             res = await fetch("/api/lore/branch/entry", {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ topic: topics[i], branch_id: activeBranchId }),
+              body: JSON.stringify({ topic: topics[i], subcategory: entry.subcategory || "", branch_id: activeBranchId }),
             }).then((r) => r.json());
           } else {
-            res = await deleteEntry(topics[i]);
+            res = await deleteEntry(topics[i], entry ? entry.subcategory : "");
           }
           if (res.ok) {
             checkedTopics.delete(topics[i]);
