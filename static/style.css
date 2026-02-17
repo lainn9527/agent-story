@@ -2802,6 +2802,22 @@ body {
   cursor: not-allowed;
 }
 
+/* UX-C1: exit hint text (visible on mobile where title is not shown) */
+.dungeon-exit-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* UX-C2: async extraction in-progress indicator */
+.dungeon-updating-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  padding: 4px 0 2px;
+  text-align: center;
+}
+
 /* Responsive (mobile) */
 @media (max-width: 768px) {
   .dungeon-progress-track {

@@ -1227,8 +1227,11 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 current = dungeon_progress["current_dungeon"]
                 template = _load_dungeon_template(story_id, current["dungeon_id"])
                 if template:
-                    # Get current node list for reference
-                    nodes_str = ", ".join([n["id"] for n in template["mainline"]["nodes"]])
+                    # GD-M3: include node title mapping so LLM can match story text to node IDs
+                    node_list = template["mainline"]["nodes"]
+                    nodes_mapping = ", ".join(
+                        [f"{n['id']}=「{n['title']}」" for n in node_list]
+                    )
                     areas_str = ", ".join([a["id"] for a in template.get("areas", [])])
 
                     prompt += (
@@ -1236,7 +1239,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                         f"當前在副本【{template['name']}】中。分析 GM 文本中是否存在：\n"
                         f"- 主線劇情節點的完成（如「成功封印伽椰子」）\n"
                         f"- 新區域的發現或探索（如「進入二樓」、「深入地下室」）\n\n"
-                        f"參考節點 ID（依序）：{nodes_str}\n"
+                        f"節點 ID 對照（依序）：{nodes_mapping}\n"
                         f"參考區域 ID：{areas_str}\n\n"
                         '格式：\n'
                         '{\n'
@@ -1577,6 +1580,8 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     # Hard constraint validation (dungeon system)
     new_state = _load_character_state(story_id, branch_id)
     validate_dungeon_progression(story_id, branch_id, new_state, old_state)
+    # BE-C1: save modified new_state back to disk (validate_dungeon_progression may have capped fields)
+    _save_json(_story_character_state_path(story_id, branch_id), new_state)
 
     # Background: normalize non-standard fields and re-apply
     _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
@@ -5031,12 +5036,17 @@ def api_dungeon_return():
         }), 400
 
     current = progress["current_dungeon"]
-    if current["mainline_progress"] < 100:
+    mainline_pct = current["mainline_progress"]
+
+    # GD-C1: allow early exit at >= 60%, but penalise reward; block below 60%
+    if mainline_pct < 60:
         return jsonify({
             "error": "incomplete_mainline",
-            "message": f"主線進度僅 {current['mainline_progress']}%，需達 100% 才能回歸",
-            "current_progress": current["mainline_progress"]
+            "message": f"主線進度僅 {mainline_pct}%，需達 60% 才能提前回歸（100% 可正常回歸）",
+            "current_progress": mainline_pct
         }), 400
+
+    is_early_exit = mainline_pct < 100
 
     # Calculate completion reward
     template = _load_dungeon_template(story_id, current["dungeon_id"])
@@ -5045,9 +5055,15 @@ def api_dungeon_return():
 
     rules = template["progression_rules"]
     base = rules["base_reward"]
-    mainline_bonus = base * (rules["mainline_multiplier"] - 1) * (current["mainline_progress"] / 100)
+    mainline_bonus = base * (rules["mainline_multiplier"] - 1) * (mainline_pct / 100)
     exploration_bonus = base * (rules["exploration_multiplier"] - 1) * (current["exploration_progress"] / 100)
     total_reward = int(base + mainline_bonus + exploration_bonus)
+
+    # Apply early-exit penalty (60-99%: reward × 0.5)
+    early_penalty = 1.0
+    if is_early_exit:
+        early_penalty = 0.5
+        total_reward = int(total_reward * early_penalty)
 
     # Apply difficulty scaling (if player over-leveled)
     state = _load_character_state(story_id, branch_id)
@@ -5056,7 +5072,8 @@ def api_dungeon_return():
     total_reward = int(total_reward * scaling)
 
     # Archive dungeon
-    archive_current_dungeon(story_id, branch_id, exit_reason="normal")
+    exit_reason = "early" if is_early_exit else "normal"
+    archive_current_dungeon(story_id, branch_id, exit_reason=exit_reason)
 
     # Update character state
     state["當前階段"] = "主神空間"
@@ -5074,7 +5091,14 @@ def api_dungeon_return():
     return jsonify({
         "success": True,
         "reward_points": total_reward,
-        "scaling": scaling
+        "scaling": scaling,
+        "exit_reason": exit_reason,
+        "early_penalty": early_penalty,
+        "message": (
+            f"提前回歸（主線 {mainline_pct}%），獎勵打折 50%。獲得 {total_reward} 點"
+            if is_early_exit
+            else f"副本完成！獲得獎勵點數 {total_reward}"
+        )
     })
 
 

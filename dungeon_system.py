@@ -244,76 +244,82 @@ def archive_current_dungeon(story_id: str, branch_id: str, exit_reason: str = "n
 
 def update_dungeon_progress(story_id: str, branch_id: str, update: dict):
     """Update mainline progress and completed nodes."""
-    progress = _load_dungeon_progress(story_id, branch_id)
-    if not progress or not progress.get("current_dungeon"):
-        return
+    # BE-C2: lock the entire read-modify-write to prevent race conditions
+    with _get_lock(story_id, branch_id):
+        path = os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
+        progress = _load_json(path)
+        if not progress or not progress.get("current_dungeon"):
+            return
 
-    current = progress["current_dungeon"]
+        current = progress["current_dungeon"]
 
-    # Mark newly completed nodes
-    new_nodes = update.get("nodes_completed", [])
-    for node_id in new_nodes:
-        if node_id not in current["completed_nodes"]:
-            current["completed_nodes"].append(node_id)
-            log.info(f"Completed node: {node_id}")
+        # Mark newly completed nodes
+        new_nodes = update.get("nodes_completed", [])
+        for node_id in new_nodes:
+            if node_id not in current["completed_nodes"]:
+                current["completed_nodes"].append(node_id)
+                log.info(f"Completed node: {node_id}")
 
-    # Update progress (delta or absolute)
-    if "progress_delta" in update:
-        current["mainline_progress"] = min(100, current["mainline_progress"] + update["progress_delta"])
-    elif "progress" in update:
-        current["mainline_progress"] = min(100, update["progress"])
-    else:
-        # Auto-calculate: (completed / total) * 100
-        template = _load_dungeon_template(story_id, current["dungeon_id"])
-        if template:
-            total_nodes = len(template["mainline"]["nodes"])
-            completed = len(current["completed_nodes"])
-            current["mainline_progress"] = int((completed / total_nodes) * 100) if total_nodes > 0 else 0
+        # Update progress (delta or absolute)
+        if "progress_delta" in update:
+            current["mainline_progress"] = min(100, current["mainline_progress"] + update["progress_delta"])
+        elif "progress" in update:
+            current["mainline_progress"] = min(100, update["progress"])
+        else:
+            # Auto-calculate: (completed / total) * 100
+            template = _load_dungeon_template(story_id, current["dungeon_id"])
+            if template:
+                total_nodes = len(template["mainline"]["nodes"])
+                completed = len(current["completed_nodes"])
+                current["mainline_progress"] = int((completed / total_nodes) * 100) if total_nodes > 0 else 0
 
-    # Update current world day
-    try:
-        from world_timer import get_world_day
-        world_day = get_world_day(story_id, branch_id)
-        current["current_world_day"] = world_day.get("day", 1) if isinstance(world_day, dict) else 1
-    except ImportError:
-        pass
+        # Update current world day
+        try:
+            from world_timer import get_world_day
+            world_day = get_world_day(story_id, branch_id)
+            current["current_world_day"] = world_day.get("day", 1) if isinstance(world_day, dict) else 1
+        except ImportError:
+            pass
 
-    _save_dungeon_progress(story_id, branch_id, progress)
-    log.info(f"Updated dungeon progress: {current['mainline_progress']}%")
+        _save_json(path, progress)
+    log.info(f"Updated dungeon progress: {progress['current_dungeon']['mainline_progress']}%")
 
 
 def update_dungeon_area(story_id: str, branch_id: str, update: dict):
     """Update area discovery and exploration."""
-    progress = _load_dungeon_progress(story_id, branch_id)
-    if not progress or not progress.get("current_dungeon"):
-        return
+    # BE-C2: lock the entire read-modify-write to prevent race conditions
+    with _get_lock(story_id, branch_id):
+        path = os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
+        progress = _load_json(path)
+        if not progress or not progress.get("current_dungeon"):
+            return
 
-    current = progress["current_dungeon"]
+        current = progress["current_dungeon"]
 
-    # Mark newly discovered areas
-    new_areas = update.get("discovered_areas", [])
-    for area_id in new_areas:
-        if area_id not in current["discovered_areas"]:
-            current["discovered_areas"].append(area_id)
-            current["explored_areas"][area_id] = 0
-            log.info(f"Discovered area: {area_id}")
+        # Mark newly discovered areas
+        new_areas = update.get("discovered_areas", [])
+        for area_id in new_areas:
+            if area_id not in current["discovered_areas"]:
+                current["discovered_areas"].append(area_id)
+                current["explored_areas"][area_id] = 0
+                log.info(f"Discovered area: {area_id}")
 
-    # Update exploration (incremental)
-    area_updates = update.get("explored_area_updates", {})
-    for area_id, delta in area_updates.items():
-        if area_id in current["explored_areas"]:
-            current["explored_areas"][area_id] = min(100, current["explored_areas"][area_id] + delta)
+        # Update exploration (incremental)
+        area_updates = update.get("explored_area_updates", {})
+        for area_id, delta in area_updates.items():
+            if area_id in current["explored_areas"]:
+                current["explored_areas"][area_id] = min(100, current["explored_areas"][area_id] + delta)
 
-    # Recalculate total exploration (average of all areas)
-    template = _load_dungeon_template(story_id, current["dungeon_id"])
-    if template:
-        all_areas = [a["id"] for a in template.get("areas", [])]
-        if all_areas:
-            total_exp = sum(current["explored_areas"].get(aid, 0) for aid in all_areas)
-            current["exploration_progress"] = int(total_exp / len(all_areas))
+        # Recalculate total exploration (average of all areas)
+        template = _load_dungeon_template(story_id, current["dungeon_id"])
+        if template:
+            all_areas = [a["id"] for a in template.get("areas", [])]
+            if all_areas:
+                total_exp = sum(current["explored_areas"].get(aid, 0) for aid in all_areas)
+                current["exploration_progress"] = int(total_exp / len(all_areas))
 
-    _save_dungeon_progress(story_id, branch_id, progress)
-    log.info(f"Updated area exploration: {current['exploration_progress']}%")
+        _save_json(path, progress)
+    log.info(f"Updated area exploration: {progress['current_dungeon']['exploration_progress']}%")
 
 
 # ========== Hard Constraint Validation (CRITICAL) ==========
@@ -322,51 +328,66 @@ def validate_dungeon_progression(story_id: str, branch_id: str, new_state: dict,
     """
     Hard validation - cap growth to dungeon limits.
     This is called from _apply_state_update() in app.py.
+    Modifies new_state in-place; caller must save new_state to disk afterward (BE-C1).
     """
-    progress = _load_dungeon_progress(story_id, branch_id)
-    if not progress or not progress.get("current_dungeon"):
-        return  # Not in dungeon, no limits
+    # BE-C2: lock the read-modify-write on dungeon_progress.json
+    with _get_lock(story_id, branch_id):
+        path = os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
+        progress = _load_json(path)
+        if not progress or not progress.get("current_dungeon"):
+            return  # Not in dungeon, no limits
 
-    current = progress["current_dungeon"]
-    template = _load_dungeon_template(story_id, current["dungeon_id"])
-    if not template:
-        return
+        current = progress["current_dungeon"]
+        template = _load_dungeon_template(story_id, current["dungeon_id"])
+        if not template:
+            return
 
-    rules = template["progression_rules"]
-    growth = current.get("growth_budget", {})
+        rules = template["progression_rules"]
+        # BE-M1: use .get() with fallback to avoid KeyError
+        growth = current.get("growth_budget", {
+            "max_rank_progress": rules.get("rank_progress", 0),
+            "consumed_rank_progress": 0,
+            "max_gene_lock_gain": rules.get("gene_lock_gain", 0),
+            "consumed_gene_lock": 0
+        })
 
-    # Validate rank growth
-    old_rank = _parse_rank(old_state.get("等級", "E"))
-    new_rank = _parse_rank(new_state.get("等級", "E"))
-    rank_gain = new_rank - old_rank
+        # Validate rank growth
+        old_rank = _parse_rank(old_state.get("等級", "E"))
+        new_rank = _parse_rank(new_state.get("等級", "E"))
+        rank_gain = new_rank - old_rank
 
-    if rank_gain > 0:
-        remaining_budget = growth["max_rank_progress"] - growth["consumed_rank_progress"]
-        if rank_gain > remaining_budget:
-            log.warning(
-                f"Rank gain {rank_gain:.1f} exceeds remaining budget {remaining_budget:.1f}, capping to {remaining_budget:.1f}"
-            )
-            new_state["等級"] = _format_rank(old_rank + remaining_budget)
-            growth["consumed_rank_progress"] = growth["max_rank_progress"]
-        else:
-            growth["consumed_rank_progress"] += rank_gain
+        if rank_gain > 0:
+            max_rank = growth.get("max_rank_progress", rules.get("rank_progress", 0))
+            consumed_rank = growth.get("consumed_rank_progress", 0)
+            remaining_budget = max_rank - consumed_rank
+            if rank_gain > remaining_budget:
+                log.warning(
+                    f"Rank gain {rank_gain:.1f} exceeds remaining budget {remaining_budget:.1f}, capping to {remaining_budget:.1f}"
+                )
+                new_state["等級"] = _format_rank(old_rank + remaining_budget)
+                growth["consumed_rank_progress"] = max_rank
+            else:
+                growth["consumed_rank_progress"] = consumed_rank + rank_gain
 
-    # Validate gene lock growth
-    old_gene_lock = _parse_gene_lock_percentage(old_state.get("基因鎖", "未開啟"))
-    new_gene_lock = _parse_gene_lock_percentage(new_state.get("基因鎖", "未開啟"))
-    gene_gain = new_gene_lock - old_gene_lock
+        # Validate gene lock growth
+        old_gene_lock = _parse_gene_lock_percentage(old_state.get("基因鎖", "未開啟"))
+        new_gene_lock = _parse_gene_lock_percentage(new_state.get("基因鎖", "未開啟"))
+        gene_gain = new_gene_lock - old_gene_lock
 
-    if gene_gain > 0:
-        remaining_budget = growth["max_gene_lock_gain"] - growth["consumed_gene_lock"]
-        if gene_gain > remaining_budget:
-            log.warning(f"Gene lock gain {gene_gain}% exceeds budget {remaining_budget}%, capping")
-            new_state["基因鎖"] = _format_gene_lock(old_gene_lock + remaining_budget)
-            growth["consumed_gene_lock"] = growth["max_gene_lock_gain"]
-        else:
-            growth["consumed_gene_lock"] += gene_gain
+        if gene_gain > 0:
+            max_gene = growth.get("max_gene_lock_gain", rules.get("gene_lock_gain", 0))
+            consumed_gene = growth.get("consumed_gene_lock", 0)
+            remaining_budget = max_gene - consumed_gene
+            if gene_gain > remaining_budget:
+                log.warning(f"Gene lock gain {gene_gain}% exceeds budget {remaining_budget}%, capping")
+                new_state["基因鎖"] = _format_gene_lock(old_gene_lock + remaining_budget)
+                growth["consumed_gene_lock"] = max_gene
+            else:
+                growth["consumed_gene_lock"] = consumed_gene + gene_gain
 
-    # Save updated growth_budget
-    _save_dungeon_progress(story_id, branch_id, progress)
+        # Persist updated growth_budget back to dungeon_progress.json
+        current["growth_budget"] = growth
+        _save_json(path, progress)
 
 
 # ========== System Prompt Context ==========
@@ -382,16 +403,18 @@ def build_dungeon_context(story_id: str, branch_id: str) -> str:
     if not template:
         return "（副本資料載入失敗）"
 
-    # Mainline nodes status (show first 3 nodes only)
+    # BE-M5: fix node status logic — first non-completed node is "active"
     completed_nodes = set(current.get("completed_nodes", []))
     nodes_status = []
+    found_active = False
     for node in template["mainline"]["nodes"][:3]:  # Limit to 3 nodes
         if node["id"] in completed_nodes:
             status = "✓"
-        elif len(nodes_status) == len([n for n in template["mainline"]["nodes"][:3] if n["id"] in completed_nodes]):
-            status = "▶"  # Next node
+        elif not found_active:
+            status = "▶"  # Next (active) node — only the first non-completed
+            found_active = True
         else:
-            status = "○"
+            status = "○"  # Locked
         nodes_status.append(f"{status} {node['title']}")
 
     # Growth budget
