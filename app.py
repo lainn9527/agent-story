@@ -5076,9 +5076,9 @@ def api_dungeon_return():
     archive_current_dungeon(story_id, branch_id, exit_reason=exit_reason)
 
     # Update character state
-    state["當前階段"] = "主神空間"
-    state["當前狀態"] = f"副本結束，回歸主神空間。獲得獎勵點數 {total_reward}"
-    state["獎勵點數"] = state.get("獎勵點數", 0) + total_reward
+    state["current_phase"] = "主神空間"
+    state["current_status"] = f"副本結束，回歸主神空間。獲得獎勵點數 {total_reward}"
+    state["reward_points"] = state.get("reward_points", 0) + total_reward
     _save_character_state(story_id, branch_id, state)
 
     # Advance world time (recovery time)
