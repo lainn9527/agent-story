@@ -42,8 +42,7 @@
     {
       "key": "inventory",
       "label": "道具欄",
-      "state_add_key": "inventory_add",
-      "state_remove_key": "inventory_remove"
+      "type": "map"
     },
     {
       "key": "completed_missions",

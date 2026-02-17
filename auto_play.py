@@ -166,7 +166,7 @@ _CHAR_GEN_PROMPT = """\
     "spirit": "描述精神力（如：普通人類/敏銳直覺等）",
     "reward_points": 0,
     "current_status": "新人，剛進入主神空間",
-    "inventory": [],
+    "inventory": {},
     "completed_missions": [],
     "relationships": {}
   },
@@ -207,7 +207,7 @@ def generate_random_character(story_id: str) -> dict:
                 "spirit": "普通人類",
                 "reward_points": 0,
                 "current_status": "新人，剛進入主神空間",
-                "inventory": [],
+                "inventory": {},
                 "completed_missions": [],
                 "relationships": {},
             },

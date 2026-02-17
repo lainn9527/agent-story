@@ -127,7 +127,7 @@ DEFAULT_CHARACTER_STATE = {
     "physique": "普通人類（稍強）",
     "spirit": "普通人類（偏高）",
     "reward_points": 5000,
-    "inventory": ["封印之鏡（紀念品）", "自省之鏡玉佩", "鎮魂符×3"],
+    "inventory": {"封印之鏡": "紀念品", "自省之鏡玉佩": "", "鎮魂符": "×3"},
     "completed_missions": ["咒怨 — 完美通關 8/8"],
     "relationships": {
         "小薇": "信任/曖昧",
@@ -151,7 +151,7 @@ DEFAULT_CHARACTER_SCHEMA = {
         {"key": "current_status", "label": "狀態", "type": "text"},
     ],
     "lists": [
-        {"key": "inventory", "label": "道具欄", "state_add_key": "inventory_add", "state_remove_key": "inventory_remove"},
+        {"key": "inventory", "label": "道具欄", "type": "map"},
         {"key": "completed_missions", "label": "已完成任務", "state_add_key": "completed_missions_add"},
         {"key": "relationships", "label": "人際關係", "type": "map"},
     ],
@@ -382,6 +382,17 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
             if len(cleaned) != len(lst):
                 state[key] = cleaned
                 dirty = True
+
+    # Auto-migrate: convert list-format fields to map when schema says map
+    for l in schema.get("lists", []):
+        if l.get("type") != "map":
+            continue
+        lkey = l["key"]
+        val = state.get(lkey)
+        if isinstance(val, list):
+            state[lkey] = _migrate_list_to_map(val)
+            dirty = True
+            log.info("    auto-migrate: converted %s from list to map in %s/%s", lkey, story_id, branch_id)
 
     if dirty:
         log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
@@ -1080,8 +1091,8 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
             "但某些欄位名稱不符合標準。請將它們映射到正確的標準欄位名。\n\n"
             f"標準欄位：{json.dumps(sorted(known_keys), ensure_ascii=False)}\n\n"
             "映射規則：\n"
-            "- 任何表示「獲得道具/裝備」的欄位 → inventory_add（陣列）\n"
-            "- 任何表示「失去/消耗道具」的欄位 → inventory_remove（陣列）\n"
+            "- 任何表示「獲得道具/裝備」的欄位 → 合併至 inventory（map，道具名為 key，狀態為 value）\n"
+            "- 任何表示「失去/消耗道具」的欄位 → 合併至 inventory（map，道具名為 key，value 設為 null）\n"
             "- 任何表示「獎勵點變化」的欄位 → reward_points_delta（整數）\n"
             "- 任何表示「完成任務」的欄位 → completed_missions_add（陣列）\n"
             "- 已經是標準欄位名的保持不變\n"
@@ -1150,7 +1161,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             for l in schema.get("lists", []):
                 ltype = l.get("type", "list")
                 if ltype == "map":
-                    schema_lines.append(f"- {l['key']}（{l.get('label', '')}）: map，用直接覆蓋")
+                    schema_lines.append(f"- {l['key']}（{l.get('label', '')}）: map，直接輸出 {{\"key\": \"value\"}} 覆蓋，null 表示移除")
                 else:
                     add_k = l.get("state_add_key", "")
                     rm_k = l.get("state_remove_key", "")
@@ -1213,12 +1224,15 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 f"角色目前有這些欄位：{existing_state_keys}\n"
                 + (f"角色目前的列表內容（含人際關係）：\n{list_contents_str}\n" if list_contents_str else "")
                 + "\n規則：\n"
-                "- 列表型欄位用 `_add` / `_remove` 後綴（如 `inventory_add`, `inventory_remove`）\n"
-                "- **道具狀態變化**（進化、綁定、損壞等）：必須同時輸出 `_remove`（舊版本）和 `_add`（新版本），不能只加不刪\n"
+                "- **map 型欄位**（道具欄、人際關係等）：直接輸出 map，同名 key 自動覆蓋\n"
+                "  - 道具欄：`inventory: {\"道具名\": \"狀態描述\"}`，進化/變化自動覆蓋同名道具\n"
+                "  - 移除道具：`inventory: {\"道具名\": null}`\n"
+                "  - 無狀態道具：`inventory: {\"道具名\": \"\"}`\n"
+                "- 列表型欄位用 `_add` / `_remove` 後綴（如 `abilities_add`, `abilities_remove`）\n"
                 "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
                 "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
                 "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
-                "- **人際關係（map 型）**：直接輸出 `relationships: {\"NPC名\": \"新關係描述\"}`，會合併更新。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
+                "- **人際關係**：`relationships: {\"NPC名\": \"新關係描述\"}`。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
                 "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
@@ -1450,9 +1464,83 @@ def _extract_item_base_name(item: str) -> str:
     return name
 
 
+def _migrate_list_to_map(items: list) -> dict:
+    """Convert a list of item strings to a map (key→value).
+
+    Deduplicates by base name — last item wins, so the latest evolution is kept.
+    """
+    result = {}
+    for item in items:
+        if isinstance(item, str):
+            key, val = _parse_item_to_kv(item)
+            result[key] = val
+    return result
+
+
+def _parse_item_to_kv(item: str) -> tuple[str, str]:
+    """Parse a list-format inventory item string into (key, value) for map format.
+
+    Examples:
+      "封印之鏡 — 可以封印低等級怨靈"  → ("封印之鏡", "可以封印低等級怨靈")
+      "死生之刃·日耀輪轉（靈魂加固版）"  → ("死生之刃·日耀輪轉", "靈魂加固版")
+      "鎮魂符×5"                         → ("鎮魂符", "×5")
+      "蝕魂者之戒"                       → ("蝕魂者之戒", "")
+    """
+    # Handle "name — description" format first
+    if " — " in item:
+        parts = item.split(" — ", 1)
+        return parts[0].strip(), parts[1].strip()
+
+    base = _extract_item_base_name(item)
+    remainder = item[len(base):].strip()
+
+    # Strip outer parentheses from remainder
+    if remainder.startswith("（") and remainder.endswith("）"):
+        remainder = remainder[1:-1]
+    elif remainder.startswith("(") and remainder.endswith(")"):
+        remainder = remainder[1:-1]
+
+    return base, remainder
+
+
 def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schema: dict):
     """Core logic: apply a STATE update dict to character state. No normalization."""
     state = _load_character_state(story_id, branch_id)
+
+    # Backward compat: convert legacy inventory_add/inventory_remove to map format.
+    # Old extraction or STATE tags may still use list-based add/remove keys for
+    # fields that are now map type.  Convert them into the map delta format so
+    # the map branch handles them naturally.
+    for list_def in schema.get("lists", []):
+        if list_def.get("type") != "map":
+            continue
+        lkey = list_def["key"]
+        add_key = list_def.get("state_add_key") or f"{lkey}_add"
+        rm_key = list_def.get("state_remove_key") or f"{lkey}_remove"
+        if add_key in update or rm_key in update:
+            inv_map = update.setdefault(lkey, {})
+            if not isinstance(inv_map, dict):
+                inv_map = {}
+                update[lkey] = inv_map
+            # Process removes (set to null)
+            if rm_key in update:
+                rm_val = update.pop(rm_key)
+                if isinstance(rm_val, str):
+                    rm_val = [rm_val]
+                if isinstance(rm_val, list):
+                    for item in rm_val:
+                        if isinstance(item, str):
+                            inv_map[_extract_item_base_name(item)] = None
+            # Process adds (parse item string into key/value)
+            if add_key in update:
+                add_val = update.pop(add_key)
+                if isinstance(add_val, str):
+                    add_val = [add_val]
+                if isinstance(add_val, list):
+                    for item in add_val:
+                        if isinstance(item, str):
+                            base, status = _parse_item_to_kv(item)
+                            inv_map[base] = status
 
     # Process list fields from schema
     for list_def in schema.get("lists", []):
@@ -1460,9 +1548,13 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         list_type = list_def.get("type", "list")
 
         if list_type == "map":
-            if key in update:
+            if key in update and isinstance(update[key], dict):
                 existing = state.get(key, {})
-                existing.update(update[key])
+                for k, v in update[key].items():
+                    if v is None:
+                        existing.pop(k, None)
+                    else:
+                        existing[k] = v
                 state[key] = existing
         else:
             # Process remove BEFORE add — when both are present (e.g. item
