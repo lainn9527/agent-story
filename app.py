@@ -1860,6 +1860,9 @@ def _migrate_to_stories():
         if not os.path.exists(dst):
             shutil.copy2(legacy_char, dst)
 
+    # Ensure design dir exists for legacy migration
+    os.makedirs(_story_design_dir(story_id), exist_ok=True)
+
     # Generate system_prompt.txt from prompts.py template
     prompt_path = _story_system_prompt_path(story_id)
     if not os.path.exists(prompt_path):
@@ -2001,6 +2004,13 @@ def _migrate_design_files(story_id: str):
 
     if migrated:
         log.info("Migrated design files to story_design/ for story %s", story_id)
+        # Rebuild lore index if world_lore.json was migrated
+        lore_path = os.path.join(design_dir, "world_lore.json")
+        if os.path.exists(lore_path):
+            try:
+                rebuild_lore_index(story_id)
+            except Exception:
+                log.warning("Failed to rebuild lore index after migration for %s", story_id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2204,7 +2214,11 @@ def api_init():
 
     story_id = _active_story_id()
 
-    # 2. Parse conversation (for original story)
+    # 2. Design files migration (data/stories/ → story_design/)
+    #    Must run BEFORE any code that reads from story_design/ paths.
+    _migrate_design_files(story_id)
+
+    # 3. Parse conversation (for original story)
     parsed_path = _story_parsed_path(story_id)
     if not os.path.exists(parsed_path):
         if os.path.exists(CONVERSATION_PATH):
@@ -2215,17 +2229,14 @@ def api_init():
             _save_json(parsed_path, [])
     original = _load_json(parsed_path, [])
 
-    # 3. Timeline tree migration
+    # 4. Timeline tree migration
     _migrate_to_timeline_tree(story_id)
 
-    # 3b. Branch files migration (flat → branches/ dirs)
+    # 4b. Branch files migration (flat → branches/ dirs)
     _migrate_branch_files(story_id)
 
-    # 3c. Schema migration: add abilities field
+    # 4c. Schema migration: add abilities field
     _migrate_schema_abilities(story_id)
-
-    # 3d. Design files migration (data/stories/ → story_design/)
-    _migrate_design_files(story_id)
 
     tree = _load_tree(story_id)
 
@@ -3595,6 +3606,7 @@ def api_stories_create():
     now = datetime.now(timezone.utc).isoformat()
     story_dir = _story_dir(story_id)
     os.makedirs(story_dir, exist_ok=True)
+    os.makedirs(_story_design_dir(story_id), exist_ok=True)
 
     # System prompt
     if system_prompt_text:
@@ -3720,10 +3732,13 @@ def api_stories_delete(story_id):
     if len(stories) <= 1:
         return jsonify({"ok": False, "error": "cannot delete the last story"}), 400
 
-    # Remove story directory
+    # Remove story directories (runtime data + design files)
     story_dir = _story_dir(story_id)
     if os.path.exists(story_dir):
         shutil.rmtree(story_dir)
+    design_dir = _story_design_dir(story_id)
+    if os.path.exists(design_dir):
+        shutil.rmtree(design_dir)
 
     del stories[story_id]
 
