@@ -320,18 +320,34 @@ class TestMigrateListToMap:
             "封印之鏡",
             "鎮魂符×5",
         ])
-        assert result == {"封印之鏡": "", "鎮魂符": "×5"}
+        assert result == {"封印之鏡": "", "鎮魂符×5": ""}
 
-    def test_dedup_by_base_name(self):
-        """Last item with same base name wins — latest evolution kept."""
+    def test_lossless_distinct_items(self):
+        """Distinct items with same base name are ALL preserved (lossless)."""
+        result = app_module._migrate_list_to_map([
+            "定界珠（生）",
+            "定界珠（死）",
+            "定界珠（因果）",
+        ])
+        assert result == {
+            "定界珠（生）": "",
+            "定界珠（死）": "",
+            "定界珠（因果）": "",
+        }
+
+    def test_evolution_stages_preserved(self):
+        """Evolution stages kept as separate keys during migration (lossless)."""
         result = app_module._migrate_list_to_map([
             "死生之刃·日耀輪轉",
             "死生之刃·日耀輪轉（初步成型）",
             "死生之刃·日耀輪轉（靈魂加固版）",
         ])
-        assert result == {"死生之刃·日耀輪轉": "靈魂加固版"}
+        assert len(result) == 3
+        assert "死生之刃·日耀輪轉" in result
+        assert "死生之刃·日耀輪轉（初步成型）" in result
+        assert "死生之刃·日耀輪轉（靈魂加固版）" in result
 
-    def test_different_base_names_preserved(self):
+    def test_different_items_preserved(self):
         result = app_module._migrate_list_to_map([
             "封印之鏡",
             "鎮魂符×5",
@@ -355,7 +371,7 @@ class TestMigrateListToMap:
         state = app_module._load_character_state(story_id, "main")
         assert isinstance(state["inventory"], dict)
         assert "封印之鏡" in state["inventory"]
-        assert state["inventory"]["鎮魂符"] == "×5"
+        assert "鎮魂符×5" in state["inventory"]
 
 
 # ===================================================================
