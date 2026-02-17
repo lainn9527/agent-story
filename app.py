@@ -576,12 +576,6 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
             result,
             flags=re.DOTALL,
         ).strip() + "\n"
-        # Tell GM explicitly — history may still contain fate references
-        result += (
-            "\n## 命運走向系統已關閉\n"
-            "不要在回應中提及或使用命運走向相關概念（天命、順遂、波折、劫數等）。"
-            "即使對話歷史中出現這些詞彙，也請忽略，當作不存在。\n"
-        )
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
     if get_pistol_mode(story_dir, branch_id):
@@ -2114,6 +2108,25 @@ _CONTEXT_ECHO_RE = re.compile(
     re.DOTALL,
 )
 
+# Pattern to strip fate direction labels from GM text in conversation history
+# Matches lines like: **【命運走向：劫數】**, **【命運走向效應：波折】**, etc.
+_FATE_LABEL_RE = re.compile(r"\*{0,2}【命運(?:走向|判定)(?:效應)?[:：][^】]*】\*{0,2}\s*")
+
+
+def _strip_fate_from_messages(messages: list[dict]) -> list[dict]:
+    """Return a shallow copy of messages with fate direction labels removed from content.
+
+    Used when fate mode is OFF so the GM doesn't see/mimic historical patterns.
+    Does NOT modify the original message dicts.
+    """
+    cleaned = []
+    for m in messages:
+        content = m.get("content", "")
+        if _FATE_LABEL_RE.search(content):
+            m = {**m, "content": _FATE_LABEL_RE.sub("", content).strip()}
+        cleaned.append(m)
+    return cleaned
+
 
 _REWARD_HINT_RE = re.compile(r"【主神提示[:：].*?獎勵點.*?】")
 
@@ -2489,6 +2502,8 @@ def api_send():
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
+    if not get_fate_mode(_story_dir(story_id), branch_id):
+        recent = _strip_fate_from_messages(recent)
 
     # 3b. Search relevant lore/events/activities and prepend to user message
     t0 = time.time()
@@ -2601,6 +2616,8 @@ def api_send_stream():
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
+    if not get_fate_mode(_story_dir(story_id), branch_id):
+        recent = _strip_fate_from_messages(recent)
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state, turn_count=tc)
     if dice_result:
@@ -2944,6 +2961,8 @@ def api_branches_edit():
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
+    if not get_fate_mode(_story_dir(story_id), branch_id):
+        recent = _strip_fate_from_messages(recent)
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
@@ -3075,6 +3094,8 @@ def api_branches_edit_stream():
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
+    if not get_fate_mode(_story_dir(story_id), branch_id):
+        recent = _strip_fate_from_messages(recent)
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state, turn_count=tc)
     if dice_result:
@@ -3214,6 +3235,8 @@ def api_branches_regenerate():
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
+    if not get_fate_mode(_story_dir(story_id), branch_id):
+        recent = _strip_fate_from_messages(recent)
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
@@ -3336,6 +3359,8 @@ def api_branches_regenerate_stream():
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
+    if not get_fate_mode(_story_dir(story_id), branch_id):
+        recent = _strip_fate_from_messages(recent)
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
 
