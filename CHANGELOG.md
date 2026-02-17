@@ -5,6 +5,19 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-02-18
+
+### Changed
+- **道具欄改為 key-value map**: `inventory` 從 list 改為 map 格式（`{"道具名": "狀態"}`），同名道具自動覆蓋，從根本上解決進化道具重複堆積問題 ([#102])
+- **Schema render hint**: 新增 `"render": "inline"` schema 欄位，人際關係保持 `name：value` 單行顯示，道具欄使用 block 雙行佈局 ([#102])
+
+### Added
+- **Backward compat shim**: 舊版 `inventory_add`/`inventory_remove` STATE tag 自動轉換為 map delta 格式 ([#102])
+- **Auto-migration on load**: 載入分支時自動偵測 list 格式 inventory 並無損轉換為 map（不合併同 base name 的不同道具） ([#102])
+- **Map null removal**: `{"inventory": {"道具名": null}}` 可移除道具 ([#102])
+
+[#102]: https://github.com/lainn9527/agent-story/pull/102
+
 ## [0.19.4] - 2026-02-18
 
 ### Fixed
