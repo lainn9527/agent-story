@@ -5,6 +5,14 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.3] - 2026-02-17
+
+### Fixed
+- **道具重複堆積**: `inventory_add` 時自動替換同 base name 的裸名舊道具（如 `武器` → `武器（強化版）`），有後綴的變體（如 `定界珠（生）` vs `定界珠（死）`）和消耗品堆疊不受影響 ([#100])
+- **人際關係不更新**: 提取 prompt 缺少 map 類型欄位（relationships）的上下文，LLM 看不到現有關係故無法輸出更新；現已包含並加強更新指示 ([#100])
+
+[#100]: https://github.com/lainn9527/agent-story/pull/100
+
 ## [0.19.2] - 2026-02-17
 
 ### Fixed
