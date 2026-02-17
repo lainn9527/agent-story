@@ -1540,6 +1540,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   loadEvents();
   loadDungeonProgress();
   loadSummaries();
+  loadFateModeStatus();
   loadDiceCheatStatus();
   loadPistolModeStatus();
 
@@ -3023,12 +3024,13 @@ async function loadFateModeStatus() {
   try {
     const res = await fetch(`/api/cheats/fate?branch_id=${currentBranchId}`);
     const data = await res.json();
+    const active = data.fate_mode !== false;
     const btn = document.getElementById("fate-cheat-btn");
     if (btn) {
-      const active = data.fate_mode !== false;
       btn.textContent = active ? "ON" : "OFF";
       btn.classList.toggle("active", active);
     }
+    _syncDiceToggleDisabled(!active);
     updateAddonBtnIndicator();
   } catch (e) {
     console.error("loadFateModeStatus error:", e);
@@ -3095,9 +3097,22 @@ async function toggleFateMode() {
         btn.classList.toggle("active", newState);
       }
     }
+    // Disable/enable dice sub-toggles based on fate mode
+    _syncDiceToggleDisabled(!newState);
     updateAddonBtnIndicator();
   } catch (e) {
     console.error("toggleFateMode error:", e);
+  }
+}
+
+/** Disable or enable the 必勝模式 dice toggles when fate mode is off/on. */
+function _syncDiceToggleDisabled(disabled) {
+  for (const id of ["dice-cheat-btn", "addon-dice-btn"]) {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.disabled = disabled;
+      btn.classList.toggle("disabled", disabled);
+    }
   }
 }
 
@@ -3226,12 +3241,13 @@ async function loadAddonPanelState() {
   try {
     const res = await fetch(`/api/cheats/fate?branch_id=${currentBranchId}`);
     const data = await res.json();
+    const active = data.fate_mode !== false;
     const btn = document.getElementById("addon-fate-btn");
     if (btn) {
-      const active = data.fate_mode !== false;
       btn.textContent = active ? "ON" : "OFF";
       btn.classList.toggle("active", active);
     }
+    _syncDiceToggleDisabled(!active);
   } catch (e) {
     console.error("loadAddonPanelState fate error:", e);
   }
