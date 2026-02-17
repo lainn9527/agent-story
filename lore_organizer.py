@@ -218,7 +218,7 @@ def _save_state(story_id: str, state: dict):
 # rename_lore_topic
 # ---------------------------------------------------------------------------
 
-def rename_lore_topic(story_id: str, old_topic: str, new_topic: str):
+def rename_lore_topic(story_id: str, old_topic: str, new_topic: str, subcategory: str = ""):
     """Rename a lore topic in world_lore.json + SQLite index. Must be called within lore lock."""
     from lore_db import delete_entry as delete_lore_entry, upsert_entry as upsert_lore_entry
 
@@ -232,7 +232,7 @@ def rename_lore_topic(story_id: str, old_topic: str, new_topic: str):
     updated = False
     updated_entry = None
     for entry in lore:
-        if entry.get("topic") == old_topic:
+        if entry.get("topic") == old_topic and entry.get("subcategory", "") == subcategory:
             entry["topic"] = new_topic
             updated_entry = entry
             updated = True
@@ -248,7 +248,7 @@ def rename_lore_topic(story_id: str, old_topic: str, new_topic: str):
     os.replace(tmp, lore_file)
 
     # Update SQLite index
-    delete_lore_entry(story_id, old_topic)
+    delete_lore_entry(story_id, old_topic, subcategory)
     upsert_lore_entry(story_id, updated_entry)
 
     log.info("    lore_organizer: renamed '%s' → '%s'", old_topic, new_topic)
@@ -351,10 +351,11 @@ def _organize_orphans_llm(story_id: str):
     for orphan in actionable:
         topic = orphan.get("topic", "")
         category = orphan.get("category", "")
+        subcategory = orphan.get("subcategory", "")
         new_topic = try_classify_topic(topic, category, story_id, prefix_registry=registry)
         if new_topic:
             with lock:
-                rename_lore_topic(story_id, topic, new_topic)
+                rename_lore_topic(story_id, topic, new_topic, subcategory)
             rule_classified += 1
         else:
             remaining.append(orphan)
@@ -446,8 +447,9 @@ def _organize_orphans_llm(story_id: str):
         _save_state(story_id, state)
         return
 
-    # Build lookup: topic → orphan category
+    # Build lookup: topic → orphan metadata
     orphan_cats = {o.get("topic", ""): o.get("category", "") for o in batch}
+    orphan_subs = {o.get("topic", ""): o.get("subcategory", "") for o in batch}
     all_prefixes = registry.get("all", set())
     llm_classified = 0
     now = datetime.now(timezone.utc).isoformat()
@@ -482,7 +484,7 @@ def _organize_orphans_llm(story_id: str):
         else:
             new_topic = f"{prefix}：{topic}"
         with lock:
-            rename_lore_topic(story_id, topic, new_topic)
+            rename_lore_topic(story_id, topic, new_topic, orphan_subs.get(topic, ""))
         llm_classified += 1
 
     if llm_classified:

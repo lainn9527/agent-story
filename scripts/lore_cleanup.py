@@ -468,21 +468,22 @@ def organize_orphans(story_id: str, delay: float = 3.0, dry_run: bool = False):
     for orphan in orphans:
         topic = orphan.get("topic", "")
         category = orphan.get("category", "")
+        subcategory = orphan.get("subcategory", "")
         new_topic = try_classify_topic(topic, category, story_id, prefix_registry=registry)
         if new_topic:
-            rule_classified.append((topic, new_topic))
+            rule_classified.append((topic, new_topic, subcategory))
         else:
             remaining.append(orphan)
 
     log.info("  Phase 6a (rules): %d classified, %d remaining", len(rule_classified), len(remaining))
-    for old, new in rule_classified:
+    for old, new, _sub in rule_classified:
         log.info("    %s → %s", old, new)
 
     if not dry_run and rule_classified:
         lock = get_lore_lock(story_id)
-        for old, new in rule_classified:
+        for old, new, sub in rule_classified:
             with lock:
-                rename_lore_topic(story_id, old, new)
+                rename_lore_topic(story_id, old, new, sub)
         invalidate_prefix_cache(story_id)
         registry = build_prefix_registry(story_id)
 
@@ -566,6 +567,7 @@ def organize_orphans(story_id: str, delay: float = 3.0, dry_run: bool = False):
             continue
 
         orphan_cats = {o.get("topic", ""): o.get("category", "") for o in batch}
+        orphan_subs = {o.get("topic", ""): o.get("subcategory", "") for o in batch}
         lock = get_lore_lock(story_id)
 
         for item in classifications:
@@ -597,7 +599,7 @@ def organize_orphans(story_id: str, delay: float = 3.0, dry_run: bool = False):
             else:
                 new_topic = f"{prefix}：{topic}"
             with lock:
-                rename_lore_topic(story_id, topic, new_topic)
+                rename_lore_topic(story_id, topic, new_topic, orphan_subs.get(topic, ""))
             llm_classified.append((topic, new_topic))
             log.info("    LLM: %s → %s", topic, new_topic)
 

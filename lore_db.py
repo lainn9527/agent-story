@@ -378,14 +378,14 @@ def upsert_entry(story_id: str, entry: dict):
 
     if hash_changed:
         _invalidate_cache(story_id)
-        _embed_single_async(story_id, topic, content)
+        _embed_single_async(story_id, topic, content, subcategory)
 
 
 # ---------------------------------------------------------------------------
 # Background embedding
 # ---------------------------------------------------------------------------
 
-def _embed_single_async(story_id: str, topic: str, content: str):
+def _embed_single_async(story_id: str, topic: str, content: str, subcategory: str = ""):
     """Embed a single entry in a background daemon thread."""
     def _do():
         try:
@@ -397,8 +397,8 @@ def _embed_single_async(story_id: str, topic: str, content: str):
                 text_hash = _compute_text_hash(topic, content)
                 conn = _get_conn(story_id)
                 conn.execute(
-                    "UPDATE lore SET embedding=?, text_hash=? WHERE topic=?",
-                    (emb_bytes, text_hash, topic),
+                    "UPDATE lore SET embedding=?, text_hash=? WHERE subcategory=? AND topic=?",
+                    (emb_bytes, text_hash, subcategory, topic),
                 )
                 conn.commit()
                 conn.close()
