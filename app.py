@@ -2222,14 +2222,15 @@ def _build_augmented_message(
         }
 
     parts = []
-    # Search base lore (via lore.db indexed search)
-    lore = search_relevant_lore(story_id, user_text, context=lore_context)
-    if lore:
-        parts.append(lore)
-    # Search branch lore (linear CJK bigram search, smaller dataset)
-    branch_lore = _search_branch_lore(story_id, branch_id, user_text)
-    if branch_lore:
-        parts.append(branch_lore)
+    if not is_blank:
+        # Search base lore (via lore.db indexed search)
+        lore = search_relevant_lore(story_id, user_text, context=lore_context)
+        if lore:
+            parts.append(lore)
+        # Search branch lore (linear CJK bigram search, smaller dataset)
+        branch_lore = _search_branch_lore(story_id, branch_id, user_text)
+        if branch_lore:
+            parts.append(branch_lore)
     if not is_blank:
         events = search_relevant_events(story_id, user_text, branch_id, limit=3)
         if events:
