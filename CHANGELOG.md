@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.3] - 2026-02-18
+
+### Fixed
+- **Lore 抽取過於積極**: 收緊 branch lore 提取標準，加入「GM 在未來其他場景是否需要此設定？」判斷門檻；明確禁止一次性場景細節（具體房間、走廊、臨時戰場），將劇情事件導向 events 追蹤 ([#106])
+
+[#106]: https://github.com/lainn9527/agent-story/pull/106
+
 ## [0.20.2] - 2026-02-18
 
 ### Changed
