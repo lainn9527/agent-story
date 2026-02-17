@@ -4386,8 +4386,14 @@ def api_lore_chat_stream():
 - 設定會透過關鍵字搜尋注入 GM 上下文，請使用明確的術語和關鍵字以提升檢索效果
 - 新增設定時請使用上方現有分類，避免建立新分類
 
+子分類（subcategory）規範：
+- 副本世界觀 的條目：subcategory = 副本名稱（如「海賊王」「生化危機」），topic 預設為「介紹」
+- 體系 的條目：subcategory = 體系/技能名稱（如「霸氣」「基因鎖」），topic 預設為「介紹」
+- 其他分類：subcategory 可選，不強制
+- 同一 subcategory 下的 topic 必須唯一，但不同 subcategory 間 topic 可重複（例如每個副本都可有「介紹」）
+
 提案格式（當建議變更時使用）：
-<!--LORE_PROPOSE {{"action":"add|edit|delete", "category":"...", "topic":"...", "content":"..."}} LORE_PROPOSE-->
+<!--LORE_PROPOSE {{"action":"add|edit|delete", "category":"...", "subcategory":"...", "topic":"...", "content":"..."}} LORE_PROPOSE-->
 
 規則：
 - 先討論再提案，確認用戶意圖後再輸出提案標籤
