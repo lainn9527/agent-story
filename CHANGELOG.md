@@ -5,6 +5,18 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-02-17
+
+### Added
+- **副本系統 (Dungeon System)**: 13 個副本完整定義（D→S 難度），含主線節點、地圖區域、成長規則 ([#94])
+- **硬約束成長控制**: `validate_dungeon_progression()` 在代碼層面 cap 每個副本的等級/基因鎖成長，防止 GM 過度慷慨導致角色過快升級 ([#94])
+- **副本進度追蹤**: 每個分支獨立的 `dungeon_progress.json`，記錄主線進度、地圖探索度、成長預算消耗 ([#94])
+- **Drawer 副本面板**: 副本中顯示進度條、主線節點、可折疊地圖區域；60% 主線完成後可回歸主神空間 ([#94])
+- **系統提示副本上下文**: `{dungeon_context}` 佔位符將副本狀態、節點進度、成長限制注入 GM 系統提示 ([#94])
+- **異步 LLM 副本提取**: 擴展 `_extract_tags_async()` 自動從 GM 文本提取副本進度更新 ([#94])
+
+[#94]: https://github.com/lainn9527/agent-story/pull/94
+
 ## [0.17.1] - 2026-02-17
 
 ### Fixed
