@@ -153,7 +153,7 @@ DEFAULT_CHARACTER_SCHEMA = {
     "lists": [
         {"key": "inventory", "label": "道具欄", "type": "map"},
         {"key": "completed_missions", "label": "已完成任務", "state_add_key": "completed_missions_add"},
-        {"key": "relationships", "label": "人際關係", "type": "map"},
+        {"key": "relationships", "label": "人際關係", "type": "map", "render": "inline"},
     ],
     "direct_overwrite_keys": ["gene_lock", "physique", "spirit", "current_status", "current_phase"],
 }
@@ -1471,13 +1471,20 @@ def _extract_item_base_name(item: str) -> str:
 def _migrate_list_to_map(items: list) -> dict:
     """Convert a list of item strings to a map (key→value).
 
-    Deduplicates by base name — last item wins, so the latest evolution is kept.
+    Lossless migration: only splits on " — " separator.  Items without
+    the separator use the full string as key (empty value).  This avoids
+    destroying distinct items that share the same base name (e.g.
+    定界珠（生） vs 定界珠（死） are different items, not evolutions).
     """
     result = {}
     for item in items:
         if isinstance(item, str):
-            key, val = _parse_item_to_kv(item)
-            result[key] = val
+            item = item.strip()
+            if " — " in item:
+                parts = item.split(" — ", 1)
+                result[parts[0].strip()] = parts[1].strip()
+            else:
+                result[item] = ""
     return result
 
 

@@ -2480,9 +2480,14 @@ function renderCharacterStatus(state) {
     const data = state[listDef.key];
 
     if (listType === "map" && data && typeof data === "object") {
+      const renderMode = listDef.render || "block";
       Object.entries(data).forEach(([name, val]) => {
         const li = document.createElement("li");
-        if (val) {
+        if (val && renderMode === "inline") {
+          // Inline: "name：value" on one line (for relationships etc.)
+          li.textContent = `${name}：${val}`;
+        } else if (val) {
+          // Block: name bold on top, description below (for inventory etc.)
           const nameSpan = document.createElement("span");
           nameSpan.className = "item-name";
           nameSpan.textContent = name;
