@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.4] - 2026-02-18
+
+### Fixed
+- **輸入框送出後不縮回**: 送出訊息後 textarea 保持展開狀態不會縮回單行；同時修正 `fillInputWithOption()` 缺少 120px 高度上限 ([#101])
+
+[#101]: https://github.com/lainn9527/agent-story/pull/101
+
 ## [0.19.3] - 2026-02-17
 
 ### Fixed
