@@ -1346,7 +1346,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
 
 _ITEM_BASE_RE = re.compile(r'\s*[（(].*$')
-_ITEM_QTY_RE = re.compile(r'\s+x\d+$')
+_ITEM_QTY_RE = re.compile(r'\s*[x×]\d+$')
 
 
 def _extract_item_base_name(item: str) -> str:
@@ -1380,20 +1380,9 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 existing.update(update[key])
                 state[key] = existing
         else:
-            add_key = list_def.get("state_add_key")
-            if add_key and add_key in update:
-                lst = state.get(key, [])
-                add_val = update[add_key]
-                # LLM sometimes returns a string instead of list — wrap it
-                if isinstance(add_val, str):
-                    add_val = [add_val]
-                elif not isinstance(add_val, list):
-                    add_val = []
-                for item in add_val:
-                    if isinstance(item, str) and item not in lst:
-                        lst.append(item)
-                state[key] = lst
-
+            # Process remove BEFORE add — when both are present (e.g. item
+            # status change), adding first would cause the base-name removal
+            # to nuke the newly added item too.
             remove_key = list_def.get("state_remove_key")
             if remove_key and remove_key in update:
                 lst = state.get(key, [])
@@ -1406,8 +1395,28 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 for rm_item in rm_val:
                     if not isinstance(rm_item, str):
                         continue
-                    rm_base = _extract_item_base_name(rm_item)
-                    lst = [x for x in lst if _extract_item_base_name(x) != rm_base]
+                    # Try exact match first; fall back to base-name match.
+                    # This prevents over-matching genuinely different items
+                    # (e.g. 定界珠（生） vs 定界珠（死）).
+                    if rm_item in lst:
+                        lst = [x for x in lst if x != rm_item]
+                    else:
+                        rm_base = _extract_item_base_name(rm_item)
+                        lst = [x for x in lst if _extract_item_base_name(x) != rm_base]
+                state[key] = lst
+
+            add_key = list_def.get("state_add_key")
+            if add_key and add_key in update:
+                lst = state.get(key, [])
+                add_val = update[add_key]
+                # LLM sometimes returns a string instead of list — wrap it
+                if isinstance(add_val, str):
+                    add_val = [add_val]
+                elif not isinstance(add_val, list):
+                    add_val = []
+                for item in add_val:
+                    if isinstance(item, str) and item not in lst:
+                        lst.append(item)
                 state[key] = lst
 
     # Generic *_delta handling: apply as addition to base field
