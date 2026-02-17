@@ -5,6 +5,14 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-02-17
+
+### Changed
+- **Design files separated**: Story design files (`system_prompt.txt`, `world_lore.json`, `character_schema.json`, `default_character_state.json`, `parsed_conversation.json`, `nsfw_preferences.json`) now live in `story_design/<story_id>/` instead of `data/stories/<story_id>/`, enabling git tracking of world-building content while runtime data stays gitignored ([#95])
+- Auto-migration on startup copies design files from old location to new; old copies become inert ([#95])
+
+[#95]: https://github.com/lainn9527/agent-story/pull/95
+
 ## [0.16.5] - 2026-02-17
 
 ### Fixed
