@@ -1178,7 +1178,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 f"已有設定（優先更新而非新建）：\n{toc}\n"
                 '格式：[{{"category": "分類", "subcategory": "子分類(選填)", "topic": "主題", "content": "完整描述"}}]\n'
                 "可用分類：主神設定與規則/體系/商城/副本世界觀/道具/場景/NPC/故事追蹤\n"
-                "- 體系：用 subcategory 區分層次（如 subcategory「技能」=單一可習得能力，「基本屬性」=角色基礎數值，空=框架級概念如基因鎖）\n"
+                "- 體系：必須填 subcategory。框架級概念用 subcategory 為體系名 + topic「介紹」（如 subcategory「基因鎖」topic「介紹」）；單一技能用 subcategory「技能」；基礎數值用 subcategory「基本屬性」\n"
                 "- 副本世界觀：必須填 subcategory 為副本名（如「生化危機」「咒怨」）\n"
                 "- 道具：角色可使用的物品與裝備\n\n"
                 "## 2. 事件追蹤（events）\n"
