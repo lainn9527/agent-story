@@ -98,8 +98,8 @@ class TestBuildAugmentedMessage:
     @mock.patch("app.search_relevant_lore", return_value="[相關世界設定]\n#### 體系：基因鎖\n基因鎖是...")
     @mock.patch("app.search_relevant_events", return_value="[相關事件追蹤]\n- [伏筆] 神秘組織（已埋）")
     @mock.patch("app.get_recent_activities", return_value="[NPC 近期動態]\n- 阿豪：訓練中")
-    @mock.patch("app.roll_fate", return_value={"outcome": "成功", "roll": 15})
-    @mock.patch("app.format_dice_context", return_value="[命運判定] 成功")
+    @mock.patch("app.roll_fate", return_value={"outcome": "順遂", "roll": 15})
+    @mock.patch("app.format_dice_context", return_value="[命運走向] 順遂")
     @mock.patch("app.is_gm_command", return_value=False)
     def test_all_sections_present(self, mock_gm, mock_fmt, mock_roll, mock_act, mock_evt, mock_lore, story_id, setup_story):
         state = {"current_phase": "主神空間"}
@@ -108,7 +108,7 @@ class TestBuildAugmentedMessage:
         assert "[相關世界設定]" in text
         assert "[相關事件追蹤]" in text
         assert "[NPC 近期動態]" in text
-        assert "[命運判定]" in text
+        assert "[命運走向]" in text
         assert "我要修煉" in text
         assert dice is not None
 
@@ -116,8 +116,8 @@ class TestBuildAugmentedMessage:
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")
     @mock.patch("app.is_gm_command", return_value=False)
-    @mock.patch("app.roll_fate", return_value={"outcome": "成功"})
-    @mock.patch("app.format_dice_context", return_value="[命運判定] 成功")
+    @mock.patch("app.roll_fate", return_value={"outcome": "順遂"})
+    @mock.patch("app.format_dice_context", return_value="[命運走向] 順遂")
     def test_empty_sections_omitted(self, mock_fmt, mock_roll, mock_gm, mock_act, mock_evt, mock_lore, story_id, setup_story):
         text, _ = app_module._build_augmented_message(story_id, "main", "你好", {"current_phase": "主神空間"})
         assert "[相關世界設定]" in text
@@ -128,8 +128,8 @@ class TestBuildAugmentedMessage:
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")
     @mock.patch("app.is_gm_command", return_value=False)
-    @mock.patch("app.roll_fate", return_value={"outcome": "成功"})
-    @mock.patch("app.format_dice_context", return_value="[命運判定] 成功")
+    @mock.patch("app.roll_fate", return_value={"outcome": "順遂"})
+    @mock.patch("app.format_dice_context", return_value="[命運走向] 順遂")
     def test_user_text_at_end(self, mock_fmt, mock_roll, mock_gm, mock_act, mock_evt, mock_lore, story_id, setup_story):
         text, _ = app_module._build_augmented_message(story_id, "main", "原始訊息", {"current_phase": "主神空間"})
         # User text should be after the separator

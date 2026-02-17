@@ -416,8 +416,8 @@ class TestBuildAugmentedMessageWithBranchLore:
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")
     @mock.patch("app.is_gm_command", return_value=False)
-    @mock.patch("app.roll_fate", return_value={"outcome": "成功"})
-    @mock.patch("app.format_dice_context", return_value="[命運判定] 成功")
+    @mock.patch("app.roll_fate", return_value={"outcome": "順遂"})
+    @mock.patch("app.format_dice_context", return_value="[命運走向] 順遂")
     def test_branch_lore_injected(self, mock_fmt, mock_roll, mock_gm,
                                   mock_act, mock_evt, mock_lore,
                                   story_id, setup_story):
@@ -437,8 +437,8 @@ class TestBuildAugmentedMessageWithBranchLore:
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")
     @mock.patch("app.is_gm_command", return_value=False)
-    @mock.patch("app.roll_fate", return_value={"outcome": "成功"})
-    @mock.patch("app.format_dice_context", return_value="[命運判定] 成功")
+    @mock.patch("app.roll_fate", return_value={"outcome": "順遂"})
+    @mock.patch("app.format_dice_context", return_value="[命運走向] 順遂")
     def test_no_branch_lore_no_section(self, mock_fmt, mock_roll, mock_gm,
                                        mock_act, mock_evt, mock_lore,
                                        story_id, setup_story):
