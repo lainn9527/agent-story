@@ -143,11 +143,11 @@ class TestInventoryAdd:
         assert "死生之刃·日耀輪轉（靈魂加固版）" in state["inventory"]
         assert "死生之刃·日耀輪轉" not in state["inventory"]
 
-    def test_add_replaces_multiple_old_versions(self, tmp_path, story_id, setup_state):
-        """Adding new version should replace ALL old versions with same base name."""
+    def test_add_only_replaces_plain_base_name(self, tmp_path, story_id, setup_state):
+        """Auto-dedup only replaces bare/plain items (no suffix), not variants with their own suffix."""
         setup_state("main", {**INITIAL_STATE, "inventory": [
-            "死生之刃·日耀輪轉",
-            "死生之刃·日耀輪轉（初步成型）",
+            "死生之刃·日耀輪轉",           # plain — should be replaced
+            "死生之刃·日耀輪轉（初步成型）",  # has suffix — should NOT be auto-replaced
         ]})
         app_module._apply_state_update_inner(
             story_id, "main",
@@ -157,10 +157,11 @@ class TestInventoryAdd:
         state = _load_state(tmp_path, story_id)
         inv = state["inventory"]
         assert "死生之刃·日耀輪轉（靈魂加固版）" in inv
-        assert len([x for x in inv if "死生之刃·日耀輪轉" in x]) == 1
+        assert "死生之刃·日耀輪轉" not in inv              # plain removed
+        assert "死生之刃·日耀輪轉（初步成型）" in inv       # suffix variant preserved
 
-    def test_add_does_not_replace_different_base_name(self, tmp_path, story_id, setup_state):
-        """Items with different base names should coexist."""
+    def test_add_preserves_different_variants(self, tmp_path, story_id, setup_state):
+        """Items with same base name but different suffixes should coexist (e.g. 定界珠（生） vs 定界珠（死）)."""
         setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生）", "封印之鏡"]})
         app_module._apply_state_update_inner(
             story_id, "main",
@@ -168,9 +169,21 @@ class TestInventoryAdd:
             SCHEMA,
         )
         state = _load_state(tmp_path, story_id)
-        # Both 定界珠 variants share base name — old replaced by new
-        assert "定界珠（死）" in state["inventory"]
-        assert "封印之鏡" in state["inventory"]
+        assert "定界珠（生）" in state["inventory"]   # preserved — has its own suffix
+        assert "定界珠（死）" in state["inventory"]   # added
+        assert "封印之鏡" in state["inventory"]       # unrelated — preserved
+
+    def test_add_preserves_consumable_stacks(self, tmp_path, story_id, setup_state):
+        """Consumable stacks (鎮魂符×5) should not be removed when adding an evolved version."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["鎮魂符×5"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_add": ["鎮魂符（強化）"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "鎮魂符×5" in state["inventory"]      # consumable stack preserved
+        assert "鎮魂符（強化）" in state["inventory"]  # new item added
 
 
 class TestExtractItemBaseName:

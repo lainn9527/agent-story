@@ -1504,11 +1504,17 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                         continue
                     if item in lst:
                         continue
-                    # Auto-dedup: if an existing item shares the same base name,
-                    # replace it (handles evolution chains like 武器 → 武器（強化版）)
+                    # Auto-dedup: replace existing items that are "plain" versions
+                    # (no parenthetical suffix) of the new item's base name.
+                    # Only replaces bare names like 武器 when adding 武器（強化版）.
+                    # Items with their own suffix (定界珠（生） vs 定界珠（死）) are
+                    # treated as distinct and NOT auto-replaced.
                     add_base = _extract_item_base_name(item)
                     if add_base:
-                        lst = [x for x in lst if _extract_item_base_name(x) != add_base]
+                        lst = [x for x in lst if not (
+                            _extract_item_base_name(x) == add_base
+                            and x.strip() == add_base  # only replace bare/plain names
+                        )]
                     lst.append(item)
                 state[key] = lst
 
