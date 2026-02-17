@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2] - 2026-02-17
+
+### Fixed
+- **命運走向關閉後仍出現劫數**: Strip `**【命運走向：XX】**` labels from conversation history before sending to LLM when fate mode is off, so GM has zero exposure to fate patterns ([#99])
+
+[#99]: https://github.com/lainn9527/agent-story/pull/99
+
 ## [0.19.1] - 2026-02-17
 
 ### Fixed
