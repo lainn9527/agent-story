@@ -839,11 +839,12 @@ def _save_branch_lore_entry(story_id: str, branch_id: str, entry: dict,
             topic = organized
             entry["topic"] = topic
 
+    subcategory = entry.get("subcategory", "")
     lock = _get_branch_lore_lock(story_id, branch_id)
     with lock:
         lore = _load_branch_lore(story_id, branch_id)
         for i, existing in enumerate(lore):
-            if existing.get("topic") == topic:
+            if existing.get("topic") == topic and existing.get("subcategory", "") == subcategory:
                 if "category" not in entry and "category" in existing:
                     entry["category"] = existing["category"]
                 if "source" not in entry and "source" in existing:
@@ -860,19 +861,19 @@ def _save_branch_lore_entry(story_id: str, branch_id: str, entry: dict,
 
 
 def _merge_branch_lore_into(story_id: str, src_branch_id: str, dst_branch_id: str):
-    """Merge source branch_lore into destination (upsert by topic, not overwrite)."""
+    """Merge source branch_lore into destination (upsert by (subcategory, topic), not overwrite)."""
     src = _load_branch_lore(story_id, src_branch_id)
     if not src:
         return
     dst = _load_branch_lore(story_id, dst_branch_id)
-    dst_topics = {e.get("topic", ""): i for i, e in enumerate(dst)}
+    dst_keys = {(e.get("subcategory", ""), e.get("topic", "")): i for i, e in enumerate(dst)}
     for e in src:
-        t = e.get("topic", "")
-        if t in dst_topics:
-            dst[dst_topics[t]] = e
+        key = (e.get("subcategory", ""), e.get("topic", ""))
+        if key in dst_keys:
+            dst[dst_keys[key]] = e
         else:
             dst.append(e)
-            dst_topics[t] = len(dst) - 1
+            dst_keys[key] = len(dst) - 1
     _save_branch_lore(story_id, dst_branch_id, dst)
 
 
@@ -1011,12 +1012,13 @@ def _save_lore_entry(story_id: str, entry: dict, prefix_registry: dict | None = 
             topic = organized
             entry["topic"] = topic
 
+    subcategory = entry.get("subcategory", "")
     lock = get_lore_lock(story_id)
     with lock:
         lore = _load_lore(story_id)
-        # Update existing topic or append new
+        # Update existing (subcategory, topic) or append new
         for i, existing in enumerate(lore):
-            if existing.get("topic") == topic:
+            if existing.get("topic") == topic and existing.get("subcategory", "") == subcategory:
                 # Preserve category if not provided in new entry
                 if "category" not in entry and "category" in existing:
                     entry["category"] = existing["category"]
@@ -4134,12 +4136,13 @@ def api_lore_entry_update():
     if not topic:
         return jsonify({"ok": False, "error": "topic required"}), 400
 
+    req_sub = body.get("subcategory", "").strip()
     lock = get_lore_lock(story_id)
     with lock:
         lore = _load_lore(story_id)
         found = False
         for i, e in enumerate(lore):
-            if e.get("topic") == topic:
+            if e.get("topic") == topic and e.get("subcategory", "") == req_sub:
                 found = True
                 new_topic = body.get("new_topic", topic).strip()
                 new_category = body.get("category", e.get("category", "其他")).strip()
@@ -4149,8 +4152,8 @@ def api_lore_entry_update():
                 if new_topic != topic or new_sub != e.get("subcategory", ""):
                     if any(x is not e and x.get("topic") == new_topic and x.get("subcategory", "") == new_sub for x in lore):
                         return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists in this subcategory"}), 409
-                if new_topic != topic:
-                    delete_lore_entry(story_id, topic)
+                if new_topic != topic or new_sub != req_sub:
+                    delete_lore_entry(story_id, topic, req_sub)
                 updated = {"category": new_category, "topic": new_topic, "content": new_content, "edited_by": "user"}
                 if "subcategory" in body:
                     new_subcategory = body["subcategory"].strip()
@@ -4185,7 +4188,7 @@ def api_lore_entry_delete():
         if len(new_lore) == len(lore):
             return jsonify({"ok": False, "error": "entry not found"}), 404
         _save_json(_story_lore_path(story_id), new_lore)
-        delete_lore_entry(story_id, topic)
+        delete_lore_entry(story_id, topic, subcategory)
     return jsonify({"ok": True})
 
 
@@ -4306,15 +4309,16 @@ def api_lore_promote():
     body = request.get_json(force=True)
     branch_id = body.get("branch_id", "")
     topic = body.get("topic", "").strip()
+    subcategory = body.get("subcategory", "").strip()
     content_override = body.get("content", "").strip()  # for rewrite action
     if not branch_id or not topic:
         return jsonify({"ok": False, "error": "branch_id and topic required"}), 400
 
-    # Find in branch lore
+    # Find in branch lore by (subcategory, topic)
     branch_lore = _load_branch_lore(story_id, branch_id)
     entry = None
     for e in branch_lore:
-        if e.get("topic") == topic:
+        if e.get("topic") == topic and e.get("subcategory", "") == subcategory:
             entry = e
             break
     if not entry:
@@ -4335,8 +4339,8 @@ def api_lore_promote():
     # Save to base lore
     _save_lore_entry(story_id, base_entry)
 
-    # Remove from branch lore
-    new_branch_lore = [e for e in branch_lore if e.get("topic") != topic]
+    # Remove from branch lore by (subcategory, topic)
+    new_branch_lore = [e for e in branch_lore if not (e.get("topic") == topic and e.get("subcategory", "") == subcategory)]
     _save_branch_lore(story_id, branch_id, new_branch_lore)
 
     return jsonify({"ok": True, "entry": base_entry})
@@ -4508,7 +4512,7 @@ def api_lore_apply():
             new_lore = [e for e in lore if not (e.get("topic") == topic and e.get("subcategory", "") == sub)]
             if len(new_lore) < len(lore):
                 _save_json(_story_lore_path(story_id), new_lore)
-                delete_lore_entry(story_id, topic)
+                delete_lore_entry(story_id, topic, sub)
                 applied.append({"action": "delete", "topic": topic})
     return jsonify({"ok": True, "applied": applied})
 
