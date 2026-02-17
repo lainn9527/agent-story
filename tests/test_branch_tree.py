@@ -16,7 +16,10 @@ def patch_app_paths(tmp_path, monkeypatch):
     """Redirect app paths to tmp_path."""
     stories_dir = tmp_path / "data" / "stories"
     stories_dir.mkdir(parents=True)
+    design_dir = tmp_path / "story_design"
+    design_dir.mkdir()
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
     return stories_dir
 
@@ -34,6 +37,8 @@ def setup_tree(tmp_path, story_id):
     """
     story_dir = tmp_path / "data" / "stories" / story_id
     story_dir.mkdir(parents=True, exist_ok=True)
+    design_dir = tmp_path / "story_design" / story_id
+    design_dir.mkdir(parents=True, exist_ok=True)
 
     def _setup(tree, parsed_messages=None, branch_messages=None):
         """
@@ -41,14 +46,14 @@ def setup_tree(tmp_path, story_id):
         parsed_messages: list of messages for parsed_conversation.json (base messages)
         branch_messages: dict of {branch_id: [messages]} for per-branch delta
         """
-        # Write timeline_tree.json
+        # Write timeline_tree.json (runtime)
         (story_dir / "timeline_tree.json").write_text(
             json.dumps(tree, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-        # Write parsed_conversation.json (base messages)
+        # Write parsed_conversation.json → story_design/
         parsed = parsed_messages or []
-        (story_dir / "parsed_conversation.json").write_text(
+        (design_dir / "parsed_conversation.json").write_text(
             json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 

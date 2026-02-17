@@ -15,10 +15,13 @@ import lore_db
 
 @pytest.fixture(autouse=True)
 def patch_stories_dir(tmp_path, monkeypatch):
-    """Redirect lore_db STORIES_DIR to tmp_path."""
+    """Redirect lore_db STORIES_DIR and STORY_DESIGN_DIR to tmp_path."""
     stories_dir = tmp_path / "stories"
     stories_dir.mkdir()
+    design_dir = tmp_path / "story_design"
+    design_dir.mkdir()
     monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
     # Clear embedding cache
     lore_db._embedding_cache.clear()
     return stories_dir
@@ -32,8 +35,11 @@ def story_id():
 @pytest.fixture
 def setup_lore(tmp_path, story_id):
     """Create a story dir with world_lore.json and build the index."""
+    # lore.db goes in stories dir (runtime), world_lore.json in design dir
     story_path = tmp_path / "stories" / story_id
     story_path.mkdir(parents=True)
+    design_path = tmp_path / "story_design" / story_id
+    design_path.mkdir(parents=True, exist_ok=True)
 
     lore_entries = [
         {
@@ -78,7 +84,7 @@ def setup_lore(tmp_path, story_id):
         },
     ]
 
-    (story_path / "world_lore.json").write_text(
+    (design_path / "world_lore.json").write_text(
         json.dumps(lore_entries, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
@@ -125,13 +131,13 @@ class TestRebuildIndex:
         assert stats["total"] == 8
 
     def test_skips_placeholder_entries(self, tmp_path, story_id):
-        story_path = tmp_path / "stories" / story_id
-        story_path.mkdir(parents=True, exist_ok=True)
+        design_path = tmp_path / "story_design" / story_id
+        design_path.mkdir(parents=True, exist_ok=True)
         entries = [
             {"category": "A", "topic": "Real", "content": "真實內容"},
             {"category": "A", "topic": "Placeholder", "content": "（待建立）這個還沒寫"},
         ]
-        (story_path / "world_lore.json").write_text(
+        (design_path / "world_lore.json").write_text(
             json.dumps(entries, ensure_ascii=False), encoding="utf-8"
         )
         lore_db.rebuild_index(story_id)
@@ -143,11 +149,11 @@ class TestRebuildIndex:
         assert lore_db.get_embedding_stats(story_id)["total"] == 8
 
         # Rewrite with fewer entries
-        story_path = tmp_path / "stories" / story_id
+        design_path = tmp_path / "story_design" / story_id
         entries = [
             {"category": "體系", "topic": "基因鎖", "content": "更新後的內容"},
         ]
-        (story_path / "world_lore.json").write_text(
+        (design_path / "world_lore.json").write_text(
             json.dumps(entries, ensure_ascii=False), encoding="utf-8"
         )
         lore_db.rebuild_index(story_id)

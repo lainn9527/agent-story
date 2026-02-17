@@ -56,8 +56,11 @@ CATEGORY_REMAP = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+STORY_DESIGN_DIR = os.path.join(PROJECT_ROOT, "story_design")
+
+
 def _lore_path(story_id: str) -> str:
-    return os.path.join(PROJECT_ROOT, "data", "stories", story_id, "world_lore.json")
+    return os.path.join(STORY_DESIGN_DIR, story_id, "world_lore.json")
 
 
 def _load_lore(story_id: str) -> list[dict]:

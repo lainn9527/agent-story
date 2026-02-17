@@ -21,13 +21,17 @@ def patch_app_paths(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     stories_dir = data_dir / "stories"
     stories_dir.mkdir(parents=True)
+    design_dir = tmp_path / "story_design"
+    design_dir.mkdir()
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(app_module, "DATA_DIR", str(data_dir))
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "STORIES_REGISTRY_PATH", str(data_dir / "stories.json"))
     monkeypatch.setattr(app_module, "_LLM_CONFIG_PATH", str(tmp_path / "llm_config.json"))
     monkeypatch.setattr(event_db, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
     lore_db._embedding_cache.clear()
     return stories_dir
 
@@ -53,6 +57,10 @@ def setup_story(tmp_path, story_id):
     branch_dir = story_dir / "branches" / "main"
     branch_dir.mkdir(parents=True, exist_ok=True)
 
+    # Design files directory
+    design_dir = tmp_path / "story_design" / story_id
+    design_dir.mkdir(parents=True, exist_ok=True)
+
     # Stories registry (dict keyed by story_id)
     registry = {
         "active_story_id": story_id,
@@ -69,20 +77,20 @@ def setup_story(tmp_path, story_id):
         json.dumps(registry, ensure_ascii=False), encoding="utf-8"
     )
 
-    # System prompt
-    (story_dir / "system_prompt.txt").write_text(
+    # Design files → story_design/
+    (design_dir / "system_prompt.txt").write_text(
         "你是GM。\n{character_state}\n{narrative_recap}\n"
         "{world_lore}\n{npc_profiles}\n{team_rules}\n{other_agents}\n{critical_facts}",
         encoding="utf-8",
     )
 
-    # Character state
+    # Character state (runtime)
     state = {"name": "測試者", "current_phase": "主神空間", "reward_points": 5000, "inventory": []}
     (branch_dir / "character_state.json").write_text(
         json.dumps(state, ensure_ascii=False), encoding="utf-8"
     )
 
-    # Character schema
+    # Character schema → story_design/
     schema = {
         "fields": [
             {"key": "name", "label": "姓名"},
@@ -95,14 +103,14 @@ def setup_story(tmp_path, story_id):
         ],
         "direct_overwrite_keys": ["current_phase"],
     }
-    (story_dir / "character_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    (design_dir / "character_schema.json").write_text(json.dumps(schema), encoding="utf-8")
 
-    # Default character state
-    (story_dir / "default_character_state.json").write_text(
+    # Default character state → story_design/
+    (design_dir / "default_character_state.json").write_text(
         json.dumps(state, ensure_ascii=False), encoding="utf-8"
     )
 
-    # Timeline tree
+    # Timeline tree (runtime)
     tree = {
         "active_branch_id": "main",
         "branches": {
@@ -116,27 +124,27 @@ def setup_story(tmp_path, story_id):
     }
     (story_dir / "timeline_tree.json").write_text(json.dumps(tree), encoding="utf-8")
 
-    # World lore
-    (story_dir / "world_lore.json").write_text("[]", encoding="utf-8")
+    # World lore → story_design/
+    (design_dir / "world_lore.json").write_text("[]", encoding="utf-8")
 
-    # Parsed conversation (base messages)
+    # Parsed conversation → story_design/
     parsed = [
         {"index": 0, "role": "user", "content": "你好"},
         {"index": 1, "role": "assistant", "content": "歡迎來到主神空間"},
         {"index": 2, "role": "user", "content": "開始任務"},
         {"index": 3, "role": "assistant", "content": "任務開始了"},
     ]
-    (story_dir / "parsed_conversation.json").write_text(
+    (design_dir / "parsed_conversation.json").write_text(
         json.dumps(parsed, ensure_ascii=False), encoding="utf-8"
     )
 
-    # Branch messages
+    # Branch messages (runtime)
     (branch_dir / "messages.json").write_text("[]", encoding="utf-8")
 
-    # NPCs
+    # NPCs (runtime)
     (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
 
-    # Branch config
+    # Branch config (runtime)
     (branch_dir / "branch_config.json").write_text("{}", encoding="utf-8")
 
     # LLM config (for /api/config)

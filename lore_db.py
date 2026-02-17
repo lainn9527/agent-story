@@ -18,6 +18,7 @@ log = logging.getLogger("rpg")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
+STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
 
 _TAG_RE = re.compile(r"\[tag:\s*([^\]]+)\]")
 _INLINE_META_RE = re.compile(r"\s*\[(?:tag|source):\s*[^\]]*\]")
@@ -32,7 +33,7 @@ def _db_path(story_id: str) -> str:
 
 
 def _lore_json_path(story_id: str) -> str:
-    return os.path.join(STORIES_DIR, story_id, "world_lore.json")
+    return os.path.join(STORY_DESIGN_DIR, story_id, "world_lore.json")
 
 
 def _get_conn(story_id: str) -> sqlite3.Connection:
