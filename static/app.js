@@ -2825,6 +2825,10 @@ function renderEventsPanel(events) {
 // Dungeon Progress Panel
 // ---------------------------------------------------------------------------
 
+// FE-M1: module-level whitelist constants (not re-created on each render)
+const VALID_NODE_STATUSES = new Set(["completed", "active", "locked"]);
+const VALID_AREA_TYPES = new Set(["mainline", "side"]);
+
 async function loadDungeonProgress() {
   // FE-M4: capture branch at start to avoid stale render after branch switch
   const branchAtLoad = currentBranchId;
@@ -2847,10 +2851,6 @@ function renderDungeonPanel(data) {
   }
 
   section.style.display = "block";
-
-  // FE-M1: whitelist for class injection
-  const validNodeStatuses = new Set(["completed", "active", "locked"]);
-  const validAreaTypes = new Set(["mainline", "side"]);
 
   // Exit button
   exitBtn.style.display = "inline-block";
@@ -2886,7 +2886,7 @@ function renderDungeonPanel(data) {
   nodesContainer.innerHTML = data.mainline_nodes.map(node => {
     const iconMap = { completed: "✓", active: "◉", locked: "○" };
     // FE-M1: whitelist node status class
-    const safeStatus = validNodeStatuses.has(node.status) ? node.status : "locked";
+    const safeStatus = VALID_NODE_STATUSES.has(node.status) ? node.status : "locked";
     return `
       <div class="dungeon-node ${safeStatus}">
         <div class="dungeon-node-icon">${iconMap[safeStatus] || "○"}</div>
@@ -2903,7 +2903,7 @@ function renderDungeonPanel(data) {
   areasContainer.innerHTML = data.map_areas.map(area => {
     const badgeMap = { mainline: "主", side: "支" };
     // FE-M1: whitelist area type class
-    const safeType = validAreaTypes.has(area.type) ? area.type : "side";
+    const safeType = VALID_AREA_TYPES.has(area.type) ? area.type : "side";
     return `
       <div class="dungeon-area ${safeType}">
         <div class="dungeon-area-badge">${badgeMap[safeType] || "?"}</div>
@@ -3748,9 +3748,8 @@ async function sendMessage() {
         updateWorldDayDisplay(status.world_day);
         loadNpcs();
         loadEvents();
-        loadDungeonProgress();
-
-        // UX-C2: show "updating" hint in dungeon panel while async extraction runs
+        // UX-C2: show hint BEFORE loadDungeonProgress so it's visible while async extraction runs;
+        // renderDungeonPanel will hide it when the fresh data arrives
         {
           const dungeonSection = document.getElementById("dungeon-section");
           if (dungeonSection && dungeonSection.style.display !== "none") {
@@ -3758,6 +3757,7 @@ async function sendMessage() {
             if (hint) hint.style.display = "block";
           }
         }
+        loadDungeonProgress();
 
         // Poll for background tag extraction updates (state, NPCs, events)
         // Extraction runs async and may take 10-30s depending on LLM provider

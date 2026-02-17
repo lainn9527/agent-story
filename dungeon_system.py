@@ -195,8 +195,8 @@ def initialize_dungeon_progress(story_id: str, branch_id: str, dungeon_id: str):
         "discovered_areas": initial_areas,
         "explored_areas": {aid: 0 for aid in initial_areas},
         "rank_on_enter": state.get("等級", "E"),
-        "gene_lock_on_enter": state.get("基因鎖", "未開啟"),
-        "reward_points_on_enter": state.get("獎勵點數", 0),
+        "gene_lock_on_enter": state.get("gene_lock", "未開啟"),
+        "reward_points_on_enter": state.get("reward_points", 0),
         "growth_budget": {
             "max_rank_progress": template["progression_rules"]["rank_progress"],
             "consumed_rank_progress": 0,
@@ -229,8 +229,8 @@ def archive_current_dungeon(story_id: str, branch_id: str, exit_reason: str = "n
         "rank_before": current.get("rank_on_enter", "E"),
         "rank_after": state.get("等級", "E"),
         "gene_lock_before": current.get("gene_lock_on_enter", "未開啟"),
-        "gene_lock_after": state.get("基因鎖", "未開啟"),
-        "reward_points_earned": state.get("獎勵點數", 0) - current.get("reward_points_on_enter", 0),
+        "gene_lock_after": state.get("gene_lock", "未開啟"),
+        "reward_points_earned": state.get("reward_points", 0) - current.get("reward_points_on_enter", 0),
         "completed_nodes": current.get("completed_nodes", [])
     }
 
@@ -370,8 +370,8 @@ def validate_dungeon_progression(story_id: str, branch_id: str, new_state: dict,
                 growth["consumed_rank_progress"] = consumed_rank + rank_gain
 
         # Validate gene lock growth
-        old_gene_lock = _parse_gene_lock_percentage(old_state.get("基因鎖", "未開啟"))
-        new_gene_lock = _parse_gene_lock_percentage(new_state.get("基因鎖", "未開啟"))
+        old_gene_lock = _parse_gene_lock_percentage(old_state.get("gene_lock", "未開啟"))
+        new_gene_lock = _parse_gene_lock_percentage(new_state.get("gene_lock", "未開啟"))
         gene_gain = new_gene_lock - old_gene_lock
 
         if gene_gain > 0:
@@ -380,7 +380,7 @@ def validate_dungeon_progression(story_id: str, branch_id: str, new_state: dict,
             remaining_budget = max_gene - consumed_gene
             if gene_gain > remaining_budget:
                 log.warning(f"Gene lock gain {gene_gain}% exceeds budget {remaining_budget}%, capping")
-                new_state["基因鎖"] = _format_gene_lock(old_gene_lock + remaining_budget)
+                new_state["gene_lock"] = _format_gene_lock(old_gene_lock + remaining_budget)
                 growth["consumed_gene_lock"] = max_gene
             else:
                 growth["consumed_gene_lock"] = consumed_gene + gene_gain
