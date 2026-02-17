@@ -4170,17 +4170,18 @@ def api_lore_entry_update():
 
 @app.route("/api/lore/entry", methods=["DELETE"])
 def api_lore_entry_delete():
-    """Delete a lore entry by topic."""
+    """Delete a lore entry by (subcategory, topic)."""
     story_id = _active_story_id()
     body = request.get_json(force=True)
     topic = body.get("topic", "").strip()
+    subcategory = body.get("subcategory", "").strip()
     if not topic:
         return jsonify({"ok": False, "error": "topic required"}), 400
 
     lock = get_lore_lock(story_id)
     with lock:
         lore = _load_lore(story_id)
-        new_lore = [e for e in lore if e.get("topic") != topic]
+        new_lore = [e for e in lore if not (e.get("topic") == topic and e.get("subcategory", "") == subcategory)]
         if len(new_lore) == len(lore):
             return jsonify({"ok": False, "error": "entry not found"}), 404
         _save_json(_story_lore_path(story_id), new_lore)
@@ -4194,16 +4195,17 @@ def api_lore_entry_delete():
 
 @app.route("/api/lore/branch/entry", methods=["DELETE"])
 def api_branch_lore_entry_delete():
-    """Delete a branch lore entry by topic."""
+    """Delete a branch lore entry by (subcategory, topic)."""
     story_id = _active_story_id()
     body = request.get_json(force=True)
     topic = body.get("topic", "").strip()
+    subcategory = body.get("subcategory", "").strip()
     branch_id = body.get("branch_id", "")
     if not topic or not branch_id:
         return jsonify({"ok": False, "error": "topic and branch_id required"}), 400
 
     lore = _load_branch_lore(story_id, branch_id)
-    new_lore = [e for e in lore if e.get("topic") != topic]
+    new_lore = [e for e in lore if not (e.get("topic") == topic and e.get("subcategory", "") == subcategory)]
     if len(new_lore) == len(lore):
         return jsonify({"ok": False, "error": "entry not found"}), 404
     _save_branch_lore(story_id, branch_id, new_lore)
