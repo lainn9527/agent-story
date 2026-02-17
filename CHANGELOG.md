@@ -5,6 +5,22 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.5] - 2026-02-17
+
+### Fixed
+- **Inventory dedup**: removal now matches by base name (strips parenthetical status, quantity suffixes, dash descriptions) — fixes items like `大日金烏劍·空燼 (穩定度提升)` being unmatchable for removal ([#93])
+- **Remove-before-add ordering**: paired `inventory_remove` + `inventory_add` updates now process removal first, preventing the new item from being nuked by base-name matching ([#93])
+- **Garbage key filtering**: LLM intermediate instruction keys (`inventory_use`, `skill_update`, etc.) no longer leak into character state as top-level fields ([#93])
+
+### Changed
+- **Extraction prompt**: now includes current inventory/abilities list so LLM can properly pair `_remove` + `_add` for item status changes (root cause of duplicate sword entries) ([#93])
+- **Lore extraction exclusion**: character-specific abilities/skills no longer extracted as world lore — redirected to character state instead ([#93])
+
+### Added
+- **Abilities schema field**: auto-migration adds `abilities` (功法與技能) list to `character_schema.json` and `default_character_state.json` on startup ([#93])
+
+[#93]: https://github.com/lainn9527/agent-story/pull/93
+
 ## [0.16.4] - 2026-02-16
 
 ### Changed
