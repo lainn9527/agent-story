@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-02-17
+
+### Fixed
+- **Dice proportional consequences**: GM now scales failure severity proportional to action risk — low-risk actions (casual chat, simple interactions) only result in minor setbacks, not catastrophic relationship-breaking outcomes ([#96])
+
+[#96]: https://github.com/lainn9527/agent-story/pull/96
+
 ## [0.17.0] - 2026-02-17
 
 ### Changed
