@@ -51,11 +51,13 @@ def _get_conn(story_id: str) -> sqlite3.Connection:
 def _ensure_tables(conn: sqlite3.Connection):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS lore (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            category  TEXT NOT NULL,
-            topic     TEXT NOT NULL UNIQUE,
-            content   TEXT NOT NULL,
-            tags      TEXT NOT NULL DEFAULT ''
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            category     TEXT NOT NULL,
+            subcategory  TEXT NOT NULL DEFAULT '',
+            topic        TEXT NOT NULL,
+            content      TEXT NOT NULL,
+            tags         TEXT NOT NULL DEFAULT '',
+            UNIQUE(subcategory, topic)
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS lore_fts USING fts5(
@@ -83,11 +85,101 @@ def _ensure_tables(conn: sqlite3.Connection):
         END;
     """)
     # Safe migration: add columns if not yet present
-    for col, typ in [("embedding", "BLOB"), ("text_hash", "TEXT"), ("subcategory", "TEXT DEFAULT ''")]:
+    for col, typ in [("embedding", "BLOB"), ("text_hash", "TEXT")]:
         try:
             conn.execute(f"ALTER TABLE lore ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # Migrate old schema: topic UNIQUE → UNIQUE(subcategory, topic)
+    # Detect old schema by trying to insert two rows with same topic but different subcategory
+    _migrate_composite_unique(conn)
+
+
+def _migrate_composite_unique(conn: sqlite3.Connection):
+    """Migrate old schema (topic UNIQUE) to new schema (UNIQUE(subcategory, topic)).
+
+    Detects old schema by checking table_info for the unique constraint structure.
+    If old schema detected, recreates table preserving all data including embeddings.
+    """
+    # Check if 'subcategory' column exists
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(lore)").fetchall()}
+    if "subcategory" not in cols:
+        # Very old schema without subcategory — add column first
+        try:
+            conn.execute("ALTER TABLE lore ADD COLUMN subcategory TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+
+    # Check if the old topic-only UNIQUE constraint is still in effect
+    # by examining the CREATE TABLE SQL
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='lore'"
+    ).fetchone()
+    if not row:
+        return
+    create_sql = row[0] or ""
+    # Old schema: "topic TEXT NOT NULL UNIQUE" (no composite)
+    # New schema: "UNIQUE(subcategory, topic)"
+    if "UNIQUE(subcategory,topic)" in create_sql.replace(" ", ""):
+        return  # already migrated
+
+    log.info("lore_db: migrating schema from topic UNIQUE to UNIQUE(subcategory, topic)")
+
+    # Recreate table with new schema, preserving embeddings
+    conn.executescript("""
+        DROP TRIGGER IF EXISTS lore_ai;
+        DROP TRIGGER IF EXISTS lore_ad;
+        DROP TRIGGER IF EXISTS lore_au;
+        DROP TABLE IF EXISTS lore_fts;
+
+        CREATE TABLE lore_new (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            category     TEXT NOT NULL,
+            subcategory  TEXT NOT NULL DEFAULT '',
+            topic        TEXT NOT NULL,
+            content      TEXT NOT NULL,
+            tags         TEXT NOT NULL DEFAULT '',
+            embedding    BLOB,
+            text_hash    TEXT,
+            UNIQUE(subcategory, topic)
+        );
+
+        INSERT OR IGNORE INTO lore_new (id, category, subcategory, topic, content, tags, embedding, text_hash)
+            SELECT id, category, COALESCE(subcategory, ''), topic, content, tags, embedding, text_hash FROM lore;
+
+        DROP TABLE lore;
+        ALTER TABLE lore_new RENAME TO lore;
+
+        CREATE VIRTUAL TABLE lore_fts USING fts5(
+            topic, content, category, tags,
+            content='lore',
+            content_rowid='id',
+            tokenize='trigram'
+        );
+
+        CREATE TRIGGER lore_ai AFTER INSERT ON lore BEGIN
+            INSERT INTO lore_fts(rowid, topic, content, category, tags)
+            VALUES (new.id, new.topic, new.content, new.category, new.tags);
+        END;
+
+        CREATE TRIGGER lore_ad AFTER DELETE ON lore BEGIN
+            INSERT INTO lore_fts(lore_fts, rowid, topic, content, category, tags)
+            VALUES ('delete', old.id, old.topic, old.content, old.category, old.tags);
+        END;
+
+        CREATE TRIGGER lore_au AFTER UPDATE ON lore BEGIN
+            INSERT INTO lore_fts(lore_fts, rowid, topic, content, category, tags)
+            VALUES ('delete', old.id, old.topic, old.content, old.category, old.tags);
+            INSERT INTO lore_fts(rowid, topic, content, category, tags)
+            VALUES (new.id, new.topic, new.content, new.category, new.tags);
+        END;
+    """)
+
+    # Rebuild FTS content from the new lore table
+    conn.execute("INSERT INTO lore_fts(lore_fts) VALUES('rebuild')")
+    conn.commit()
+    log.info("lore_db: schema migration complete")
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +284,8 @@ def rebuild_index(story_id: str):
     conn = _get_conn(story_id)
     _ensure_tables(conn)
 
-    # Track which topics are in the current JSON
-    current_topics = set()
+    # Track which (subcategory, topic) pairs are in the current JSON
+    current_keys = set()
 
     for entry in lore_entries:
         content = entry.get("content", "")
@@ -205,27 +297,27 @@ def rebuild_index(story_id: str):
         topic = entry.get("topic", "")
         if not topic:
             continue
-        current_topics.add(topic)
+        current_keys.add((entry.get("subcategory", ""), topic))
         text_hash = _compute_text_hash(topic, content)
         category = entry.get("category", "其他")
         subcategory = entry.get("subcategory", "")
         tags_str = ",".join(tags)
 
         existing = conn.execute(
-            "SELECT id, text_hash FROM lore WHERE topic = ?", (topic,)
+            "SELECT id, text_hash FROM lore WHERE subcategory = ? AND topic = ?", (subcategory, topic)
         ).fetchone()
         if existing:
             if existing["text_hash"] != text_hash:
                 # Content changed — update text, clear embedding for re-embed
                 conn.execute(
-                    "UPDATE lore SET category=?, subcategory=?, content=?, tags=?, text_hash=?, embedding=NULL WHERE topic=?",
-                    (category, subcategory, content, tags_str, text_hash, topic),
+                    "UPDATE lore SET category=?, content=?, tags=?, text_hash=?, embedding=NULL WHERE subcategory=? AND topic=?",
+                    (category, content, tags_str, text_hash, subcategory, topic),
                 )
             else:
                 # Content unchanged — update metadata only, keep embedding
                 conn.execute(
-                    "UPDATE lore SET category=?, subcategory=?, tags=? WHERE topic=?",
-                    (category, subcategory, tags_str, topic),
+                    "UPDATE lore SET category=?, tags=? WHERE subcategory=? AND topic=?",
+                    (category, tags_str, subcategory, topic),
                 )
         else:
             conn.execute(
@@ -234,10 +326,10 @@ def rebuild_index(story_id: str):
             )
 
     # Remove entries no longer in world_lore.json
-    all_topics = [r[0] for r in conn.execute("SELECT topic FROM lore").fetchall()]
-    for topic in all_topics:
-        if topic not in current_topics:
-            conn.execute("DELETE FROM lore WHERE topic = ?", (topic,))
+    all_keys = [(r[0], r[1]) for r in conn.execute("SELECT subcategory, topic FROM lore").fetchall()]
+    for sub, topic in all_keys:
+        if (sub, topic) not in current_keys:
+            conn.execute("DELETE FROM lore WHERE subcategory = ? AND topic = ?", (sub, topic))
 
     conn.commit()
     conn.close()
@@ -263,16 +355,18 @@ def upsert_entry(story_id: str, entry: dict):
         return
 
     new_hash = _compute_text_hash(topic, content)
-    existing = conn.execute("SELECT id, text_hash FROM lore WHERE topic = ?", (topic,)).fetchone()
+    subcategory = entry.get("subcategory", "")
+    existing = conn.execute(
+        "SELECT id, text_hash FROM lore WHERE subcategory = ? AND topic = ?", (subcategory, topic)
+    ).fetchone()
 
     hash_changed = True
-    subcategory = entry.get("subcategory", "")
     if existing:
         if existing["text_hash"] == new_hash:
             hash_changed = False
         conn.execute(
-            "UPDATE lore SET category=?, subcategory=?, content=?, tags=?, text_hash=? WHERE topic=?",
-            (entry.get("category", "其他"), subcategory, content, ",".join(tags), new_hash, topic),
+            "UPDATE lore SET category=?, content=?, tags=?, text_hash=? WHERE subcategory=? AND topic=?",
+            (entry.get("category", "其他"), content, ",".join(tags), new_hash, subcategory, topic),
         )
     else:
         conn.execute(
@@ -739,11 +833,11 @@ def get_toc(story_id: str) -> str:
     return "\n".join(lines).strip()
 
 
-def delete_entry(story_id: str, topic: str):
-    """Delete a lore entry from the search index by topic."""
+def delete_entry(story_id: str, topic: str, subcategory: str = ""):
+    """Delete a lore entry from the search index by (subcategory, topic)."""
     conn = _get_conn(story_id)
     _ensure_tables(conn)
-    conn.execute("DELETE FROM lore WHERE topic = ?", (topic,))
+    conn.execute("DELETE FROM lore WHERE subcategory = ? AND topic = ?", (subcategory, topic))
     conn.commit()
     conn.close()
     _invalidate_cache(story_id)

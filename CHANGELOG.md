@@ -8,7 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.20.4] - 2026-02-18
 
 ### Fixed
-- **Lore 刪除誤殺**: `DELETE /api/lore/entry` 只用 topic 比對，刪除「進擊的巨人/介紹」時會連帶刪除所有 topic 為「介紹」的條目（32 條遺失）；改為 (subcategory, topic) 聯合比對，前端同步傳送 subcategory ([#105])
+- **Lore 全面 (subcategory, topic) 聯合比對**: 修復所有 lore CRUD 操作只用 topic 比對的系統性問題，改為 (subcategory, topic) 聯合識別 ([#105])
+  - `DELETE /api/lore/entry` — 刪除「進擊的巨人/介紹」不再連帶刪除 32 條同名條目
+  - `DELETE /api/lore/branch/entry` — 同上，分支 lore 刪除
+  - `PUT /api/lore/entry` — 編輯時正確定位同 subcategory 的條目
+  - `_save_lore_entry()` — 連續採用兩個副本推薦不再互相覆蓋
+  - `_save_branch_lore_entry()` — 分支 lore 自動擷取不再覆蓋同 topic 條目
+  - `_merge_branch_lore_into()` — 分支合併時保留不同 subcategory 的同名條目
+  - `POST /api/lore/promote` — 提升分支知識到 base 時精確匹配
+  - `POST /api/lore/apply` delete action — chat 提案刪除精確匹配
+  - 前端 `updateEntry()`、`saveModal()`、promote 按鈕 — 傳送 subcategory
+- **lore.db 搜尋索引 schema 升級**: `topic UNIQUE` → `UNIQUE(subcategory, topic)` 複合唯一鍵，自動遷移舊 DB，保留 embeddings ([#105])
+  - `rebuild_index()`、`upsert_entry()`、`delete_entry()` 全面改用 (subcategory, topic) 查詢
 
 [#105]: https://github.com/lainn9527/agent-story/pull/105
 

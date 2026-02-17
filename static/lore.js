@@ -102,11 +102,11 @@
     return res.json();
   }
 
-  async function updateEntry(topic, updates) {
+  async function updateEntry(topic, subcategory, updates) {
     const res = await fetch("/api/lore/entry", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, ...updates }),
+      body: JSON.stringify({ topic, subcategory: subcategory || "", ...updates }),
     });
     return res.json();
   }
@@ -492,7 +492,7 @@
       }
       const updates = { category, subcategory, content };
       if (topic !== editingEntry.topic) updates.new_topic = topic;
-      const res = await updateEntry(editingEntry.topic, updates);
+      const res = await updateEntry(editingEntry.topic, editingEntry.subcategory, updates);
       if (!res.ok) {
         alert(res.error || "更新失敗");
         return;
@@ -678,6 +678,7 @@
         const body = {
           branch_id: activeBranchId,
           topic: proposal.topic,
+          subcategory: proposal.subcategory || "",
         };
         // For rewrite, send the rewritten content
         if (action === "rewrite" && proposal.rewritten_content) {
