@@ -493,9 +493,13 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
             lines.append(f"- 獎勵點餘額：{state['reward_points']} 點")
 
     # 4. Key inventory (top 5 items, name only)
-    inv = state.get("inventory", [])
+    inv = state.get("inventory", {})
     if inv:
-        item_names = [item.split("—")[0].split(" — ")[0].strip() for item in inv[:5]]
+        if isinstance(inv, dict):
+            item_names = list(inv.keys())[:5]
+        else:
+            # Legacy list format (pre-migration)
+            item_names = [item.split("—")[0].split(" — ")[0].strip() for item in inv[:5]]
         lines.append(f"- 關鍵道具：{'、'.join(item_names)}")
 
     # 5. NPC relationship matrix
