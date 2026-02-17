@@ -4937,8 +4937,8 @@ def api_dungeon_enter():
         return jsonify({"error": str(e)}), 500
 
     # Update character state
-    state["當前階段"] = "傳送中"
-    state["當前狀態"] = f"準備進入【{template['name']}】副本"
+    state["current_phase"] = "傳送中"
+    state["current_status"] = f"準備進入【{template['name']}】副本"
     _save_character_state(story_id, branch_id, state)
 
     # Advance world time (dungeon enter cost)
