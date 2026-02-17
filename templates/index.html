@@ -170,7 +170,11 @@
           <select id="model-select"></select>
         </div>
         <div class="config-field cheat-field">
-          <label>骰子必勝</label>
+          <label>命運走向</label>
+          <button id="fate-cheat-btn" class="cheat-toggle active" onclick="toggleFateMode()">ON</button>
+        </div>
+        <div class="config-field cheat-field">
+          <label>必勝模式</label>
           <button id="dice-cheat-btn" class="cheat-toggle" onclick="toggleDiceCheat()">OFF</button>
         </div>
       </div>
@@ -205,9 +209,13 @@
             </div>
           </div>
           <div class="addon-section">
-            <div class="addon-section-title">金手指</div>
+            <div class="addon-section-title">命運走向</div>
             <div class="addon-toggle-field">
-              <span>骰子必勝</span>
+              <span>啟用</span>
+              <button id="addon-fate-btn" class="cheat-toggle active" onclick="toggleFateMode()">ON</button>
+            </div>
+            <div class="addon-toggle-field">
+              <span>必勝模式</span>
               <button id="addon-dice-btn" class="cheat-toggle" onclick="toggleAddonDiceCheat()">OFF</button>
             </div>
           </div>

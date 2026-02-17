@@ -566,8 +566,18 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
         # Fallback to prompts.py template
         result = build_system_prompt(state_text, critical_facts=critical_facts, dungeon_context=dungeon_context)
 
-    # Pistol mode (手槍模式) — inject NSFW scene instructions
+    # Strip fate direction section when fate mode is off
     story_dir = _story_dir(story_id)
+    if not get_fate_mode(story_dir, branch_id):
+        # Remove the ## ⚠️ 命運走向系統 section (up to next ## heading)
+        result = re.sub(
+            r"## ⚠️ 命運走向系統.*?(?=## |\Z)",
+            "",
+            result,
+            flags=_re.DOTALL,
+        ).strip() + "\n"
+
+    # Pistol mode (手槍模式) — inject NSFW scene instructions
     if get_pistol_mode(story_dir, branch_id):
         pistol_block = (
             "\n\n## 親密場景指示（手槍模式已啟用）\n"

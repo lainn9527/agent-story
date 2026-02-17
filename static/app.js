@@ -3009,13 +3009,30 @@ async function loadConfigPanel() {
     console.error("loadConfigPanel error:", e);
   }
 
-  // Load dice cheat status
+  // Load fate mode + dice cheat status
+  loadFateModeStatus();
   loadDiceCheatStatus();
 }
 
 function updateCheatBadge(active) {
   const badge = document.getElementById("cheat-badge");
   if (badge) badge.classList.toggle("visible", active);
+}
+
+async function loadFateModeStatus() {
+  try {
+    const res = await fetch(`/api/cheats/fate?branch_id=${currentBranchId}`);
+    const data = await res.json();
+    const btn = document.getElementById("fate-cheat-btn");
+    if (btn) {
+      const active = data.fate_mode !== false;
+      btn.textContent = active ? "ON" : "OFF";
+      btn.classList.toggle("active", active);
+    }
+    updateAddonBtnIndicator();
+  } catch (e) {
+    console.error("loadFateModeStatus error:", e);
+  }
 }
 
 async function loadDiceCheatStatus() {
@@ -3058,6 +3075,29 @@ async function toggleDiceCheat() {
     updateAddonBtnIndicator();
   } catch (e) {
     console.error("toggleDiceCheat error:", e);
+  }
+}
+
+async function toggleFateMode() {
+  const addonBtn = document.getElementById("addon-fate-btn");
+  const drawerBtn = document.getElementById("fate-cheat-btn");
+  const current = addonBtn?.classList.contains("active") ?? drawerBtn?.classList.contains("active");
+  const newState = !current;
+  try {
+    await fetch("/api/cheats/fate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId, fate_mode: newState }),
+    });
+    for (const btn of [addonBtn, drawerBtn]) {
+      if (btn) {
+        btn.textContent = newState ? "ON" : "OFF";
+        btn.classList.toggle("active", newState);
+      }
+    }
+    updateAddonBtnIndicator();
+  } catch (e) {
+    console.error("toggleFateMode error:", e);
   }
 }
 
@@ -3180,6 +3220,20 @@ async function loadAddonPanelState() {
     }
   } catch (e) {
     console.error("loadAddonPanelState config error:", e);
+  }
+
+  // Load fate mode status
+  try {
+    const res = await fetch(`/api/cheats/fate?branch_id=${currentBranchId}`);
+    const data = await res.json();
+    const btn = document.getElementById("addon-fate-btn");
+    if (btn) {
+      const active = data.fate_mode !== false;
+      btn.textContent = active ? "ON" : "OFF";
+      btn.classList.toggle("active", active);
+    }
+  } catch (e) {
+    console.error("loadAddonPanelState fate error:", e);
   }
 
   // Load dice cheat status
