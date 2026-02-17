@@ -4147,8 +4147,9 @@ def api_lore_entry_update():
                         return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
                     delete_lore_entry(story_id, topic)
                 updated = {"category": new_category, "topic": new_topic, "content": new_content, "edited_by": "user"}
-                if e.get("subcategory"):
-                    updated["subcategory"] = e["subcategory"]
+                new_subcategory = body.get("subcategory", e.get("subcategory", "")).strip()
+                if new_subcategory:
+                    updated["subcategory"] = new_subcategory
                 if "source" in e:
                     updated["source"] = e["source"]
                 lore[i] = updated

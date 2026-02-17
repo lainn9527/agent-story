@@ -33,6 +33,7 @@
   const $modal = document.getElementById("edit-modal");
   const $modalTitle = document.getElementById("modal-title");
   const $modalCategory = document.getElementById("modal-category");
+  const $modalSubcategory = document.getElementById("modal-subcategory");
   const $modalTopic = document.getElementById("modal-topic");
   const $modalContent = document.getElementById("modal-content");
   const $modalSave = document.getElementById("modal-save");
@@ -432,6 +433,7 @@
       $modalTitle.textContent = entry.layer === "branch" ? "編輯分支設定" : "編輯設定";
       $modalDelete.style.display = "";
       populateCategoryDropdown(entry.category);
+      $modalSubcategory.value = entry.subcategory || "";
       $modalTopic.value = entry.topic;
       $modalContent.value = entry.content || "";
 
@@ -459,6 +461,7 @@
       $modalTitle.textContent = "新增設定";
       $modalDelete.style.display = "none";
       populateCategoryDropdown(categories[0] || "其他");
+      $modalSubcategory.value = "";
       $modalTopic.value = "";
       $modalContent.value = "";
     }
@@ -473,6 +476,7 @@
 
   async function saveModal() {
     const category = $modalCategory.value;
+    const subcategory = $modalSubcategory.value.trim();
     const topic = $modalTopic.value.trim();
     const content = $modalContent.value.trim();
     if (!topic) {
@@ -486,7 +490,7 @@
         alert("分支設定無法直接編輯。請使用「審核提升」功能。");
         return;
       }
-      const updates = { category, content };
+      const updates = { category, subcategory, content };
       if (topic !== editingEntry.topic) updates.new_topic = topic;
       const res = await updateEntry(editingEntry.topic, updates);
       if (!res.ok) {
@@ -494,7 +498,7 @@
         return;
       }
     } else {
-      const res = await createEntry({ category, topic, content });
+      const res = await createEntry({ category, subcategory, topic, content });
       if (!res.ok) {
         alert(res.error || "新增失敗");
         return;
