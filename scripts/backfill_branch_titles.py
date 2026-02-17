@@ -28,6 +28,7 @@ logging.basicConfig(
 log = logging.getLogger("backfill_titles")
 
 STORIES_DIR = os.path.join(PROJECT_ROOT, "data", "stories")
+STORY_DESIGN_DIR = os.path.join(PROJECT_ROOT, "story_design")
 
 
 def _load_json(path, default=None):
@@ -88,7 +89,7 @@ def backfill_story(story_id: str, dry_run: bool = False):
 
         if not gm_msgs:
             # Try parsed_conversation for main-line branches
-            parsed_path = os.path.join(story_dir, "parsed_conversation.json")
+            parsed_path = os.path.join(STORY_DESIGN_DIR, story_id, "parsed_conversation.json")
             parsed = _load_json(parsed_path, [])
             gm_msgs = [m.get("content", "") for m in parsed if m.get("role") == "gm" and m.get("content")]
             if not gm_msgs:

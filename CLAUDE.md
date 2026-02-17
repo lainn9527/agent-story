@@ -35,27 +35,32 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 
 ## Data Layout
 ```
-data/
-  stories.json                          # Story registry with active_story_id
+story_design/<story_id>/                  # Design files (tracked in git)
+  system_prompt.txt                       # GM system prompt with placeholders
+  character_schema.json                   # Schema-driven character panel config
+  default_character_state.json            # Initial character state
+  world_lore.json                         # World lore entries (curated)
+  parsed_conversation.json                # Immutable original messages
+  nsfw_preferences.json                   # Story-level preferences
+
+data/                                     # Runtime data (gitignored)
+  stories.json                            # Story registry with active_story_id
   stories/<story_id>/
-    system_prompt.txt                   # GM system prompt with placeholders
-    character_schema.json               # Schema-driven character panel config
-    default_character_state.json        # Initial character state
-    parsed_conversation.json            # Immutable original messages
-    timeline_tree.json                  # Branch tree + session IDs
-    messages_<branch_id>.json           # Per-branch delta messages
-    character_state_<branch_id>.json    # Per-branch character state
-    world_lore.json                     # 41 world lore entries
-    lore.db                             # SQLite lore search index
-    npcs.json                           # NPC profiles with Big5 personality
-    events.db                           # SQLite event tracking
-    usage.db                            # SQLite token/cost tracking
-    npc_activities_<branch_id>.json     # Background NPC activity logs
-    auto_play_state.json                # Auto-play progress (auto_ branches only)
+    timeline_tree.json                    # Branch tree + session IDs
+    lore.db                               # SQLite lore search index
+    events.db                             # SQLite event tracking
+    usage.db                              # SQLite token/cost tracking
+    lore_organizer_state.json             # Lore organizer background state
     branches/<branch_id>/
-      world_day.json                    # Per-branch world day/time {day, hour}
-    images/                             # Generated scene images
-  auto_play_characters/                 # Character JSON files for auto-play
+      messages.json                       # Per-branch delta messages
+      character_state.json                # Per-branch character state
+      npcs.json                           # NPC profiles with Big5 personality
+      npc_activities.json                 # Background NPC activity logs
+      branch_lore.json                    # Per-branch auto-extracted lore
+      world_day.json                      # Per-branch world day/time {day, hour}
+      conversation_recap.json             # Rolling narrative recap
+    images/                               # Generated scene images
+  auto_play_characters/                   # Character JSON files for auto-play
 ```
 
 ## Multi-Story System

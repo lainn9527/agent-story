@@ -62,10 +62,13 @@ INITIAL_STATE = {
 
 @pytest.fixture(autouse=True)
 def patch_app_paths(tmp_path, monkeypatch):
-    """Redirect app.py's STORIES_DIR to tmp_path."""
+    """Redirect app.py's STORIES_DIR and STORY_DESIGN_DIR to tmp_path."""
     stories_dir = tmp_path / "data" / "stories"
     stories_dir.mkdir(parents=True)
+    design_dir = tmp_path / "story_design"
+    design_dir.mkdir()
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
     return stories_dir
 

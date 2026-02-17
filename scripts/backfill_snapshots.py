@@ -37,6 +37,7 @@ logging.basicConfig(
 log = logging.getLogger("backfill_snapshots")
 
 STORIES_DIR = os.path.join(PROJECT_ROOT, "data", "stories")
+STORY_DESIGN_DIR = os.path.join(PROJECT_ROOT, "story_design")
 
 
 def _load_json(path, default=None):
@@ -138,7 +139,7 @@ def process_branch(story_id, branch_id, dry_run=False):
 
 def process_parsed_conversation(story_id, dry_run=False):
     """Backfill snapshots for a story's parsed_conversation.json (main branch messages)."""
-    path = os.path.join(STORIES_DIR, story_id, "parsed_conversation.json")
+    path = os.path.join(STORY_DESIGN_DIR, story_id, "parsed_conversation.json")
     if not os.path.exists(path):
         return 0
 

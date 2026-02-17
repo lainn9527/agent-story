@@ -18,7 +18,10 @@ def patch_app_paths(tmp_path, monkeypatch):
     """Redirect app paths to tmp_path."""
     stories_dir = tmp_path / "data" / "stories"
     stories_dir.mkdir(parents=True)
+    design_dir = tmp_path / "story_design"
+    design_dir.mkdir()
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
     return stories_dir
 
@@ -36,7 +39,11 @@ def setup_story(tmp_path, story_id):
     branch_dir = story_dir / "branches" / "main"
     branch_dir.mkdir(parents=True, exist_ok=True)
 
-    # System prompt
+    # Design files directory
+    design_dir = tmp_path / "story_design" / story_id
+    design_dir.mkdir(parents=True, exist_ok=True)
+
+    # Design files → story_design/
     prompt = (
         "你是GM。\n"
         "## 角色狀態\n{character_state}\n"
@@ -47,9 +54,9 @@ def setup_story(tmp_path, story_id):
         "## 其他\n{other_agents}\n"
         "## 關鍵事實\n{critical_facts}\n"
     )
-    (story_dir / "system_prompt.txt").write_text(prompt, encoding="utf-8")
+    (design_dir / "system_prompt.txt").write_text(prompt, encoding="utf-8")
 
-    # Timeline tree
+    # Timeline tree (runtime)
     (story_dir / "timeline_tree.json").write_text(json.dumps({
         "active_branch_id": "main",
         "branches": {
@@ -57,27 +64,27 @@ def setup_story(tmp_path, story_id):
         },
     }), encoding="utf-8")
 
-    # Character state
+    # Character state (runtime)
     state = {"name": "測試者", "current_phase": "主神空間", "reward_points": 5000}
     (branch_dir / "character_state.json").write_text(
         json.dumps(state, ensure_ascii=False), encoding="utf-8"
     )
 
-    # Character schema
-    (story_dir / "character_schema.json").write_text(json.dumps({
+    # Character schema → story_design/
+    (design_dir / "character_schema.json").write_text(json.dumps({
         "fields": [{"key": "name"}, {"key": "current_phase"}, {"key": "reward_points"}],
         "lists": [],
         "direct_overwrite_keys": [],
     }), encoding="utf-8")
 
-    # NPCs
+    # NPCs (runtime)
     (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
 
-    # Branch config
+    # Branch config (runtime)
     (branch_dir / "branch_config.json").write_text(json.dumps({}), encoding="utf-8")
 
-    # World lore
-    (story_dir / "world_lore.json").write_text("[]", encoding="utf-8")
+    # World lore → story_design/
+    (design_dir / "world_lore.json").write_text("[]", encoding="utf-8")
 
     return story_dir
 

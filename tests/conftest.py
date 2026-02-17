@@ -140,28 +140,35 @@ def story_dir(tmp_path):
 
     Returns (stories_dir, story_id) — stories_dir is the parent that modules
     can use as STORIES_DIR.
+
+    Design files (system_prompt, schema, lore, etc.) are written to
+    story_design/<story_id>/ matching the production layout.
     """
     stories_dir = tmp_path / "data" / "stories"
     story_path = stories_dir / SAMPLE_STORY_ID
     story_path.mkdir(parents=True)
 
+    # Design files directory
+    design_path = tmp_path / "story_design" / SAMPLE_STORY_ID
+    design_path.mkdir(parents=True)
+
     # branches/main
     main_branch = story_path / "branches" / "main"
     main_branch.mkdir(parents=True)
 
-    # Write sample files
-    (story_path / "system_prompt.txt").write_text(SAMPLE_SYSTEM_PROMPT, encoding="utf-8")
-    (story_path / "character_schema.json").write_text(
+    # Write design files to story_design/
+    (design_path / "system_prompt.txt").write_text(SAMPLE_SYSTEM_PROMPT, encoding="utf-8")
+    (design_path / "character_schema.json").write_text(
         json.dumps(SAMPLE_CHARACTER_SCHEMA, ensure_ascii=False), encoding="utf-8"
     )
-    (story_path / "default_character_state.json").write_text(
+    (design_path / "default_character_state.json").write_text(
         json.dumps(SAMPLE_CHARACTER_STATE, ensure_ascii=False), encoding="utf-8"
     )
-    (story_path / "world_lore.json").write_text(
+    (design_path / "world_lore.json").write_text(
         json.dumps(SAMPLE_LORE_ENTRIES, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    # Per-branch files
+    # Per-branch files (runtime data stays in data/stories/)
     (main_branch / "messages.json").write_text("[]", encoding="utf-8")
     (main_branch / "character_state.json").write_text(
         json.dumps(SAMPLE_CHARACTER_STATE, ensure_ascii=False), encoding="utf-8"

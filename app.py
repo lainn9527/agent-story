@@ -79,6 +79,7 @@ from gm_cheats import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
+STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
 STORIES_REGISTRY_PATH = os.path.join(DATA_DIR, "stories.json")
 
 # Legacy paths — used only during migration
@@ -200,12 +201,16 @@ def _story_dir(story_id: str) -> str:
     return os.path.join(STORIES_DIR, story_id)
 
 
+def _story_design_dir(story_id: str) -> str:
+    return os.path.join(STORY_DESIGN_DIR, story_id)
+
+
 def _story_tree_path(story_id: str) -> str:
     return os.path.join(_story_dir(story_id), "timeline_tree.json")
 
 
 def _story_parsed_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "parsed_conversation.json")
+    return os.path.join(_story_design_dir(story_id), "parsed_conversation.json")
 
 
 def _branch_dir(story_id: str, branch_id: str) -> str:
@@ -223,7 +228,7 @@ def _story_character_state_path(story_id: str, branch_id: str) -> str:
 
 
 def _nsfw_preferences_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "nsfw_preferences.json")
+    return os.path.join(_story_design_dir(story_id), "nsfw_preferences.json")
 
 
 def _load_nsfw_preferences(story_id: str) -> dict:
@@ -268,7 +273,7 @@ def _format_nsfw_preferences(prefs: dict) -> str:
 
 
 def _story_system_prompt_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "system_prompt.txt")
+    return os.path.join(_story_design_dir(story_id), "system_prompt.txt")
 
 
 def _branch_config_path(story_id: str, branch_id: str) -> str:
@@ -284,11 +289,11 @@ def _save_branch_config(story_id: str, branch_id: str, config: dict):
 
 
 def _story_character_schema_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "character_schema.json")
+    return os.path.join(_story_design_dir(story_id), "character_schema.json")
 
 
 def _story_default_character_state_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "default_character_state.json")
+    return os.path.join(_story_design_dir(story_id), "default_character_state.json")
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +742,7 @@ def _build_npc_text(story_id: str, branch_id: str = "main") -> str:
 
 
 def _story_lore_path(story_id: str) -> str:
-    return os.path.join(_story_dir(story_id), "world_lore.json")
+    return os.path.join(_story_design_dir(story_id), "world_lore.json")
 
 
 def _story_saves_path(story_id: str) -> str:
@@ -1953,18 +1958,49 @@ def _migrate_schema_abilities(story_id: str):
             "state_remove_key": "abilities_remove",
         })
         schema["lists"] = lists
-        schema_path = os.path.join(_story_dir(story_id), "character_schema.json")
+        schema_path = _story_character_schema_path(story_id)
         _save_json(schema_path, schema)
         log.info("Migrated character_schema.json: added 'abilities' list for story %s", story_id)
 
     # --- default_character_state.json ---
-    default_path = os.path.join(_story_dir(story_id), "default_character_state.json")
+    default_path = _story_default_character_state_path(story_id)
     if os.path.exists(default_path):
         default_state = _load_json(default_path, {})
         if "abilities" not in default_state:
             default_state["abilities"] = []
             _save_json(default_path, default_state)
             log.info("Migrated default_character_state.json: added 'abilities' for story %s", story_id)
+
+
+def _migrate_design_files(story_id: str):
+    """One-time migration: copy design files from data/stories/<id>/ to story_design/<id>/.
+
+    Copies files only if they exist in the old location but not in the new one.
+    The old copies in data/ become inert (no longer read by code).
+    """
+    design_dir = _story_design_dir(story_id)
+    old_dir = _story_dir(story_id)
+
+    DESIGN_FILES = [
+        "system_prompt.txt",
+        "character_schema.json",
+        "default_character_state.json",
+        "world_lore.json",
+        "parsed_conversation.json",
+        "nsfw_preferences.json",
+    ]
+
+    migrated = False
+    for fname in DESIGN_FILES:
+        old_path = os.path.join(old_dir, fname)
+        new_path = os.path.join(design_dir, fname)
+        if os.path.exists(old_path) and not os.path.exists(new_path):
+            os.makedirs(design_dir, exist_ok=True)
+            shutil.copy2(old_path, new_path)
+            migrated = True
+
+    if migrated:
+        log.info("Migrated design files to story_design/ for story %s", story_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2187,6 +2223,9 @@ def api_init():
 
     # 3c. Schema migration: add abilities field
     _migrate_schema_abilities(story_id)
+
+    # 3d. Design files migration (data/stories/ → story_design/)
+    _migrate_design_files(story_id)
 
     tree = _load_tree(story_id)
 
@@ -4663,10 +4702,10 @@ def api_nsfw_preferences_set():
 
 def _init_lore_indexes():
     """Rebuild lore search indexes for all stories on startup."""
-    if not os.path.exists(STORIES_DIR):
+    if not os.path.exists(STORY_DESIGN_DIR):
         return
-    for story_dir_name in os.listdir(STORIES_DIR):
-        lore_path = os.path.join(STORIES_DIR, story_dir_name, "world_lore.json")
+    for story_dir_name in os.listdir(STORY_DESIGN_DIR):
+        lore_path = os.path.join(STORY_DESIGN_DIR, story_dir_name, "world_lore.json")
         if os.path.exists(lore_path):
             rebuild_lore_index(story_dir_name)
 

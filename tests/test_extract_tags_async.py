@@ -28,10 +28,14 @@ def patch_all_paths(tmp_path, monkeypatch):
     """Redirect all module paths to tmp_path."""
     stories_dir = tmp_path / "data" / "stories"
     stories_dir.mkdir(parents=True)
+    design_dir = tmp_path / "story_design"
+    design_dir.mkdir()
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(event_db, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
+    monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(world_timer, "BASE_DIR", str(tmp_path))
     lore_db._embedding_cache.clear()
     return stories_dir
@@ -61,11 +65,15 @@ def setup_story(tmp_path, story_id):
     branch_dir = story_dir / "branches" / "main"
     branch_dir.mkdir(parents=True, exist_ok=True)
 
-    # Character state
+    # Design files directory
+    design_dir = tmp_path / "story_design" / story_id
+    design_dir.mkdir(parents=True, exist_ok=True)
+
+    # Character state (runtime)
     state = {"name": "測試者", "current_phase": "主神空間", "reward_points": 5000, "inventory": []}
     (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
-    # Character schema
+    # Character schema → story_design/
     schema = {
         "fields": [
             {"key": "name"}, {"key": "current_phase"},
@@ -77,21 +85,21 @@ def setup_story(tmp_path, story_id):
         ],
         "direct_overwrite_keys": ["current_phase", "current_status"],
     }
-    (story_dir / "character_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    (design_dir / "character_schema.json").write_text(json.dumps(schema), encoding="utf-8")
 
-    # World lore
-    (story_dir / "world_lore.json").write_text("[]", encoding="utf-8")
+    # World lore → story_design/
+    (design_dir / "world_lore.json").write_text("[]", encoding="utf-8")
 
-    # Timeline tree
+    # Timeline tree (runtime)
     tree = {"active_branch_id": "main", "branches": {
         "main": {"id": "main", "parent_branch_id": None, "branch_point_index": None},
     }}
     (story_dir / "timeline_tree.json").write_text(json.dumps(tree), encoding="utf-8")
 
-    # NPCs
+    # NPCs (runtime)
     (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
 
-    # Messages
+    # Messages (runtime)
     (branch_dir / "messages.json").write_text("[]", encoding="utf-8")
 
     return story_dir
@@ -270,7 +278,7 @@ class TestAsyncEventDedup:
 
 class TestAsyncLoreExtraction:
     @mock.patch("llm_bridge.call_oneshot")
-    def test_new_lore_saved_to_branch(self, mock_llm, story_id, setup_story):
+    def test_new_lore_saved_to_branch(self, mock_llm, story_id, setup_story, tmp_path):
         """New auto-extracted lore should be saved to branch_lore.json (not base)."""
         llm_response = json.dumps({
             "lore": [{"category": "體系", "topic": "新體系", "content": "這是新的體系說明"}],
@@ -286,15 +294,17 @@ class TestAsyncLoreExtraction:
         assert "新體系" in topics
 
         # Base lore should remain empty
-        base_lore = json.loads((setup_story / "world_lore.json").read_text(encoding="utf-8"))
+        design_dir = tmp_path / "story_design" / story_id
+        base_lore = json.loads((design_dir / "world_lore.json").read_text(encoding="utf-8"))
         assert len(base_lore) == 0
 
     @mock.patch("llm_bridge.call_oneshot")
-    def test_user_edited_lore_protected(self, mock_llm, story_id, setup_story):
+    def test_user_edited_lore_protected(self, mock_llm, story_id, setup_story, tmp_path):
         """Lore entries marked as user-edited should not be overwritten."""
         # Pre-populate with user-edited entry
+        design_dir = tmp_path / "story_design" / story_id
         lore = [{"category": "體系", "topic": "保護項", "content": "用戶編輯", "edited_by": "user"}]
-        (setup_story / "world_lore.json").write_text(json.dumps(lore, ensure_ascii=False), encoding="utf-8")
+        (design_dir / "world_lore.json").write_text(json.dumps(lore, ensure_ascii=False), encoding="utf-8")
 
         llm_response = json.dumps({
             "lore": [{"category": "體系", "topic": "保護項", "content": "LLM想覆蓋"}],
@@ -303,7 +313,7 @@ class TestAsyncLoreExtraction:
 
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
 
-        lore_path = setup_story / "world_lore.json"
+        lore_path = design_dir / "world_lore.json"
         lore = json.loads(lore_path.read_text(encoding="utf-8"))
         protected = [e for e in lore if e["topic"] == "保護項"]
         assert len(protected) == 1
