@@ -5,6 +5,18 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-02-17
+
+### Changed
+- **命運走向系統 (Fate Direction System)**: Replaced binary success/failure dice with fate directions (天命/順遂/平淡/波折/劫數) following 塞翁失馬焉知非福 philosophy — good fortune may hide risks, setbacks may bring gains ([#97])
+- **行動合理性 (Action Quality)**: Player RP quality now independently affects outcomes — detailed strategies increase success chance regardless of fate direction ([#97])
+
+### Added
+- **命運走向開關**: Fate system toggleable on/off per branch, like pistol mode; when off, system prompt fate section is stripped and no dice are rolled ([#97])
+- **必勝模式連動**: 必勝模式 toggles are disabled (greyed out) when fate mode is off ([#97])
+
+[#97]: https://github.com/lainn9527/agent-story/pull/97
+
 ## [0.18.0] - 2026-02-17
 
 ### Added
