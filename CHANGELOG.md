@@ -5,6 +5,16 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.2] - 2026-02-18
+
+### Changed
+- **體系改為 key-value map**: `systems` 從 list 改為 map 格式（`{"死生之道": "B級"}`），與 inventory/relationships 一致，更新時直接覆蓋 ([#104])
+
+### Fixed
+- **Async state extraction 被跳過**: GM 輸出 `<!--STATE-->` tag 時，async extraction 的 state 提取被 `skip_state=True` 完全跳過，導致 STATE tag 不完整時 systems/abilities 等欄位漏更新；現在 async extraction 永遠執行 state 提取 ([#104])
+
+[#104]: https://github.com/lainn9527/agent-story/pull/104
+
 ## [0.20.1] - 2026-02-18
 
 ### Added
