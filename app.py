@@ -1164,12 +1164,15 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             list_contents_lines = []
             for l in schema.get("lists", []):
                 ltype = l.get("type", "list")
-                if ltype == "map":
-                    continue
                 lkey = l["key"]
-                items = state.get(lkey, [])
-                if items:
-                    list_contents_lines.append(f"{l.get('label', lkey)}：{json.dumps(items, ensure_ascii=False)}")
+                if ltype == "map":
+                    items = state.get(lkey, {})
+                    if items:
+                        list_contents_lines.append(f"{l.get('label', lkey)}：{json.dumps(items, ensure_ascii=False)}")
+                else:
+                    items = state.get(lkey, [])
+                    if items:
+                        list_contents_lines.append(f"{l.get('label', lkey)}：{json.dumps(items, ensure_ascii=False)}")
             list_contents_str = "\n".join(list_contents_lines) if list_contents_lines else ""
 
             titles_str = ", ".join(sorted(existing_titles)) if existing_titles else "（無）"
@@ -1208,13 +1211,14 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "## 4. 角色狀態變化（state）\n"
                 f"Schema 告訴你角色有哪些欄位：\n{schema_summary}\n"
                 f"角色目前有這些欄位：{existing_state_keys}\n"
-                + (f"角色目前的列表內容：\n{list_contents_str}\n" if list_contents_str else "")
+                + (f"角色目前的列表內容（含人際關係）：\n{list_contents_str}\n" if list_contents_str else "")
                 + "\n規則：\n"
                 "- 列表型欄位用 `_add` / `_remove` 後綴（如 `inventory_add`, `inventory_remove`）\n"
                 "- **道具狀態變化**（進化、綁定、損壞等）：必須同時輸出 `_remove`（舊版本）和 `_add`（新版本），不能只加不刪\n"
                 "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
                 "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
                 "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
+                "- **人際關係（map 型）**：直接輸出 `relationships: {\"NPC名\": \"新關係描述\"}`，會合併更新。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
                 "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
@@ -1496,8 +1500,16 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 elif not isinstance(add_val, list):
                     add_val = []
                 for item in add_val:
-                    if isinstance(item, str) and item not in lst:
-                        lst.append(item)
+                    if not isinstance(item, str):
+                        continue
+                    if item in lst:
+                        continue
+                    # Auto-dedup: if an existing item shares the same base name,
+                    # replace it (handles evolution chains like 武器 → 武器（強化版）)
+                    add_base = _extract_item_base_name(item)
+                    if add_base:
+                        lst = [x for x in lst if _extract_item_base_name(x) != add_base]
+                    lst.append(item)
                 state[key] = lst
 
     # Generic *_delta handling: apply as addition to base field
