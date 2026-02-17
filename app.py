@@ -1134,6 +1134,18 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             state = _load_character_state(story_id, branch_id)
             existing_state_keys = ", ".join(sorted(state.keys()))
 
+            # Build current list contents for state extraction context
+            list_contents_lines = []
+            for l in schema.get("lists", []):
+                ltype = l.get("type", "list")
+                if ltype == "map":
+                    continue
+                lkey = l["key"]
+                items = state.get(lkey, [])
+                if items:
+                    list_contents_lines.append(f"{l.get('label', lkey)}：{json.dumps(items, ensure_ascii=False)}")
+            list_contents_str = "\n".join(list_contents_lines) if list_contents_lines else ""
+
             titles_str = ", ".join(sorted(existing_titles)) if existing_titles else "（無）"
 
             prompt = (
@@ -1143,7 +1155,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "提取**通用世界規則與設定**，這些設定要適用於任何角色、任何分支時間線。\n"
                 "✓ 適合提取：體系機制的運作原理、副本世界的背景設定、場景的客觀描述、商城兌換項目\n"
                 "✗ 禁止提取：角色的個人數值或進度（如「基因鎖進度15%」「獎勵點5740」）、"
-                "角色獲得/失去的具體道具、角色的戰鬥過程與經歷、角色之間的互動劇情\n"
+                "角色獲得/失去的具體道具、角色習得的功法與技能進度、角色的戰鬥過程與經歷、角色之間的互動劇情\n"
                 "**撰寫原則：**\n"
                 "- 用通用語氣（「輪迴者可以…」「該能力的效果是…」），**不要提及具體角色名**\n"
                 "- 如果已有設定中有密切相關的主題，**更新該條目**（使用完全相同的 topic 名稱）\n"
@@ -1169,9 +1181,11 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
                 "## 4. 角色狀態變化（state）\n"
                 f"Schema 告訴你角色有哪些欄位：\n{schema_summary}\n"
-                f"角色目前有這些欄位：{existing_state_keys}\n\n"
-                "規則：\n"
+                f"角色目前有這些欄位：{existing_state_keys}\n"
+                + (f"角色目前的列表內容：\n{list_contents_str}\n" if list_contents_str else "")
+                + "\n規則：\n"
                 "- 列表型欄位用 `_add` / `_remove` 後綴（如 `inventory_add`, `inventory_remove`）\n"
+                "- **道具狀態變化**（進化、綁定、損壞等）：必須同時輸出 `_remove`（舊版本）和 `_add`（新版本），不能只加不刪\n"
                 "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
                 "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
                 "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
@@ -1331,6 +1345,26 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
     t.start()
 
 
+_ITEM_BASE_RE = re.compile(r'\s*[（(].*$')
+_ITEM_QTY_RE = re.compile(r'\s+x\d+$')
+
+
+def _extract_item_base_name(item: str) -> str:
+    """Extract base name from an item string, stripping status/description suffixes.
+
+    Handles formats:
+      "道具名 — 描述"     → "道具名"
+      "道具名 (狀態)"     → "道具名"
+      "道具名（狀態）"    → "道具名"
+      "道具名 x3"         → "道具名"
+      "道具名 (狀態) x2"  → "道具名"
+    """
+    name = item.split(" — ")[0].strip()
+    name = _ITEM_QTY_RE.sub("", name).strip()
+    name = _ITEM_BASE_RE.sub("", name).strip()
+    return name
+
+
 def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schema: dict):
     """Core logic: apply a STATE update dict to character state. No normalization."""
     state = _load_character_state(story_id, branch_id)
@@ -1372,8 +1406,8 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                 for rm_item in rm_val:
                     if not isinstance(rm_item, str):
                         continue
-                    rm_name = rm_item.split(" — ")[0].strip()
-                    lst = [x for x in lst if x.split(" — ")[0].strip() != rm_name]
+                    rm_base = _extract_item_base_name(rm_item)
+                    lst = [x for x in lst if _extract_item_base_name(x) != rm_base]
                 state[key] = lst
 
     # Generic *_delta handling: apply as addition to base field
@@ -1425,10 +1459,15 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         "tool_status", "available_escape", "available_locations",
         "status_update", "current_predicament",
     }
+    # LLM intermediate instruction keys that leak into state
+    _INSTRUCTION_KEYS = {
+        "inventory_use", "inventory_update", "skill_update",
+        "status_change", "state_change", "note", "notes",
+    }
 
     # Save extra keys — only non-delta, non-handled, string/number fields
     for key, val in update.items():
-        if key in _SYSTEM_KEYS or key in _SCENE_KEYS:
+        if key in _SYSTEM_KEYS or key in _SCENE_KEYS or key in _INSTRUCTION_KEYS:
             continue
         # Reject keys ending with _add/_remove for non-schema lists
         if (key.endswith("_add") or key.endswith("_remove")) and key not in handled_keys:
