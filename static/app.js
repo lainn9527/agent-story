@@ -2222,7 +2222,7 @@ function fillInputWithOption(text) {
   $input.value = existing ? existing + "\n" + text : text;
   $input.focus();
   $input.style.height = "auto";
-  $input.style.height = $input.scrollHeight + "px";
+  $input.style.height = Math.min($input.scrollHeight, 120) + "px";
   $input.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -3706,6 +3706,7 @@ async function sendMessage() {
   isSending = true;
   $sendBtn.disabled = true;
   $input.value = "";
+  $input.style.height = "auto";
 
   const playerMsg = { role: "user", content: text, index: allMessages.length, inherited: false, owner_branch_id: currentBranchId };
   allMessages.push(playerMsg);
