@@ -1939,6 +1939,34 @@ def _migrate_branch_files(story_id: str):
         log.info("Migrated branch files to branches/ dirs for story %s", story_id)
 
 
+def _migrate_schema_abilities(story_id: str):
+    """One-time migration: add 'abilities' list field to character schema and default state."""
+    # --- character_schema.json ---
+    schema = _load_character_schema(story_id)
+    lists = schema.get("lists", [])
+    has_abilities = any(l.get("key") == "abilities" for l in lists)
+    if not has_abilities:
+        lists.append({
+            "key": "abilities",
+            "label": "功法與技能",
+            "state_add_key": "abilities_add",
+            "state_remove_key": "abilities_remove",
+        })
+        schema["lists"] = lists
+        schema_path = os.path.join(_story_dir(story_id), "character_schema.json")
+        _save_json(schema_path, schema)
+        log.info("Migrated character_schema.json: added 'abilities' list for story %s", story_id)
+
+    # --- default_character_state.json ---
+    default_path = os.path.join(_story_dir(story_id), "default_character_state.json")
+    if os.path.exists(default_path):
+        default_state = _load_json(default_path, {})
+        if "abilities" not in default_state:
+            default_state["abilities"] = []
+            _save_json(default_path, default_state)
+            log.info("Migrated default_character_state.json: added 'abilities' for story %s", story_id)
+
+
 # ---------------------------------------------------------------------------
 # Helpers — unified tag extraction & context injection
 # ---------------------------------------------------------------------------
@@ -2156,6 +2184,9 @@ def api_init():
 
     # 3b. Branch files migration (flat → branches/ dirs)
     _migrate_branch_files(story_id)
+
+    # 3c. Schema migration: add abilities field
+    _migrate_schema_abilities(story_id)
 
     tree = _load_tree(story_id)
 
