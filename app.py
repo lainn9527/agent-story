@@ -576,6 +576,12 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
             result,
             flags=re.DOTALL,
         ).strip() + "\n"
+        # Tell GM explicitly — history may still contain fate references
+        result += (
+            "\n## 命運走向系統已關閉\n"
+            "不要在回應中提及或使用命運走向相關概念（天命、順遂、波折、劫數等）。"
+            "即使對話歷史中出現這些詞彙，也請忽略，當作不存在。\n"
+        )
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
     if get_pistol_mode(story_dir, branch_id):
