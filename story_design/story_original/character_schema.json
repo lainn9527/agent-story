@@ -64,8 +64,8 @@
     {
       "key": "systems",
       "label": "體系",
-      "state_add_key": "systems_add",
-      "state_remove_key": "systems_remove"
+      "type": "map",
+      "render": "inline"
     }
   ],
   "direct_overwrite_keys": [
