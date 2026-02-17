@@ -156,6 +156,9 @@ class TestExtractItemBaseName:
     def test_compound_name_with_dot(self):
         assert app_module._extract_item_base_name("混元·九轉生機膏 x2") == "混元·九轉生機膏"
 
+    def test_fullwidth_multiply_sign(self):
+        assert app_module._extract_item_base_name("鎮魂符×5") == "鎮魂符"
+
 
 class TestInventoryRemove:
     def test_remove_item(self, tmp_path, story_id, setup_state):
@@ -218,6 +221,33 @@ class TestInventoryRemove:
         )
         state = _load_state(tmp_path, story_id)
         assert len([x for x in state["inventory"] if "魔虛羅" in x]) == 0
+
+    def test_remove_exact_match_first(self, tmp_path, story_id, setup_state):
+        """Exact match takes priority — removing '定界珠（生）' should NOT remove '定界珠（死）'."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生）", "定界珠（死）"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_remove": ["定界珠（生）"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "定界珠（生）" not in state["inventory"]
+        assert "定界珠（死）" in state["inventory"]
+
+    def test_remove_then_add_ordering(self, tmp_path, story_id, setup_state):
+        """Remove processes before add — paired update should keep new version."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["大日金烏劍·空燼 (S 級潛力)"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {
+                "inventory_remove": ["大日金烏劍·空燼 (S 級潛力)"],
+                "inventory_add": ["大日金烏劍·空燼 (穩定度提升)"],
+            },
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "大日金烏劍·空燼 (穩定度提升)" in state["inventory"]
+        assert "大日金烏劍·空燼 (S 級潛力)" not in state["inventory"]
 
 
 # ===================================================================
