@@ -4141,11 +4141,12 @@ def api_lore_entry_update():
                 new_topic = body.get("new_topic", topic).strip()
                 new_category = body.get("category", e.get("category", "其他")).strip()
                 new_content = body.get("content", e.get("content", "")).strip()
-                # If renaming, check for collision within same (subcategory, topic) scope
-                if new_topic != topic:
-                    new_sub = body.get("subcategory", e.get("subcategory", "")).strip()
-                    if any(x.get("topic") == new_topic and x.get("subcategory", "") == new_sub for x in lore):
+                new_sub = body["subcategory"].strip() if "subcategory" in body else e.get("subcategory", "")
+                # Check collision when topic or subcategory changes
+                if new_topic != topic or new_sub != e.get("subcategory", ""):
+                    if any(x is not e and x.get("topic") == new_topic and x.get("subcategory", "") == new_sub for x in lore):
                         return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists in this subcategory"}), 409
+                if new_topic != topic:
                     delete_lore_entry(story_id, topic)
                 updated = {"category": new_category, "topic": new_topic, "content": new_content, "edited_by": "user"}
                 if "subcategory" in body:
@@ -4387,10 +4388,12 @@ def api_lore_chat_stream():
 - 新增設定時請使用上方現有分類，避免建立新分類
 
 子分類（subcategory）規範：
-- 副本世界觀 的條目：subcategory = 副本名稱（如「海賊王」「生化危機」），topic 預設為「介紹」
-- 體系 的條目：subcategory = 體系/技能名稱（如「霸氣」「基因鎖」），topic 預設為「介紹」
+- 副本世界觀 的條目：subcategory = 副本名稱（如「海賊王」「生化危機」）。首條總覽條目 topic = 「介紹」；後續條目用具體名稱（如「T病毒」「追蹤者」）
+- 體系 的條目：subcategory = 體系名稱（如「霸氣」「基因鎖」）。首條總覽條目 topic = 「介紹」；後續條目用具體名稱
+- 場景 的條目：subcategory 建議填對應副本名稱（與副本世界觀對應），topic 為場景名稱
 - 其他分類：subcategory 可選，不強制
 - 同一 subcategory 下的 topic 必須唯一，但不同 subcategory 間 topic 可重複（例如每個副本都可有「介紹」）
+- delete 操作以 (subcategory + topic) 聯合識別，請同時提供 subcategory 以精確刪除
 
 提案格式（當建議變更時使用）：
 <!--LORE_PROPOSE {{"action":"add|edit|delete", "category":"...", "subcategory":"...", "topic":"...", "content":"..."}} LORE_PROPOSE-->
@@ -4495,8 +4498,9 @@ def api_lore_apply():
             _save_lore_entry(story_id, entry)
             applied.append({"action": "edit", "topic": topic})
         elif action == "delete":
+            sub = p.get("subcategory", "").strip()
             lore = _load_lore(story_id)
-            new_lore = [e for e in lore if e.get("topic") != topic]
+            new_lore = [e for e in lore if not (e.get("topic") == topic and e.get("subcategory", "") == sub)]
             if len(new_lore) < len(lore):
                 _save_json(_story_lore_path(story_id), new_lore)
                 delete_lore_entry(story_id, topic)
