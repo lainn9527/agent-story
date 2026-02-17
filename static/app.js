@@ -2826,8 +2826,11 @@ function renderEventsPanel(events) {
 // ---------------------------------------------------------------------------
 
 async function loadDungeonProgress() {
+  // FE-M4: capture branch at start to avoid stale render after branch switch
+  const branchAtLoad = currentBranchId;
   try {
-    const result = await API.dungeonProgress(currentBranchId);
+    const result = await API.dungeonProgress(branchAtLoad);
+    if (currentBranchId !== branchAtLoad) return;
     renderDungeonPanel(result);
   } catch (e) {
     console.warn("Failed to load dungeon progress:", e);
@@ -2845,26 +2848,48 @@ function renderDungeonPanel(data) {
 
   section.style.display = "block";
 
+  // FE-M1: whitelist for class injection
+  const validNodeStatuses = new Set(["completed", "active", "locked"]);
+  const validAreaTypes = new Set(["mainline", "side"]);
+
   // Exit button
   exitBtn.style.display = "inline-block";
   exitBtn.disabled = !data.can_exit;
   exitBtn.title = data.can_exit
     ? "回歸主神空間"
-    : `需主線 100%（當前 ${data.mainline_progress}%）`;
+    : `需主線 60%（當前 ${data.mainline_progress}%）`;
 
+  // UX-C1: show exit hint text for mobile (title attribute invisible on mobile)
+  let exitHint = section.querySelector("#dungeon-exit-hint");
+  if (!exitHint) {
+    exitHint = document.createElement("span");
+    exitHint.id = "dungeon-exit-hint";
+    exitHint.className = "dungeon-exit-hint";
+    exitBtn.insertAdjacentElement("afterend", exitHint);
+  }
+  if (!data.can_exit) {
+    exitHint.textContent = `主線 ${data.mainline_progress}%`;
+    exitHint.style.display = "inline";
+  } else {
+    exitHint.style.display = "none";
+  }
+
+  // FE-C1: use section.querySelector instead of document.querySelector
   // Render progress overview
-  document.querySelector(".dungeon-progress-pct").textContent = `${data.mainline_progress}%`;
-  document.querySelector(".dungeon-progress-fill").style.width = `${data.mainline_progress}%`;
-  document.querySelector(".dungeon-metric-value").textContent =
+  section.querySelector(".dungeon-progress-pct").textContent = `${data.mainline_progress}%`;
+  section.querySelector(".dungeon-progress-fill").style.width = `${data.mainline_progress}%`;
+  section.querySelector(".dungeon-metric-value").textContent =
     `${data.metrics.explored_areas}/${data.metrics.total_areas}`;
 
   // Render mainline nodes (simplified: show completed + current + next)
-  const nodesContainer = document.querySelector(".dungeon-nodes");
+  const nodesContainer = section.querySelector(".dungeon-nodes");
   nodesContainer.innerHTML = data.mainline_nodes.map(node => {
     const iconMap = { completed: "✓", active: "◉", locked: "○" };
+    // FE-M1: whitelist node status class
+    const safeStatus = validNodeStatuses.has(node.status) ? node.status : "locked";
     return `
-      <div class="dungeon-node ${node.status}">
-        <div class="dungeon-node-icon">${iconMap[node.status]}</div>
+      <div class="dungeon-node ${safeStatus}">
+        <div class="dungeon-node-icon">${iconMap[safeStatus] || "○"}</div>
         <div class="dungeon-node-content">
           <div class="dungeon-node-title">${escapeHtml(node.title)}</div>
           <div class="dungeon-node-hint">${escapeHtml(node.hint)}</div>
@@ -2874,12 +2899,14 @@ function renderDungeonPanel(data) {
   }).join("");
 
   // Render map areas
-  const areasContainer = document.querySelector(".dungeon-areas");
+  const areasContainer = section.querySelector(".dungeon-areas");
   areasContainer.innerHTML = data.map_areas.map(area => {
     const badgeMap = { mainline: "主", side: "支" };
+    // FE-M1: whitelist area type class
+    const safeType = validAreaTypes.has(area.type) ? area.type : "side";
     return `
-      <div class="dungeon-area ${area.type}">
-        <div class="dungeon-area-badge">${badgeMap[area.type] || "?"}</div>
+      <div class="dungeon-area ${safeType}">
+        <div class="dungeon-area-badge">${badgeMap[safeType] || "?"}</div>
         <div class="dungeon-area-name">${escapeHtml(area.name)}</div>
         <div class="dungeon-area-status">
           ${area.status === "explored" ? `探索度 ${area.exploration}%` : "已發現"}
@@ -2887,6 +2914,10 @@ function renderDungeonPanel(data) {
       </div>
     `;
   }).join("");
+
+  // UX-C2: remove updating hint now that data has loaded
+  const updatingHint = section.querySelector("#dungeon-updating-hint");
+  if (updatingHint) updatingHint.style.display = "none";
 }
 
 // Exit button event handler
@@ -2896,7 +2927,7 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
   try {
     const res = await API.dungeonReturn(currentBranchId);
     if (res.success) {
-      showAlert(`回歸成功！獲得獎勵點數 ${res.reward_points}（難度縮放 ${res.scaling}x）`);
+      showAlert(res.message || `回歸成功！獲得獎勵點數 ${res.reward_points}（難度縮放 ${res.scaling}x）`);
       await loadMessages(currentBranchId);
       loadDungeonProgress();
       loadNpcs();
@@ -3718,6 +3749,15 @@ async function sendMessage() {
         loadNpcs();
         loadEvents();
         loadDungeonProgress();
+
+        // UX-C2: show "updating" hint in dungeon panel while async extraction runs
+        {
+          const dungeonSection = document.getElementById("dungeon-section");
+          if (dungeonSection && dungeonSection.style.display !== "none") {
+            const hint = dungeonSection.querySelector("#dungeon-updating-hint");
+            if (hint) hint.style.display = "block";
+          }
+        }
 
         // Poll for background tag extraction updates (state, NPCs, events)
         // Extraction runs async and may take 10-30s depending on LLM provider
