@@ -4109,13 +4109,13 @@ def api_lore_entry_create():
     content = body.get("content", "").strip()
     if not topic:
         return jsonify({"ok": False, "error": "topic required"}), 400
-    # Check for duplicate topic
+    subcategory = body.get("subcategory", "").strip()
+    # Check for duplicate within same (subcategory, topic) scope
     lore = _load_lore(story_id)
     for e in lore:
-        if e.get("topic") == topic:
-            return jsonify({"ok": False, "error": f"topic '{topic}' already exists"}), 409
+        if e.get("topic") == topic and e.get("subcategory", "") == subcategory:
+            return jsonify({"ok": False, "error": f"topic '{topic}' already exists in this subcategory"}), 409
     entry = {"category": category, "topic": topic, "content": content, "edited_by": "user"}
-    subcategory = body.get("subcategory", "").strip()
     if subcategory:
         entry["subcategory"] = subcategory
     _save_lore_entry(story_id, entry)
@@ -4141,10 +4141,11 @@ def api_lore_entry_update():
                 new_topic = body.get("new_topic", topic).strip()
                 new_category = body.get("category", e.get("category", "其他")).strip()
                 new_content = body.get("content", e.get("content", "")).strip()
-                # If renaming, check for collision with existing topic
+                # If renaming, check for collision within same (subcategory, topic) scope
                 if new_topic != topic:
-                    if any(x.get("topic") == new_topic for x in lore):
-                        return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists"}), 409
+                    new_sub = body.get("subcategory", e.get("subcategory", "")).strip()
+                    if any(x.get("topic") == new_topic and x.get("subcategory", "") == new_sub for x in lore):
+                        return jsonify({"ok": False, "error": f"topic '{new_topic}' already exists in this subcategory"}), 409
                     delete_lore_entry(story_id, topic)
                 updated = {"category": new_category, "topic": new_topic, "content": new_content, "edited_by": "user"}
                 if "subcategory" in body:
