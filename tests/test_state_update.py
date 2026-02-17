@@ -1,7 +1,7 @@
-"""Tests for _apply_state_update_inner in app.py (Phase 2.2).
+"""Tests for _apply_state_update_inner in app.py.
 
-Tests inventory add/remove, delta fields, direct overwrite,
-schema-driven ops, and edge cases.
+Tests inventory map operations, delta fields, direct overwrite,
+schema-driven ops, backward compatibility, and edge cases.
 Uses monkeypatched paths for filesystem isolation.
 """
 
@@ -12,7 +12,7 @@ import pytest
 import app as app_module
 
 
-# The character schema matching the real project
+# The character schema matching the real project (inventory is now map type)
 SCHEMA = {
     "fields": [
         {"key": "name", "label": "姓名", "type": "text"},
@@ -27,8 +27,7 @@ SCHEMA = {
         {
             "key": "inventory",
             "label": "道具欄",
-            "state_add_key": "inventory_add",
-            "state_remove_key": "inventory_remove",
+            "type": "map",
         },
         {
             "key": "completed_missions",
@@ -50,7 +49,7 @@ INITIAL_STATE = {
     "name": "測試者",
     "current_phase": "主神空間",
     "reward_points": 5000,
-    "inventory": ["封印之鏡", "鎮魂符×5"],
+    "inventory": {"封印之鏡": "", "鎮魂符": "×5"},
     "relationships": {"小薇": "信任"},
     "completed_missions": ["咒怨 — 完美通關"],
     "gene_lock": "未開啟",
@@ -100,90 +99,154 @@ def _load_state(tmp_path, story_id, branch_id="main"):
 
 
 # ===================================================================
-# Inventory operations
+# Inventory map operations
 # ===================================================================
 
 
-class TestInventoryAdd:
-    def test_add_single_item(self, tmp_path, story_id, setup_state):
+class TestInventoryMap:
+    def test_add_new_item(self, tmp_path, story_id, setup_state):
         setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_add": ["新道具"]}, SCHEMA)
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory": {"新道具": ""}}, SCHEMA)
         state = _load_state(tmp_path, story_id)
         assert "新道具" in state["inventory"]
 
-    def test_add_multiple_items(self, tmp_path, story_id, setup_state):
+    def test_add_item_with_status(self, tmp_path, story_id, setup_state):
         setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_add": ["劍", "盾"]}, SCHEMA)
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory": {"死生之刃": "靈魂加固版"}}, SCHEMA)
         state = _load_state(tmp_path, story_id)
-        assert "劍" in state["inventory"]
-        assert "盾" in state["inventory"]
+        assert state["inventory"]["死生之刃"] == "靈魂加固版"
 
-    def test_add_string_wrapped_in_list(self, tmp_path, story_id, setup_state):
+    def test_evolution_overwrites(self, tmp_path, story_id, setup_state):
+        """Adding evolved item auto-overwrites the old status for the same key."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"死生之刃": "初步成型"}})
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory": {"死生之刃": "靈魂加固版"}}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert state["inventory"]["死生之刃"] == "靈魂加固版"
+        assert len([k for k in state["inventory"] if "死生之刃" in k]) == 1
+
+    def test_remove_item_with_null(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory": {"封印之鏡": None}}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "封印之鏡" not in state["inventory"]
+        assert "鎮魂符" in state["inventory"]  # Other items preserved
+
+    def test_remove_nonexistent_no_error(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory": {"不存在的道具": None}}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert len(state["inventory"]) == 2  # Original items unchanged
+
+    def test_mixed_add_and_remove(self, tmp_path, story_id, setup_state):
+        """Can add and remove items in one update."""
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"封印之鏡": None, "新武器": "強化版"}},
+            SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "封印之鏡" not in state["inventory"]
+        assert state["inventory"]["新武器"] == "強化版"
+
+    def test_preserves_existing_items(self, tmp_path, story_id, setup_state):
+        """Map merge preserves items not mentioned in the update."""
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory": {"新道具": ""}}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "封印之鏡" in state["inventory"]
+        assert "鎮魂符" in state["inventory"]
+        assert "新道具" in state["inventory"]
+
+
+# ===================================================================
+# Backward compatibility: inventory_add / inventory_remove
+# ===================================================================
+
+
+class TestInventoryBackwardCompat:
+    """Legacy extraction or STATE tags may still produce inventory_add/inventory_remove."""
+
+    def test_legacy_add_converted_to_map(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory_add": ["新道具"]}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "新道具" in state["inventory"]
+
+    def test_legacy_add_with_status(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory_add": ["死生之刃·日耀輪轉（靈魂加固版）"]}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert state["inventory"]["死生之刃·日耀輪轉"] == "靈魂加固版"
+
+    def test_legacy_add_string_wrapped(self, tmp_path, story_id, setup_state):
         """LLM sometimes returns string instead of list."""
         setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_add": "單一道具"}, SCHEMA)
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory_add": "單一道具"}, SCHEMA)
         state = _load_state(tmp_path, story_id)
         assert "單一道具" in state["inventory"]
 
-    def test_add_duplicate_skipped(self, tmp_path, story_id, setup_state):
+    def test_legacy_remove_converted_to_null(self, tmp_path, story_id, setup_state):
         setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_add": ["封印之鏡"]}, SCHEMA)
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory_remove": ["封印之鏡"]}, SCHEMA)
         state = _load_state(tmp_path, story_id)
-        assert state["inventory"].count("封印之鏡") == 1
+        assert "封印之鏡" not in state["inventory"]
 
-    def test_add_replaces_same_base_name(self, tmp_path, story_id, setup_state):
-        """Adding evolved item should auto-replace the old version with same base name."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["死生之刃·日耀輪轉"]})
+    def test_legacy_remove_string_wrapped(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main", {"inventory_remove": "封印之鏡"}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "封印之鏡" not in state["inventory"]
+
+    def test_legacy_remove_then_add(self, tmp_path, story_id, setup_state):
+        """Paired remove+add should work: remove old, add new."""
+        setup_state()
         app_module._apply_state_update_inner(
             story_id, "main",
-            {"inventory_add": ["死生之刃·日耀輪轉（靈魂加固版）"]},
-            SCHEMA,
-        )
+            {
+                "inventory_remove": ["封印之鏡"],
+                "inventory_add": ["封印之鏡（強化版）"],
+            },
+            SCHEMA)
         state = _load_state(tmp_path, story_id)
-        assert "死生之刃·日耀輪轉（靈魂加固版）" in state["inventory"]
-        assert "死生之刃·日耀輪轉" not in state["inventory"]
+        # Remove sets base name to null, add sets new status — last write wins
+        # Since both operate on same base name "封印之鏡", add (non-null) wins
+        assert state["inventory"]["封印之鏡"] == "強化版"
 
-    def test_add_only_replaces_plain_base_name(self, tmp_path, story_id, setup_state):
-        """Auto-dedup only replaces bare/plain items (no suffix), not variants with their own suffix."""
-        setup_state("main", {**INITIAL_STATE, "inventory": [
-            "死生之刃·日耀輪轉",           # plain — should be replaced
-            "死生之刃·日耀輪轉（初步成型）",  # has suffix — should NOT be auto-replaced
-        ]})
+    def test_legacy_add_evolution_dedup(self, tmp_path, story_id, setup_state):
+        """Legacy add of evolved item should overwrite same base name in map."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"死生之刃": "初步成型"}})
         app_module._apply_state_update_inner(
             story_id, "main",
-            {"inventory_add": ["死生之刃·日耀輪轉（靈魂加固版）"]},
-            SCHEMA,
-        )
+            {"inventory_add": ["死生之刃（靈魂加固版）"]},
+            SCHEMA)
         state = _load_state(tmp_path, story_id)
-        inv = state["inventory"]
-        assert "死生之刃·日耀輪轉（靈魂加固版）" in inv
-        assert "死生之刃·日耀輪轉" not in inv              # plain removed
-        assert "死生之刃·日耀輪轉（初步成型）" in inv       # suffix variant preserved
+        assert state["inventory"]["死生之刃"] == "靈魂加固版"
 
-    def test_add_preserves_different_variants(self, tmp_path, story_id, setup_state):
-        """Items with same base name but different suffixes should coexist (e.g. 定界珠（生） vs 定界珠（死）)."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生）", "封印之鏡"]})
+    def test_legacy_add_dash_format(self, tmp_path, story_id, setup_state):
+        """Legacy 'name — description' format should be parsed correctly."""
+        setup_state()
         app_module._apply_state_update_inner(
             story_id, "main",
-            {"inventory_add": ["定界珠（死）"]},
-            SCHEMA,
-        )
+            {"inventory_add": ["封印之鏡 — 可以封印低等級怨靈"]},
+            SCHEMA)
         state = _load_state(tmp_path, story_id)
-        assert "定界珠（生）" in state["inventory"]   # preserved — has its own suffix
-        assert "定界珠（死）" in state["inventory"]   # added
-        assert "封印之鏡" in state["inventory"]       # unrelated — preserved
+        assert state["inventory"]["封印之鏡"] == "可以封印低等級怨靈"
 
-    def test_add_preserves_consumable_stacks(self, tmp_path, story_id, setup_state):
-        """Consumable stacks (鎮魂符×5) should not be removed when adding an evolved version."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["鎮魂符×5"]})
-        app_module._apply_state_update_inner(
-            story_id, "main",
-            {"inventory_add": ["鎮魂符（強化）"]},
-            SCHEMA,
-        )
-        state = _load_state(tmp_path, story_id)
-        assert "鎮魂符×5" in state["inventory"]      # consumable stack preserved
-        assert "鎮魂符（強化）" in state["inventory"]  # new item added
+
+# ===================================================================
+# Base name extraction (still used by backward compat and migration)
+# ===================================================================
 
 
 class TestExtractItemBaseName:
@@ -217,94 +280,82 @@ class TestExtractItemBaseName:
         assert app_module._extract_item_base_name("鎮魂符×5") == "鎮魂符"
 
 
-class TestInventoryRemove:
-    def test_remove_item(self, tmp_path, story_id, setup_state):
-        setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_remove": ["封印之鏡"]}, SCHEMA)
-        state = _load_state(tmp_path, story_id)
-        assert "封印之鏡" not in state["inventory"]
+# ===================================================================
+# Parse item to key-value
+# ===================================================================
 
-    def test_remove_string_wrapped(self, tmp_path, story_id, setup_state):
-        setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_remove": "封印之鏡"}, SCHEMA)
-        state = _load_state(tmp_path, story_id)
-        assert "封印之鏡" not in state["inventory"]
 
-    def test_remove_nonexistent_no_error(self, tmp_path, story_id, setup_state):
-        setup_state()
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_remove": ["不存在"]}, SCHEMA)
-        state = _load_state(tmp_path, story_id)
-        assert len(state["inventory"]) == 2  # Original items unchanged
+class TestParseItemToKv:
+    """Test _parse_item_to_kv helper for list→map migration."""
 
-    def test_remove_by_name_prefix(self, tmp_path, story_id, setup_state):
-        """Items like '封印之鏡 — 描述' should match by name prefix '封印之鏡'."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["封印之鏡 — 可以封印低等級怨靈"]})
-        app_module._apply_state_update_inner(story_id, "main", {"inventory_remove": ["封印之鏡"]}, SCHEMA)
-        state = _load_state(tmp_path, story_id)
-        assert len(state["inventory"]) == 0
+    def test_plain_name(self):
+        assert app_module._parse_item_to_kv("蝕魂者之戒") == ("蝕魂者之戒", "")
 
-    def test_remove_by_paren_status(self, tmp_path, story_id, setup_state):
-        """Items with (status) format should be removable by base name."""
-        setup_state("main", {**INITIAL_STATE, "inventory": [
-            "大日金烏劍·空燼 (S 級潛力)",
-            "大日金烏劍·空燼 (穩定度提升)",
-        ]})
-        app_module._apply_state_update_inner(
-            story_id, "main",
-            {"inventory_remove": ["大日金烏劍·空燼"]},
-            SCHEMA,
-        )
-        state = _load_state(tmp_path, story_id)
-        assert len([x for x in state["inventory"] if "大日金烏劍" in x]) == 0
+    def test_dash_format(self):
+        assert app_module._parse_item_to_kv("封印之鏡 — 可以封印低等級怨靈") == ("封印之鏡", "可以封印低等級怨靈")
 
-    def test_remove_by_fullwidth_paren(self, tmp_path, story_id, setup_state):
-        """Items with （全形括號） should also match."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生/已深度綁定）"]})
-        app_module._apply_state_update_inner(
-            story_id, "main",
-            {"inventory_remove": ["定界珠"]},
-            SCHEMA,
-        )
-        state = _load_state(tmp_path, story_id)
-        assert len(state["inventory"]) == 0
+    def test_fullwidth_paren(self):
+        assert app_module._parse_item_to_kv("死生之刃·日耀輪轉（靈魂加固版）") == ("死生之刃·日耀輪轉", "靈魂加固版")
 
-    def test_remove_with_quantity(self, tmp_path, story_id, setup_state):
-        """Items with x2 quantity suffix should match by base name."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["魔虛羅的殘損齒輪 x2"]})
-        app_module._apply_state_update_inner(
-            story_id, "main",
-            {"inventory_remove": ["魔虛羅的殘損齒輪"]},
-            SCHEMA,
-        )
-        state = _load_state(tmp_path, story_id)
-        assert len([x for x in state["inventory"] if "魔虛羅" in x]) == 0
+    def test_halfwidth_paren(self):
+        assert app_module._parse_item_to_kv("大日金烏劍·空燼 (S 級潛力)") == ("大日金烏劍·空燼", "S 級潛力")
 
-    def test_remove_exact_match_first(self, tmp_path, story_id, setup_state):
-        """Exact match takes priority — removing '定界珠（生）' should NOT remove '定界珠（死）'."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生）", "定界珠（死）"]})
-        app_module._apply_state_update_inner(
-            story_id, "main",
-            {"inventory_remove": ["定界珠（生）"]},
-            SCHEMA,
-        )
-        state = _load_state(tmp_path, story_id)
-        assert "定界珠（生）" not in state["inventory"]
-        assert "定界珠（死）" in state["inventory"]
+    def test_quantity_suffix(self):
+        assert app_module._parse_item_to_kv("鎮魂符×5") == ("鎮魂符", "×5")
 
-    def test_remove_then_add_ordering(self, tmp_path, story_id, setup_state):
-        """Remove processes before add — paired update should keep new version."""
-        setup_state("main", {**INITIAL_STATE, "inventory": ["大日金烏劍·空燼 (S 級潛力)"]})
-        app_module._apply_state_update_inner(
-            story_id, "main",
-            {
-                "inventory_remove": ["大日金烏劍·空燼 (S 級潛力)"],
-                "inventory_add": ["大日金烏劍·空燼 (穩定度提升)"],
-            },
-            SCHEMA,
-        )
-        state = _load_state(tmp_path, story_id)
-        assert "大日金烏劍·空燼 (穩定度提升)" in state["inventory"]
-        assert "大日金烏劍·空燼 (S 級潛力)" not in state["inventory"]
+    def test_quantity_with_space(self):
+        assert app_module._parse_item_to_kv("鎮魂符 x3") == ("鎮魂符", "x3")
+
+
+# ===================================================================
+# Auto-migration: list → map
+# ===================================================================
+
+
+class TestMigrateListToMap:
+    """Test _migrate_list_to_map for auto-migration on load."""
+
+    def test_basic_migration(self):
+        result = app_module._migrate_list_to_map([
+            "封印之鏡",
+            "鎮魂符×5",
+        ])
+        assert result == {"封印之鏡": "", "鎮魂符": "×5"}
+
+    def test_dedup_by_base_name(self):
+        """Last item with same base name wins — latest evolution kept."""
+        result = app_module._migrate_list_to_map([
+            "死生之刃·日耀輪轉",
+            "死生之刃·日耀輪轉（初步成型）",
+            "死生之刃·日耀輪轉（靈魂加固版）",
+        ])
+        assert result == {"死生之刃·日耀輪轉": "靈魂加固版"}
+
+    def test_different_base_names_preserved(self):
+        result = app_module._migrate_list_to_map([
+            "封印之鏡",
+            "鎮魂符×5",
+            "蝕魂者之戒",
+        ])
+        assert len(result) == 3
+
+    def test_dash_format(self):
+        result = app_module._migrate_list_to_map([
+            "封印之鏡 — 可以封印低等級怨靈",
+        ])
+        assert result == {"封印之鏡": "可以封印低等級怨靈"}
+
+    def test_empty_list(self):
+        assert app_module._migrate_list_to_map([]) == {}
+
+    def test_auto_migration_on_load(self, tmp_path, story_id, setup_state):
+        """Loading a branch with list-format inventory auto-converts to map."""
+        legacy_state = {**INITIAL_STATE, "inventory": ["封印之鏡", "鎮魂符×5"]}
+        setup_state("main", legacy_state)
+        state = app_module._load_character_state(story_id, "main")
+        assert isinstance(state["inventory"], dict)
+        assert "封印之鏡" in state["inventory"]
+        assert state["inventory"]["鎮魂符"] == "×5"
 
 
 # ===================================================================
@@ -395,6 +446,17 @@ class TestRelationshipMap:
         state = _load_state(tmp_path, story_id)
         assert state["relationships"]["小薇"] == "深厚信任"
 
+    def test_remove_relationship_with_null(self, tmp_path, story_id, setup_state):
+        """Null value should remove the relationship entry."""
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"relationships": {"小薇": None}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "小薇" not in state["relationships"]
+
 
 # ===================================================================
 # Scene-transient keys blocked
@@ -458,7 +520,7 @@ class TestCombinedUpdates:
         update = {
             "current_phase": "副本中",
             "reward_points_delta": -500,
-            "inventory_add": ["急救包"],
+            "inventory": {"急救包": ""},
             "gene_lock": "第一階",
         }
         app_module._apply_state_update_inner(story_id, "main", update, SCHEMA)

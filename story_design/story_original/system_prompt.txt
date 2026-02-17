@@ -156,5 +156,5 @@
   <!--STATE {{"current_phase": "主神空間", "current_status": "在兌換大廳選購強化道具"}} STATE-->
   - `current_phase`（必填）：`主神空間` / `副本中` / `副本結算` / `傳送中` / `死亡`
   - `current_status`（必填）：一句話描述角色當前處境（10-25字）
-  - 如有其他狀態變化也可加入（如 `reward_points_delta: -500`、`inventory_add: [...]`）
+  - 如有其他狀態變化也可加入（如 `reward_points_delta: -500`、`inventory: {{"道具名": "狀態"}}`）
   - STATE tag 不會顯示給玩家，僅供系統讀取。

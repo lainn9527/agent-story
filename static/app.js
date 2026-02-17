@@ -2480,9 +2480,20 @@ function renderCharacterStatus(state) {
     const data = state[listDef.key];
 
     if (listType === "map" && data && typeof data === "object") {
-      Object.entries(data).forEach(([name, rel]) => {
+      Object.entries(data).forEach(([name, val]) => {
         const li = document.createElement("li");
-        li.textContent = `${name}：${rel}`;
+        if (val) {
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "item-name";
+          nameSpan.textContent = name;
+          const descSpan = document.createElement("span");
+          descSpan.className = "item-desc";
+          descSpan.textContent = val;
+          li.appendChild(nameSpan);
+          li.appendChild(descSpan);
+        } else {
+          li.textContent = name;
+        }
         ul.appendChild(li);
       });
     } else if (Array.isArray(data)) {
