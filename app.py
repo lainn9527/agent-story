@@ -70,6 +70,7 @@ from lore_organizer import (
 from gm_cheats import (
     is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats,
     get_dice_always_success, set_dice_always_success,
+    get_fate_mode, set_fate_mode,
     get_pistol_mode, set_pistol_mode,
 )
 from dungeon_system import (
@@ -2243,10 +2244,10 @@ def _build_augmented_message(
     if activities:
         parts.append(activities)
 
-    # Dice roll (skip for /gm commands — not in-game actions)
+    # Fate roll (skip for /gm commands and when fate mode is off)
     dice_result = None
-    if character_state and not is_gm_command(user_text):
-        story_dir = _story_dir(story_id)
+    story_dir = _story_dir(story_id)
+    if character_state and not is_gm_command(user_text) and get_fate_mode(story_dir, branch_id):
         cheat_mod = get_dice_modifier(story_dir, branch_id)
         always_win = get_dice_always_success(story_dir, branch_id)
         dice_result = roll_fate(character_state, cheat_modifier=cheat_mod,
@@ -4747,6 +4748,31 @@ def api_cheats_dice_set():
         log.info("cheats/dice: always_success=%s branch=%s", enabled, branch_id)
 
     return jsonify({"ok": True, "always_success": get_dice_always_success(story_dir, branch_id)})
+
+
+@app.route("/api/cheats/fate", methods=["GET"])
+def api_cheats_fate_get():
+    """Get fate direction mode (命運走向) status for current branch."""
+    story_id = _active_story_id()
+    branch_id = request.args.get("branch_id", "main")
+    story_dir = _story_dir(story_id)
+    return jsonify({"fate_mode": get_fate_mode(story_dir, branch_id)})
+
+
+@app.route("/api/cheats/fate", methods=["POST"])
+def api_cheats_fate_set():
+    """Toggle fate direction mode (命運走向)."""
+    body = request.get_json(force=True)
+    story_id = _active_story_id()
+    branch_id = body.get("branch_id", "main")
+    story_dir = _story_dir(story_id)
+
+    if "fate_mode" in body:
+        enabled = bool(body["fate_mode"])
+        set_fate_mode(story_dir, branch_id, enabled)
+        log.info("cheats/fate: fate_mode=%s branch=%s", enabled, branch_id)
+
+    return jsonify({"ok": True, "fate_mode": get_fate_mode(story_dir, branch_id)})
 
 
 @app.route("/api/cheats/pistol", methods=["GET"])

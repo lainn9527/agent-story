@@ -62,6 +62,19 @@ def set_dice_always_success(story_dir: str, branch_id: str, enabled: bool) -> No
     save_cheats(story_dir, branch_id, cheats)
 
 
+def get_fate_mode(story_dir: str, branch_id: str) -> bool:
+    """Get the fate direction mode (命運走向) status for a branch. Default: enabled."""
+    cheats = load_cheats(story_dir, branch_id)
+    return cheats.get("fate_mode", True)
+
+
+def set_fate_mode(story_dir: str, branch_id: str, enabled: bool) -> None:
+    """Toggle fate direction mode (命運走向)."""
+    cheats = load_cheats(story_dir, branch_id)
+    cheats["fate_mode"] = enabled
+    save_cheats(story_dir, branch_id, cheats)
+
+
 def get_pistol_mode(story_dir: str, branch_id: str) -> bool:
     """Get the pistol mode (手槍模式) status for a branch."""
     cheats = load_cheats(story_dir, branch_id)
