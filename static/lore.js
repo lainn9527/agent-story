@@ -12,8 +12,8 @@
   let categories = [];
   let collapsedCats = new Set(); // preserve collapsed state across re-renders
   let allCollapsed = true; // default: everything collapsed
-  let selectedTopics = new Set(); // allow multiple expanded entries
-  let checkedTopics = new Set(); // for batch delete
+  let selectedKeys = new Set(); // allow multiple expanded entries (composite "sub\ttopic" keys)
+  let checkedKeys = new Set(); // for batch delete (composite "sub\ttopic" keys)
   let chatMessages = []; // {role, content} history for LLM
   let isStreaming = false;
   let editingEntry = null; // null = create, {topic, ...} = edit
@@ -61,6 +61,10 @@
     return str.length > len ? str.slice(0, len) + "..." : str;
   }
 
+  /** Composite key for lore entries: "subcategory\ttopic" */
+  function loreKey(sub, topic) { return (sub || "") + "\t" + topic; }
+  function loreKeyOf(entry) { return loreKey(entry.subcategory, entry.topic); }
+
   /** Render markdown to sanitized HTML */
   function renderMarkdown(text) {
     if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined" && text) {
@@ -71,9 +75,9 @@
 
   /** Update batch action bar visibility */
   function updateBatchBar() {
-    if (checkedTopics.size > 0) {
+    if (checkedKeys.size > 0) {
       $batchBar.classList.remove("hidden");
-      $batchCount.textContent = `已選 ${checkedTopics.size} 項`;
+      $batchCount.textContent = `已選 ${checkedKeys.size} 項`;
     } else {
       $batchBar.classList.add("hidden");
     }
@@ -200,16 +204,18 @@
 
   function renderEntryHtml(e, displayName) {
     const label = displayName || e.topic;
-    const sel = selectedTopics.has(e.topic) ? " selected" : "";
-    const checked = checkedTopics.has(e.topic) ? " checked" : "";
+    const key = loreKeyOf(e);
+    const sel = selectedKeys.has(key) ? " selected" : "";
+    const checked = checkedKeys.has(key) ? " checked" : "";
     const layerClass = e.layer === "branch" ? " branch-entry" : "";
-    let html = `<div class="lore-entry${sel}${layerClass}" data-topic="${escapeHtml(e.topic)}" data-layer="${e.layer || 'base'}">`;
+    const subAttr = escapeHtml(e.subcategory || "");
+    let html = `<div class="lore-entry${sel}${layerClass}" data-topic="${escapeHtml(e.topic)}" data-subcategory="${subAttr}" data-layer="${e.layer || 'base'}">`;
     html += `<span class="lore-entry-topic">${escapeHtml(label)}</span>`;
     if (e.layer === "branch") {
       html += `<span class="lore-layer-badge branch">分支</span>`;
     }
-    html += `<input type="checkbox" class="lore-entry-check" data-topic="${escapeHtml(e.topic)}" aria-label="選取 ${escapeHtml(label)}"${checked}>`;
-    html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" title="編輯">&#x270E;</button>`;
+    html += `<input type="checkbox" class="lore-entry-check" data-topic="${escapeHtml(e.topic)}" data-subcategory="${subAttr}" aria-label="選取 ${escapeHtml(label)}"${checked}>`;
+    html += `<button class="lore-entry-edit" data-topic="${escapeHtml(e.topic)}" data-subcategory="${subAttr}" title="編輯">&#x270E;</button>`;
     html += `</div>`;
     const previewText = sel ? e.content || "" : truncate(e.content, 120);
     html += `<div class="lore-entry-preview">${escapeHtml(previewText)}`;
@@ -381,9 +387,9 @@
       el.addEventListener("click", (ev) => {
         if (ev.target.closest(".lore-entry-edit")) return;
         if (ev.target.closest(".lore-entry-check")) return;
-        const topic = el.dataset.topic;
-        if (selectedTopics.has(topic)) selectedTopics.delete(topic);
-        else selectedTopics.add(topic);
+        const key = loreKey(el.dataset.subcategory, el.dataset.topic);
+        if (selectedKeys.has(key)) selectedKeys.delete(key);
+        else selectedKeys.add(key);
         renderLoreList($searchInput.value);
       });
     });
@@ -391,9 +397,9 @@
     // Bind checkbox handlers
     $loreList.querySelectorAll(".lore-entry-check").forEach((cb) => {
       cb.addEventListener("change", () => {
-        const topic = cb.dataset.topic;
-        if (cb.checked) checkedTopics.add(topic);
-        else checkedTopics.delete(topic);
+        const key = loreKey(cb.dataset.subcategory, cb.dataset.topic);
+        if (cb.checked) checkedKeys.add(key);
+        else checkedKeys.delete(key);
         updateBatchBar();
       });
     });
@@ -402,9 +408,10 @@
       btn.addEventListener("click", (ev) => {
         ev.stopPropagation();
         const topic = btn.dataset.topic;
+        const sub = btn.dataset.subcategory || "";
         const entryEl = btn.closest(".lore-entry");
         const layer = entryEl ? entryEl.dataset.layer : "base";
-        const entry = allEntries.find((e) => e.topic === topic && (e.layer || "base") === layer);
+        const entry = allEntries.find((e) => e.topic === topic && (e.subcategory || "") === sub && (e.layer || "base") === layer);
         if (entry) openModal(entry);
       });
     });
@@ -526,9 +533,9 @@
       alert(res.error || "刪除失敗");
       return;
     }
-    const deletedTopic = editingEntry.topic;
+    const deletedKey = loreKeyOf(editingEntry);
     closeModal();
-    selectedTopics.delete(deletedTopic);
+    selectedKeys.delete(deletedKey);
     await refreshLoreList();
   }
 
@@ -538,12 +545,12 @@
   async function refreshLoreList() {
     await fetchLoreAll();
     // Prune stale checked/selected entries
-    const existing = new Set(allEntries.map((e) => e.topic));
-    for (const t of checkedTopics) {
-      if (!existing.has(t)) checkedTopics.delete(t);
+    const existing = new Set(allEntries.map((e) => loreKeyOf(e)));
+    for (const k of checkedKeys) {
+      if (!existing.has(k)) checkedKeys.delete(k);
     }
-    for (const t of selectedTopics) {
-      if (!existing.has(t)) selectedTopics.delete(t);
+    for (const k of selectedKeys) {
+      if (!existing.has(k)) selectedKeys.delete(k);
     }
     updateBatchBar();
     renderLoreList($searchInput.value);
@@ -1152,37 +1159,43 @@
 
     // Batch delete
     $batchDeleteBtn.addEventListener("click", async () => {
-      if (checkedTopics.size === 0) return;
-      const topics = [...checkedTopics];
-      const preview = topics.length <= 5
-        ? topics.map((t) => `「${t}」`).join("\n")
-        : topics.slice(0, 5).map((t) => `「${t}」`).join("\n") + `\n...及其他 ${topics.length - 5} 項`;
-      if (!confirm(`確定要刪除以下 ${topics.length} 個設定？\n\n${preview}`)) return;
+      if (checkedKeys.size === 0) return;
+      const keys = [...checkedKeys];
+      // Build display names from entries
+      const displayNames = keys.map((k) => {
+        const entry = allEntries.find((e) => loreKeyOf(e) === k);
+        return entry ? entry.topic : k;
+      });
+      const preview = displayNames.length <= 5
+        ? displayNames.map((t) => `「${t}」`).join("\n")
+        : displayNames.slice(0, 5).map((t) => `「${t}」`).join("\n") + `\n...及其他 ${displayNames.length - 5} 項`;
+      if (!confirm(`確定要刪除以下 ${keys.length} 個設定？\n\n${preview}`)) return;
       $batchDeleteBtn.disabled = true;
-      $batchDeleteBtn.textContent = `刪除中 0/${topics.length}...`;
+      $batchDeleteBtn.textContent = `刪除中 0/${keys.length}...`;
       const failures = [];
-      for (let i = 0; i < topics.length; i++) {
-        $batchDeleteBtn.textContent = `刪除中 ${i + 1}/${topics.length}...`;
+      for (let i = 0; i < keys.length; i++) {
+        $batchDeleteBtn.textContent = `刪除中 ${i + 1}/${keys.length}...`;
         try {
-          const entry = allEntries.find((e) => e.topic === topics[i]);
+          const entry = allEntries.find((e) => loreKeyOf(e) === keys[i]);
+          if (!entry) { failures.push(displayNames[i]); continue; }
           let res;
-          if (entry && entry.layer === "branch") {
+          if (entry.layer === "branch") {
             res = await fetch("/api/lore/branch/entry", {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ topic: topics[i], subcategory: entry.subcategory || "", branch_id: activeBranchId }),
+              body: JSON.stringify({ topic: entry.topic, subcategory: entry.subcategory || "", branch_id: activeBranchId }),
             }).then((r) => r.json());
           } else {
-            res = await deleteEntry(topics[i], entry ? entry.subcategory : "");
+            res = await deleteEntry(entry.topic, entry.subcategory);
           }
           if (res.ok) {
-            checkedTopics.delete(topics[i]);
-            selectedTopics.delete(topics[i]);
+            checkedKeys.delete(keys[i]);
+            selectedKeys.delete(keys[i]);
           } else {
-            failures.push(topics[i]);
+            failures.push(displayNames[i]);
           }
         } catch {
-          failures.push(topics[i]);
+          failures.push(displayNames[i]);
         }
       }
       $batchDeleteBtn.disabled = false;
@@ -1195,7 +1208,7 @@
     });
 
     $batchClearBtn.addEventListener("click", () => {
-      checkedTopics.clear();
+      checkedKeys.clear();
       updateBatchBar();
       renderLoreList($searchInput.value);
     });
