@@ -2039,6 +2039,10 @@ body {
 .cheat-toggle.active:hover {
   background: #335a33;
 }
+.cheat-toggle.disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
 
 /* Header cheat badge */
 #cheat-badge {

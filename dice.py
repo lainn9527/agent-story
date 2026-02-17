@@ -93,7 +93,7 @@ def _get_modifiers(state: dict) -> tuple[int, int, int]:
 _OUTCOMES = {
     "天命": "命運強烈眷顧，超乎預期的機緣或收穫。但好運未必沒有隱患——功高震主、樹大招風、樂極生悲皆有可能。",
     "順遂": "事情朝好的方向發展。但順境中也可能暗藏伏筆——過於順利是否意味著某處正在積累風險？",
-    "平淡": "命運不偏不倚，一切按常理發展。結果取決於角色自身的能力和選擇。",
+    "平淡": "命運不偏不倚，一切按常理發展。結果完全取決於角色自身的能力、準備和選擇——沒有額外的好運或厄運介入。",
     "波折": "遇到阻礙或意外轉折。但塞翁失馬焉知非福——挫折可能帶來意外的發現、盟友、或成長契機。",
     "劫數": "重大考驗降臨，處境艱難。但危機往往是轉機的起點——絕境中的突破、因禍得福、置之死地而後生。",
 }
@@ -167,11 +167,6 @@ def roll_fate(state: dict, cheat_modifier: int = 0,
 
 def format_dice_context(result: dict) -> str:
     """Format dice result as context block for the GM."""
-    p = result["physique_mod"]
-    s = result["spirit_mod"]
-    g = result["gene_lock_mod"]
-    bonus_sign = "+" if result["attr_bonus"] >= 0 else ""
-
     return (
         f"[命運走向]\n"
         f"本回合命運：**{result['outcome']}** — {_OUTCOMES[result['outcome']]}\n"

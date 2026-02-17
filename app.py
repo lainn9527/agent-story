@@ -574,7 +574,7 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
             r"## ⚠️ 命運走向系統.*?(?=## |\Z)",
             "",
             result,
-            flags=_re.DOTALL,
+            flags=re.DOTALL,
         ).strip() + "\n"
 
     # Pistol mode (手槍模式) — inject NSFW scene instructions
@@ -2104,7 +2104,7 @@ def _migrate_design_files(story_id: str):
 # ---------------------------------------------------------------------------
 
 _CONTEXT_ECHO_RE = re.compile(
-    r"\[(?:命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
+    r"\[(?:命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
     re.DOTALL,
 )
 
