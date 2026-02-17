@@ -5,6 +5,19 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-02-18
+
+### Added
+- **Lore helper subcategory field**: 新增/編輯 modal 加入「子分類」欄位，支援 `副本世界觀/副本名/介紹`、`體系/體系名/介紹` 等層級結構 ([#103])
+- **Lore chat subcategory support**: AI 提案格式加入 `subcategory` 欄位；系統提示規範 副本世界觀/體系/場景 的命名慣例 ([#103])
+
+### Fixed
+- **Topic 唯一性 scoped 化**: 建立/更新 lore 條目時，重複檢查範圍縮小為同一 `(subcategory, topic)` 組合，允許不同副本各有「介紹」條目 ([#103])
+- **PUT subcategory 更新**: 編輯時可修改 subcategory；subcategory 變更時同樣觸發衝突檢查 ([#103])
+- **Lore apply delete 精確化**: chat 提案 delete 操作改為 (subcategory, topic) 聯合識別，避免跨副本誤刪同名條目 ([#103])
+
+[#103]: https://github.com/lainn9527/agent-story/pull/103
+
 ## [0.20.0] - 2026-02-18
 
 ### Changed
