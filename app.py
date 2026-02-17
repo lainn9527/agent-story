@@ -5010,7 +5010,7 @@ def api_dungeon_progress():
         "difficulty": template["difficulty"],
         "mainline_progress": current["mainline_progress"],
         "exploration_progress": current["exploration_progress"],
-        "can_exit": current["mainline_progress"] >= 100,
+        "can_exit": current["mainline_progress"] >= 60,
         "mainline_nodes": nodes_response,
         "map_areas": areas_response,
         "metrics": {
