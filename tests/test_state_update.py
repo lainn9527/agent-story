@@ -129,6 +129,34 @@ class TestInventoryAdd:
         assert state["inventory"].count("封印之鏡") == 1
 
 
+class TestExtractItemBaseName:
+    """Test _extract_item_base_name helper for flexible name matching."""
+
+    def test_plain_name(self):
+        assert app_module._extract_item_base_name("封印之鏡") == "封印之鏡"
+
+    def test_dash_description(self):
+        assert app_module._extract_item_base_name("封印之鏡 — 可以封印低等級怨靈") == "封印之鏡"
+
+    def test_halfwidth_paren_status(self):
+        assert app_module._extract_item_base_name("大日金烏劍·空燼 (S 級潛力)") == "大日金烏劍·空燼"
+
+    def test_fullwidth_paren_status(self):
+        assert app_module._extract_item_base_name("定界珠（生/已綁定）") == "定界珠"
+
+    def test_quantity_suffix(self):
+        assert app_module._extract_item_base_name("鎮魂符 x5") == "鎮魂符"
+
+    def test_paren_with_quantity(self):
+        assert app_module._extract_item_base_name("特級殘穢·獄門疆碎屑 (剩餘 x2)") == "特級殘穢·獄門疆碎屑"
+
+    def test_quantity_without_paren(self):
+        assert app_module._extract_item_base_name("魔虛羅的殘損齒輪 x2") == "魔虛羅的殘損齒輪"
+
+    def test_compound_name_with_dot(self):
+        assert app_module._extract_item_base_name("混元·九轉生機膏 x2") == "混元·九轉生機膏"
+
+
 class TestInventoryRemove:
     def test_remove_item(self, tmp_path, story_id, setup_state):
         setup_state()
@@ -154,6 +182,42 @@ class TestInventoryRemove:
         app_module._apply_state_update_inner(story_id, "main", {"inventory_remove": ["封印之鏡"]}, SCHEMA)
         state = _load_state(tmp_path, story_id)
         assert len(state["inventory"]) == 0
+
+    def test_remove_by_paren_status(self, tmp_path, story_id, setup_state):
+        """Items with (status) format should be removable by base name."""
+        setup_state("main", {**INITIAL_STATE, "inventory": [
+            "大日金烏劍·空燼 (S 級潛力)",
+            "大日金烏劍·空燼 (穩定度提升)",
+        ]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_remove": ["大日金烏劍·空燼"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert len([x for x in state["inventory"] if "大日金烏劍" in x]) == 0
+
+    def test_remove_by_fullwidth_paren(self, tmp_path, story_id, setup_state):
+        """Items with （全形括號） should also match."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["定界珠（生/已深度綁定）"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_remove": ["定界珠"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert len(state["inventory"]) == 0
+
+    def test_remove_with_quantity(self, tmp_path, story_id, setup_state):
+        """Items with x2 quantity suffix should match by base name."""
+        setup_state("main", {**INITIAL_STATE, "inventory": ["魔虛羅的殘損齒輪 x2"]})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_remove": ["魔虛羅的殘損齒輪"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert len([x for x in state["inventory"] if "魔虛羅" in x]) == 0
 
 
 # ===================================================================
@@ -322,3 +386,37 @@ class TestCombinedUpdates:
         app_module._apply_state_update_inner(story_id, "main", {}, SCHEMA)
         state = _load_state(tmp_path, story_id)
         assert state["name"] == "測試者"  # Unchanged
+
+
+# ===================================================================
+# Instruction keys blocked
+# ===================================================================
+
+
+class TestInstructionKeysBlocked:
+    """LLM intermediate instruction keys should not leak into state."""
+
+    def test_inventory_use_not_saved(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(story_id, "main", {"inventory_use": "藥劑已使用"}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "inventory_use" not in state
+
+    def test_skill_update_not_saved(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(story_id, "main", {"skill_update": "因果入侵"}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "skill_update" not in state
+
+    def test_inventory_update_not_saved(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(story_id, "main", {"inventory_update": "定界珠已綁定"}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert "inventory_update" not in state
+
+    def test_legitimate_extra_field_still_saved(self, tmp_path, story_id, setup_state):
+        """Ensure real permanent attributes are not blocked."""
+        setup_state()
+        app_module._apply_state_update_inner(story_id, "main", {"修真境界": "煉氣期"}, SCHEMA)
+        state = _load_state(tmp_path, story_id)
+        assert state["修真境界"] == "煉氣期"
