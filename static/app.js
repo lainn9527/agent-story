@@ -1795,6 +1795,7 @@ async function submitEdit(msg, newText) {
           if (errMsg === "no_change") {
             // Content unchanged — restore DOM to pre-edit state
             loadMessages();
+            showToast("內容未變更");
           } else {
             loadBranches().then(() => renderBranchList());
             showAlert(errMsg || "編輯失敗");

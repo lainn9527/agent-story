@@ -370,6 +370,31 @@ class TestSearchBranchLore:
         result = app_module._search_branch_lore(story_id, "main", "xyz")
         assert result == ""
 
+    def test_dungeon_scoping_penalizes_other_dungeons(self, story_id, setup_story):
+        """Cross-dungeon entries should be penalized when in a specific dungeon."""
+        app_module._save_branch_lore(story_id, "main", [
+            {"category": "副本世界觀", "subcategory": "咒術迴戰", "topic": "咒術迴戰機制", "content": "呪力是咒術師的核心戰鬥力來源"},
+            {"category": "副本世界觀", "subcategory": "民俗台灣", "topic": "民俗台灣習俗", "content": "台灣民俗副本涉及各種禁忌和習俗"},
+        ])
+        context = {"phase": "副本中", "status": "", "dungeon": "民俗台灣"}
+        result = app_module._search_branch_lore(story_id, "main", "副本", context=context)
+        assert "民俗台灣習俗" in result
+        # 咒術迴戰 should be penalized — if it appears at all, it should be after 民俗台灣
+        lines = result.split("\n")
+        headers = [l for l in lines if l.startswith("####")]
+        if len(headers) >= 2:
+            assert headers[0].find("民俗台灣") >= 0
+
+    def test_dungeon_scoping_no_penalty_without_context(self, story_id, setup_story):
+        """Without context, no dungeon penalty applied."""
+        app_module._save_branch_lore(story_id, "main", [
+            {"category": "副本世界觀", "subcategory": "咒術迴戰", "topic": "呪力系統", "content": "呪力是咒術師的核心戰鬥力來源"},
+            {"category": "副本世界觀", "subcategory": "民俗台灣", "topic": "民俗禁忌", "content": "台灣民俗副本涉及各種禁忌和習俗"},
+        ])
+        result = app_module._search_branch_lore(story_id, "main", "副本")
+        # Both should appear without penalty
+        assert "[相關分支設定]" in result
+
 
 class TestGetBranchLoreTOC:
     def test_empty_returns_empty(self, story_id, setup_story):

@@ -5190,6 +5190,7 @@ def api_dungeon_enter():
     # Update character state
     state["current_phase"] = "傳送中"
     state["current_status"] = f"準備進入【{template['name']}】副本"
+    state["current_dungeon"] = template["name"]
     _save_character_state(story_id, branch_id, state)
 
     # Advance world time (dungeon enter cost)
@@ -5329,6 +5330,7 @@ def api_dungeon_return():
     # Update character state
     state["current_phase"] = "主神空間"
     state["current_status"] = f"副本結束，回歸主神空間。獲得獎勵點數 {total_reward}"
+    state["current_dungeon"] = ""
     state["reward_points"] = state.get("reward_points", 0) + total_reward
     _save_character_state(story_id, branch_id, state)
 
