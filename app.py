@@ -1345,11 +1345,16 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
             saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False}
 
+            # Pistol mode: skip lore + event extraction (NSFW scenes shouldn't persist)
+            pistol = get_pistol_mode(_story_dir(story_id), branch_id)
+            if pistol:
+                log.info("    extract_tags: pistol mode ON, skipping lore + events")
+
             # Build prefix registry once for the batch (avoids per-entry rebuild)
             prefix_reg = build_prefix_registry(story_id)
 
             # Lore — save to branch_lore (not base), similarity guard to prevent fragmentation
-            for entry in data.get("lore", []):
+            for entry in ([] if pistol else data.get("lore", [])):
                 topic = entry.get("topic", "").strip()
                 category = entry.get("category", "").strip()
                 if not topic:
@@ -1377,7 +1382,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
             # Events — dedup by title, update status if changed
             _STATUS_ORDER = {"planted": 0, "triggered": 1, "resolved": 2, "abandoned": 2}
-            for event in data.get("events", []):
+            for event in ([] if pistol else data.get("events", [])):
                 title = event.get("title", "").strip()
                 if not title:
                     continue
