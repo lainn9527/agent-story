@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.6] - 2026-02-18
+
+### Fixed
+- **分支 fork 遺失 current_dungeon**: 編輯/重生成建立新分支時，歷史 state snapshot 缺少 `current_dungeon` 欄位，導致新分支失去副本上下文。新增 `_backfill_forked_state()` 從 source branch 繼承 ([#108])
+
+[#108]: https://github.com/lainn9527/agent-story/pull/108
+
 ## [0.20.5] - 2026-02-18
 
 ### Fixed
