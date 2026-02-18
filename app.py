@@ -1259,6 +1259,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
                 "- `current_dungeon`: 當前所在副本名稱（如「咒術迴戰」「民俗台灣」「鬼滅之刃」）。進入副本時設定，回到主神空間時設為空字串 \"\"。必須與世界設定中的副本分類名一致。\n"
                 "- **人際關係**：`relationships: {\"NPC名\": \"新關係描述\"}`。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
+                "- **體系等級**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），**必須輸出 systems 更新**，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
                 "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
