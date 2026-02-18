@@ -1176,7 +1176,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             schema = _load_character_schema(story_id)
             schema_lines = []
             for f in schema.get("fields", []):
-                schema_lines.append(f"- {f['key']}（{f.get('label', '')}）: {f.get('type', 'text')}")
+                if f.get("type") == "map":
+                    schema_lines.append(f"- {f['key']}（{f.get('label', '')}）: map，直接輸出 {{\"key\": \"value\"}} 覆蓋，null 表示移除")
+                else:
+                    schema_lines.append(f"- {f['key']}（{f.get('label', '')}）: {f.get('type', 'text')}")
             for l in schema.get("lists", []):
                 ltype = l.get("type", "list")
                 if ltype == "map":
@@ -1572,6 +1575,20 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                             base, status = _parse_item_to_kv(item)
                             inv_map[base] = status
 
+    # Process map-type fields defined in schema.fields (e.g. systems)
+    for field_def in schema.get("fields", []):
+        if field_def.get("type") != "map":
+            continue
+        key = field_def["key"]
+        if key in update and isinstance(update[key], dict):
+            existing = state.get(key, {})
+            for k, v in update[key].items():
+                if v is None:
+                    existing.pop(k, None)
+                else:
+                    existing[k] = v
+            state[key] = existing
+
     # Process list fields from schema
     for list_def in schema.get("lists", []):
         key = list_def["key"]
@@ -1666,6 +1683,9 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
     # Build handled_keys set
     handled_keys = set()
     handled_keys.add("reward_points")
+    for field_def in schema.get("fields", []):
+        if field_def.get("type") == "map":
+            handled_keys.add(field_def["key"])
     for list_def in schema.get("lists", []):
         handled_keys.add(list_def["key"])
         if list_def.get("state_add_key"):
