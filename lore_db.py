@@ -670,6 +670,13 @@ def search_hybrid(
                     # Boost phase-relevant categories to float above generic matches
                     rrf_scores[entry_id] *= 1.5
 
+        # Dungeon scoping: penalize lore from other dungeons
+        current_dungeon = context.get("dungeon", "")
+        if current_dungeon and "副本" in phase:
+            for entry_id, entry in candidates.items():
+                if entry["category"] == "副本世界觀" and entry.get("subcategory", "") != current_dungeon:
+                    rrf_scores[entry_id] *= 0.1
+
     # Sort by RRF score
     sorted_ids = sorted(all_ids, key=lambda x: rrf_scores[x], reverse=True)
 

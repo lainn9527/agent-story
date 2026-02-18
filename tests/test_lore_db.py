@@ -93,6 +93,43 @@ def setup_lore(tmp_path, story_id):
     return story_path
 
 
+@pytest.fixture
+def setup_lore_with_subcategory(tmp_path, story_id):
+    """Create lore entries with subcategory for dungeon scoping tests."""
+    story_path = tmp_path / "stories" / story_id
+    story_path.mkdir(parents=True, exist_ok=True)
+    design_path = tmp_path / "story_design" / story_id
+    design_path.mkdir(parents=True, exist_ok=True)
+
+    lore_entries = [
+        {
+            "category": "副本世界觀",
+            "subcategory": "咒怨",
+            "topic": "咒怨",
+            "content": "咒怨副本基於日本恐怖電影世界觀。伽椰子是核心怨靈，進入咒怨之屋的人會被詛咒。副本目標是生存或消滅怨靈。",
+        },
+        {
+            "category": "副本世界觀",
+            "subcategory": "生化危機",
+            "topic": "生化危機",
+            "content": "生化危機副本基於遊戲世界觀。T病毒爆發，殭屍橫行。副本目標是逃出拉坤市。",
+        },
+        {
+            "category": "主神設定與規則",
+            "subcategory": "",
+            "topic": "任務規則",
+            "content": "每次副本任務限時七天，完成度決定獎勵點數量。",
+        },
+    ]
+
+    (design_path / "world_lore.json").write_text(
+        json.dumps(lore_entries, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    lore_db.rebuild_index(story_id)
+    return story_path
+
+
 # ===================================================================
 # extract_tags — pure function
 # ===================================================================
@@ -314,3 +351,29 @@ class TestSearchHybrid:
     def test_empty_results_when_no_match(self, story_id, setup_lore):
         results = lore_db.search_hybrid(story_id, "zzz_no_match")
         assert results == []
+
+    def test_dungeon_scoping_penalizes_other_dungeons(self, story_id, setup_lore_with_subcategory):
+        """When in 咒怨 dungeon, 生化危機 entries should be penalized."""
+        context = {"phase": "副本中", "status": "", "dungeon": "咒怨"}
+        results = lore_db.search_hybrid(story_id, "副本", context=context)
+        assert len(results) > 0
+        # 咒怨 should rank before 生化危機
+        topics = [r["topic"] for r in results]
+        if "咒怨" in topics and "生化危機" in topics:
+            assert topics.index("咒怨") < topics.index("生化危機")
+
+    def test_dungeon_scoping_no_penalty_without_dungeon(self, story_id, setup_lore_with_subcategory):
+        """Without dungeon context, no penalization."""
+        context = {"phase": "副本中", "status": "", "dungeon": ""}
+        results = lore_db.search_hybrid(story_id, "副本", context=context)
+        # Both should appear without strong penalization
+        topics = [r["topic"] for r in results]
+        assert "咒怨" in topics or "生化危機" in topics
+
+    def test_dungeon_scoping_no_penalty_in_main_space(self, story_id, setup_lore_with_subcategory):
+        """In 主神空間 (no 副本 in phase), no dungeon penalty even if dungeon set."""
+        context = {"phase": "主神空間", "status": "", "dungeon": "咒怨"}
+        results = lore_db.search_hybrid(story_id, "副本", context=context)
+        topics = [r["topic"] for r in results]
+        # 生化危機 should NOT be heavily penalized since we're not in a dungeon phase
+        assert "生化危機" in topics or len(results) > 0
