@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.7] - 2026-02-18
+
+### Fixed
+- **副本世界觀隔離指示**: System prompt 新增「副本世界觀隔離」規則，禁止 GM 在副本中引入其他副本的角色、怪物、科技或設定（如民俗恐怖副本出現電磁脈衝武器） ([#109])
+
+[#109]: https://github.com/lainn9527/agent-story/pull/109
+
 ## [0.20.6] - 2026-02-18
 
 ### Fixed
