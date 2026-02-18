@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.10] - 2026-02-18
+
+### Fixed
+- **手槍模式 lore/event 洩漏**: 手槍模式開啟時，`_extract_tags_async()` 仍會提取 lore 和 event 存入分支資料，fork 時會帶到新分支。現在手槍模式下跳過 lore + event 提取，NPC/state/time 等照常運作 ([#111])
+
+[#111]: https://github.com/lainn9527/agent-story/pull/111
+
 ## [0.20.9] - 2026-02-18
 
 ### Fixed
