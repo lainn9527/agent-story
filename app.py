@@ -2353,6 +2353,17 @@ def _find_state_at_index(story_id: str, branch_id: str, target_index: int) -> di
     return state
 
 
+def _backfill_forked_state(forked_state: dict, story_id: str, source_branch_id: str):
+    """Backfill new fields from source branch's current state into forked snapshot.
+
+    Historical state_snapshots may lack fields added after the snapshot was taken
+    (e.g. current_dungeon). Inherit from the source branch's live state.
+    """
+    if "current_dungeon" not in forked_state:
+        source_state = _load_character_state(story_id, source_branch_id)
+        forked_state["current_dungeon"] = source_state.get("current_dungeon", "")
+
+
 def _find_npcs_at_index(story_id: str, branch_id: str, target_index: int) -> list[dict]:
     """Walk timeline backwards to find most recent npcs_snapshot at or before target_index."""
     timeline = get_full_timeline(story_id, branch_id)
@@ -2892,6 +2903,7 @@ def api_branches_create():
     now = datetime.now(timezone.utc).isoformat()
 
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
+    _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
@@ -3070,6 +3082,7 @@ def api_branches_edit():
     now = datetime.now(timezone.utc).isoformat()
 
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
+    _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
@@ -3215,6 +3228,7 @@ def api_branches_edit_stream():
     now = datetime.now(timezone.utc).isoformat()
 
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
+    _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
@@ -3366,6 +3380,7 @@ def api_branches_regenerate():
     now = datetime.now(timezone.utc).isoformat()
 
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
+    _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
@@ -3490,6 +3505,7 @@ def api_branches_regenerate_stream():
     now = datetime.now(timezone.utc).isoformat()
 
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
+    _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
