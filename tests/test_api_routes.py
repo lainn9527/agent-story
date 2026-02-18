@@ -272,6 +272,45 @@ class TestBranchesAPI:
         assert resp2.status_code == 200
         assert resp2.get_json()["ok"] is True
 
+    def test_edit_no_change_rejected(self, client, setup_story):
+        """Editing a message with identical content should return 400."""
+        # The parsed conversation has: index 0 = user "你好", index 2 = user "開始任務"
+        # Edit at branch_point_index=1 means the user msg at index 2 is being edited
+        resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "開始任務",  # same as original
+        })
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["error"] == "no_change"
+
+    def test_edit_changed_message_allowed(self, client, setup_story, monkeypatch):
+        """Editing a message with different content should proceed (mock LLM)."""
+        import app as app_module
+        # Mock the LLM call to avoid actual API calls
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("GM回覆", None))
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+        resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "改變了的訊息",  # different from original
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+
+    def test_edit_stream_no_change_rejected(self, client, setup_story):
+        """Streaming edit with identical content should return error SSE event."""
+        resp = client.post("/api/branches/edit/stream", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "開始任務",  # same as original
+        })
+        # The response is SSE; check that it contains the error
+        data = resp.get_data(as_text=True)
+        assert "no_change" in data
+
     def test_branch_config_roundtrip(self, client, setup_story):
         # GET default config
         resp = client.get("/api/branches/main/config")

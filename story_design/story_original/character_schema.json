@@ -36,6 +36,11 @@
       "key": "current_status",
       "label": "狀態",
       "type": "text"
+    },
+    {
+      "key": "current_dungeon",
+      "label": "當前副本",
+      "type": "text"
     }
   ],
   "lists": [
@@ -73,6 +78,7 @@
     "physique",
     "spirit",
     "current_status",
-    "current_phase"
+    "current_phase",
+    "current_dungeon"
   ]
 }

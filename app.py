@@ -878,7 +878,8 @@ def _merge_branch_lore_into(story_id: str, src_branch_id: str, dst_branch_id: st
 
 
 def _search_branch_lore(story_id: str, branch_id: str, query: str,
-                         token_budget: int = 1500) -> str:
+                         token_budget: int = 1500,
+                         context: dict | None = None) -> str:
     """Search branch_lore.json using CJK bigram scoring. Returns formatted text."""
     lore = _load_branch_lore(story_id, branch_id)
     if not lore:
@@ -897,6 +898,14 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
     # Also use query words for non-CJK matching
     query_lower = query.lower()
 
+    # Dungeon scoping context
+    current_dungeon = ""
+    in_dungeon = False
+    if context:
+        current_dungeon = context.get("dungeon", "")
+        phase = context.get("phase", "")
+        in_dungeon = bool(current_dungeon and "副本" in phase)
+
     scored = []
     for e in lore:
         topic = e.get("topic", "")
@@ -913,6 +922,10 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
         # Boost for substring match in topic
         if query_lower and query_lower in topic.lower():
             score += 2.0
+
+        # Penalize lore from other dungeons
+        if in_dungeon and category == "副本世界觀" and e.get("subcategory", "") != current_dungeon:
+            score *= 0.1
 
         if score > 0:
             scored.append((score, e))
@@ -1241,6 +1254,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
                 "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
                 "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
+                "- `current_dungeon`: 當前所在副本名稱（如「咒術迴戰」「民俗台灣」「鬼滅之刃」）。進入副本時設定，回到主神空間時設為空字串 \"\"。必須與世界設定中的副本分類名一致。\n"
                 "- **人際關係**：`relationships: {\"NPC名\": \"新關係描述\"}`。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
                 "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
@@ -2380,6 +2394,7 @@ def _build_augmented_message(
         lore_context = {
             "phase": character_state.get("current_phase", ""),
             "status": character_state.get("current_status", ""),
+            "dungeon": character_state.get("current_dungeon", ""),
         }
 
     parts = []
@@ -2388,7 +2403,7 @@ def _build_augmented_message(
     if lore:
         parts.append(lore)
     # Search branch lore (linear CJK bigram search, smaller dataset)
-    branch_lore = _search_branch_lore(story_id, branch_id, user_text)
+    branch_lore = _search_branch_lore(story_id, branch_id, user_text, context=lore_context)
     if branch_lore:
         parts.append(branch_lore)
     if not is_blank:
@@ -3029,6 +3044,18 @@ def api_branches_edit():
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
     source_branch_id = parent_branch_id  # preserve for branch-level config copy
+
+    # No-change guard: reject if edited message is identical to original
+    edit_target_index = branch_point_index + 1
+    timeline = get_full_timeline(story_id, source_branch_id)
+    original_msg = next(
+        (m for m in timeline
+         if m.get("index") == edit_target_index and m.get("role") == "user"),
+        None,
+    )
+    if original_msg and original_msg.get("content", "").strip() == edited_message:
+        return jsonify({"ok": False, "error": "no_change"}), 400
+
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
@@ -3159,6 +3186,19 @@ def api_branches_edit_stream():
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
     source_branch_id = parent_branch_id  # preserve for branch-level config copy
+
+    # No-change guard: reject if edited message is identical to original
+    edit_target_index = branch_point_index + 1
+    timeline = get_full_timeline(story_id, source_branch_id)
+    original_msg = next(
+        (m for m in timeline
+         if m.get("index") == edit_target_index and m.get("role") == "user"),
+        None,
+    )
+    if original_msg and original_msg.get("content", "").strip() == edited_message:
+        return Response(_sse_event({"type": "error", "message": "no_change"}),
+                        mimetype="text/event-stream")
+
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return Response(_sse_event({"type": "error", "message": "parent branch not found"}),
