@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.9] - 2026-02-18
+
+### Fixed
+- **體系升級未同步**: Async extraction LLM 對體系（systems）等級升級輸出 `state no change`，因 prompt 缺乏明確指引。新增規則：GM 文本顯示體系等級變化時，必須輸出 `systems` map 更新。同時補強 `_apply_state_update_inner` 支援 `schema.fields` 中 `type: map` 的欄位（defensive fix）並新增 5 個測試 ([#112])
+
+[#112]: https://github.com/lainn9527/agent-story/pull/112
+
 ## [0.20.8] - 2026-02-18
 
 ### Fixed
