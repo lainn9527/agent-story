@@ -5,6 +5,18 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.5] - 2026-02-18
+
+### Fixed
+- **副本 Lore 跨副本污染**: 玩家在副本中時，其他副本的世界設定不再被注入 GM 上下文。`search_hybrid()` 和 `_search_branch_lore()` 對非當前副本的 `副本世界觀` 條目施加 0.1x 分數懲罰 ([#107])
+- **編輯無變更後端守衛**: 編輯訊息但內容未變更時，後端直接返回 400 `no_change`，不再建立新分支或呼叫 LLM。前端同步修正 DOM 還原和 toast 提示 ([#107])
+
+### Added
+- `current_dungeon` 角色狀態欄位：追蹤玩家當前所在副本名稱，由 LLM 抽取自動維護。進入/離開副本 API 同步設定 ([#107])
+- `scripts/migrate_current_dungeon.py` 資料遷移腳本：為既有分支回填 `current_dungeon`，支援 `--dry-run` ([#107])
+
+[#107]: https://github.com/lainn9527/agent-story/pull/107
+
 ## [0.20.4] - 2026-02-18
 
 ### Fixed
