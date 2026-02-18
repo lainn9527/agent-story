@@ -2249,8 +2249,11 @@ _CONTEXT_ECHO_RE = re.compile(
 )
 
 # Pattern to strip fate direction labels from GM text in conversation history
-# Matches lines like: **【命運走向：劫數】**, **【命運走向效應：波折】**, etc.
-_FATE_LABEL_RE = re.compile(r"\*{0,2}【命運(?:走向|判定)(?:效應)?[:：][^】]*】\*{0,2}\s*")
+# Matches lines like: **【命運走向：劫數】**, **【命運判定：18（成功）】**,
+# **【判定：大成功…】**, **【判定結果：…】** etc.
+_FATE_LABEL_RE = re.compile(
+    r"\*{0,2}【(?:命運(?:走向|判定)(?:效應)?|判定(?:結果)?)[:：][^】]*】\*{0,2}\s*"
+)
 
 
 def _strip_fate_from_messages(messages: list[dict]) -> list[dict]:
