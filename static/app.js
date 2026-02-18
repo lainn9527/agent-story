@@ -1695,7 +1695,7 @@ function startEditing(msgEl, msg) {
     haptic();
     const newText = textarea.value.trim();
     if (!newText) return;
-    if (newText === msg.content) {
+    if (newText === msg.content.trim()) {
       msgEl.classList.remove("editing");
       contentEl.innerHTML = originalHtml;
       return;
@@ -1792,8 +1792,13 @@ async function submitEdit(msg, newText) {
         if (streamingEl) streamingEl.remove();
         $loading.style.display = "none";
         if (errMsg !== "AbortError") {
-          loadBranches().then(() => renderBranchList());
-          showAlert(errMsg || "編輯失敗");
+          if (errMsg === "no_change") {
+            // Content unchanged — restore DOM to pre-edit state
+            loadMessages();
+          } else {
+            loadBranches().then(() => renderBranchList());
+            showAlert(errMsg || "編輯失敗");
+          }
         }
         activeStreamController = null;
       },
