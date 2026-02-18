@@ -585,3 +585,97 @@ class TestInstructionKeysBlocked:
         app_module._apply_state_update_inner(story_id, "main", {"修真境界": "煉氣期"}, SCHEMA)
         state = _load_state(tmp_path, story_id)
         assert state["修真境界"] == "煉氣期"
+
+
+# ===================================================================
+# schema.fields map-type entries (e.g. systems/體系)
+# ===================================================================
+
+SCHEMA_WITH_FIELDS_MAP = {
+    "fields": [
+        {"key": "name", "label": "姓名", "type": "text"},
+        {"key": "reward_points", "label": "獎勵點", "type": "number"},
+        {"key": "systems", "label": "體系", "type": "map"},
+    ],
+    "lists": [
+        {"key": "inventory", "label": "道具欄", "type": "map"},
+    ],
+    "direct_overwrite_keys": [],
+}
+
+INITIAL_STATE_WITH_SYSTEMS = {
+    "name": "測試者",
+    "reward_points": 5000,
+    "inventory": {},
+    "systems": {"死生之道": "B級（具備空間掌控力）"},
+}
+
+
+def _load_state_for(tmp_path, story_id, branch_id="main"):
+    path = tmp_path / "data" / "stories" / story_id / "branches" / branch_id / "character_state.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+class TestFieldsMapType:
+    """schema.fields entries with type=map should be deep-merged like schema.lists map entries."""
+
+    def test_system_grade_upgrade_upserts_key(self, tmp_path, story_id, setup_state):
+        """Upgrading a system grade (e.g. B→A) updates the existing key."""
+        setup_state(state=dict(INITIAL_STATE_WITH_SYSTEMS))
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": {"死生之道": "A級（漩渦瞳·空間感知）"}},
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state_for(tmp_path, story_id)
+        assert state["systems"]["死生之道"] == "A級（漩渦瞳·空間感知）"
+
+    def test_system_add_new_key(self, tmp_path, story_id, setup_state):
+        """Adding a new body cultivation system appends without removing others."""
+        setup_state(state=dict(INITIAL_STATE_WITH_SYSTEMS))
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": {"修真之道": "C級（入門）"}},
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state_for(tmp_path, story_id)
+        assert state["systems"]["死生之道"] == "B級（具備空間掌控力）"
+        assert state["systems"]["修真之道"] == "C級（入門）"
+
+    def test_system_remove_with_null(self, tmp_path, story_id, setup_state):
+        """Setting a key to null removes it from the map."""
+        setup_state(state=dict(INITIAL_STATE_WITH_SYSTEMS))
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": {"死生之道": None}},
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state_for(tmp_path, story_id)
+        assert "死生之道" not in state["systems"]
+
+    def test_system_non_dict_value_ignored(self, tmp_path, story_id, setup_state):
+        """If LLM outputs a string instead of a dict, the field is not overwritten."""
+        setup_state(state=dict(INITIAL_STATE_WITH_SYSTEMS))
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": "A級"},  # malformed LLM output
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state_for(tmp_path, story_id)
+        # Original value preserved; string value was not applied
+        assert state["systems"] == {"死生之道": "B級（具備空間掌控力）"}
+
+    def test_fields_map_key_in_handled_keys_no_extra_save(self, tmp_path, story_id, setup_state):
+        """fields-map keys are in handled_keys, so they are not double-saved as scalar extra fields."""
+        setup_state(state=dict(INITIAL_STATE_WITH_SYSTEMS))
+        # If 'systems' were NOT in handled_keys, a dict value would be ignored by
+        # the extra-keys scalar guard, which is fine — but it should be processed
+        # by the fields-map loop, not fall through.
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": {"死生之道": "A級（漩渦瞳）"}},
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state_for(tmp_path, story_id)
+        assert isinstance(state["systems"], dict)
+        assert state["systems"]["死生之道"] == "A級（漩渦瞳）"
