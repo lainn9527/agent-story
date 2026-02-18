@@ -611,11 +611,6 @@ INITIAL_STATE_WITH_SYSTEMS = {
 }
 
 
-def _load_state_for(tmp_path, story_id, branch_id="main"):
-    path = tmp_path / "data" / "stories" / story_id / "branches" / branch_id / "character_state.json"
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 class TestFieldsMapType:
     """schema.fields entries with type=map should be deep-merged like schema.lists map entries."""
 
@@ -627,7 +622,7 @@ class TestFieldsMapType:
             {"systems": {"死生之道": "A級（漩渦瞳·空間感知）"}},
             SCHEMA_WITH_FIELDS_MAP,
         )
-        state = _load_state_for(tmp_path, story_id)
+        state = _load_state(tmp_path, story_id)
         assert state["systems"]["死生之道"] == "A級（漩渦瞳·空間感知）"
 
     def test_system_add_new_key(self, tmp_path, story_id, setup_state):
@@ -638,7 +633,7 @@ class TestFieldsMapType:
             {"systems": {"修真之道": "C級（入門）"}},
             SCHEMA_WITH_FIELDS_MAP,
         )
-        state = _load_state_for(tmp_path, story_id)
+        state = _load_state(tmp_path, story_id)
         assert state["systems"]["死生之道"] == "B級（具備空間掌控力）"
         assert state["systems"]["修真之道"] == "C級（入門）"
 
@@ -650,7 +645,7 @@ class TestFieldsMapType:
             {"systems": {"死生之道": None}},
             SCHEMA_WITH_FIELDS_MAP,
         )
-        state = _load_state_for(tmp_path, story_id)
+        state = _load_state(tmp_path, story_id)
         assert "死生之道" not in state["systems"]
 
     def test_system_non_dict_value_ignored(self, tmp_path, story_id, setup_state):
@@ -661,7 +656,7 @@ class TestFieldsMapType:
             {"systems": "A級"},  # malformed LLM output
             SCHEMA_WITH_FIELDS_MAP,
         )
-        state = _load_state_for(tmp_path, story_id)
+        state = _load_state(tmp_path, story_id)
         # Original value preserved; string value was not applied
         assert state["systems"] == {"死生之道": "B級（具備空間掌控力）"}
 
@@ -676,6 +671,6 @@ class TestFieldsMapType:
             {"systems": {"死生之道": "A級（漩渦瞳）"}},
             SCHEMA_WITH_FIELDS_MAP,
         )
-        state = _load_state_for(tmp_path, story_id)
+        state = _load_state(tmp_path, story_id)
         assert isinstance(state["systems"], dict)
         assert state["systems"]["死生之道"] == "A級（漩渦瞳）"
