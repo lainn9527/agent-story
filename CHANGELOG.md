@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.8] - 2026-02-18
+
+### Fixed
+- **Fate strip 自我強化**: GM 在 fate mode OFF 時自行生成 `【判定：大成功】` 等格式，留在 recent window 造成後續回合持續模仿。擴大 `_FATE_LABEL_RE` regex 範圍，也清除 `【判定：】`、`【判定結果：】` 變體 ([#110])
+
+[#110]: https://github.com/lainn9527/agent-story/pull/110
+
 ## [0.20.7] - 2026-02-18
 
 ### Fixed
