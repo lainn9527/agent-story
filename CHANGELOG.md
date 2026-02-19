@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.11] - 2026-02-19
+
+### Fixed
+- **關閉骰子仍顯示命運走向**: `_FATE_LABEL_RE` 只匹配全形括號 `【】`，漏掉 GM 常用的半形 `[]`（如 `**[命運走向：順遂]**`）。fate mode 關閉時歷史訊息未被 strip，GM 從 context 模仿繼續輸出。修正 regex 支援兩種括號及 `效果/觸發/結果` 後綴 ([#113])
+
+[#113]: https://github.com/lainn9527/agent-story/pull/113
+
 ## [0.20.10] - 2026-02-18
 
 ### Fixed
