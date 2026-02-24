@@ -674,3 +674,199 @@ class TestFieldsMapType:
         state = _load_state(tmp_path, story_id)
         assert isinstance(state["systems"], dict)
         assert state["systems"]["死生之道"] == "A級（漩渦瞳）"
+
+
+# ===================================================================
+# Fuzzy key normalization
+# ===================================================================
+
+
+class TestNormalizeMapKey:
+    """Test _normalize_map_key helper for character-variant normalization."""
+
+    def test_strip_spaces(self):
+        assert app_module._normalize_map_key("C 級支線劇情") == "C級支線劇情"
+
+    def test_normalize_middle_dots(self):
+        for dot in ['‧', '・', '•']:
+            assert app_module._normalize_map_key(f"G病毒{dot}原始株") == "G病毒·原始株"
+
+    def test_normalize_dashes(self):
+        for dash in ['–', '-', 'ー']:
+            assert app_module._normalize_map_key(f"死生之刃{dash}覺醒") == "死生之刃—覺醒"
+
+    def test_normalize_fullwidth_alpha(self):
+        assert app_module._normalize_map_key("Ｇ病毒") == "G病毒"
+
+    def test_normalize_fullwidth_digits(self):
+        assert app_module._normalize_map_key("等級５") == "等級5"
+
+    def test_normalize_brackets(self):
+        assert app_module._normalize_map_key("空間戒指（5立方公尺）") == "空間戒指(5立方公尺)"
+
+    def test_strip_fullwidth_space(self):
+        assert app_module._normalize_map_key("死生\u3000之刃") == "死生之刃"
+
+    def test_fullwidth_hyphen(self):
+        assert app_module._normalize_map_key("死生之刃－覺醒") == "死生之刃—覺醒"
+
+    def test_combined_normalization(self):
+        assert app_module._normalize_map_key("Ｇ 病毒・原始株（Ａ級）") == "G病毒·原始株(A級)"
+
+
+# ===================================================================
+# Fuzzy dedup in inventory (map type via schema.lists)
+# ===================================================================
+
+
+class TestFuzzyInventoryDedup:
+    """Fuzzy key matching prevents duplicate inventory entries from LLM character variations."""
+
+    def test_spaces_dedup(self, tmp_path, story_id, setup_state):
+        """'C級支線劇情' update matches existing 'C 級支線劇情'."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"C 級支線劇情": "進行中"}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"C級支線劇情": "已完成"}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "C 級支線劇情" in state["inventory"]
+        assert state["inventory"]["C 級支線劇情"] == "已完成"
+        assert "C級支線劇情" not in state["inventory"]
+
+    def test_dots_dedup(self, tmp_path, story_id, setup_state):
+        """'G病毒·原始株' matches 'G病毒‧原始株'."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"G病毒‧原始株": ""}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"G病毒·原始株": "已使用"}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "G病毒‧原始株" in state["inventory"]
+        assert state["inventory"]["G病毒‧原始株"] == "已使用"
+        assert "G病毒·原始株" not in state["inventory"]
+
+    def test_brackets_dedup(self, tmp_path, story_id, setup_state):
+        """'空間戒指（5立方公尺）' matches '空間戒指(5立方公尺)'."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"空間戒指(5立方公尺)": ""}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"空間戒指（5立方公尺）": "已裝備"}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "空間戒指(5立方公尺)" in state["inventory"]
+        assert state["inventory"]["空間戒指(5立方公尺)"] == "已裝備"
+
+    def test_no_false_positive(self, tmp_path, story_id, setup_state):
+        """Genuinely different items remain separate."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"冰劍": ""}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"火劍": ""}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "冰劍" in state["inventory"]
+        assert "火劍" in state["inventory"]
+        assert len([k for k in state["inventory"] if k in ("冰劍", "火劍")]) == 2
+
+    def test_fuzzy_removal_base_name(self, tmp_path, story_id, setup_state):
+        """Removing with base-name fallback: {'道具名（舊狀態）': null} removes '道具名（新狀態）'."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"道具名（新狀態）": "強化"}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"道具名（舊狀態）": None}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "道具名（新狀態）" not in state["inventory"]
+        assert "道具名（舊狀態）" not in state["inventory"]
+
+    def test_fullwidth_alpha_dedup(self, tmp_path, story_id, setup_state):
+        """Full-width 'Ｓ級武器' matches half-width 'S級武器'."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"S級武器": ""}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory": {"Ｓ級武器": "強化版"}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "S級武器" in state["inventory"]
+        assert state["inventory"]["S級武器"] == "強化版"
+        assert "Ｓ級武器" not in state["inventory"]
+
+
+# ===================================================================
+# Fuzzy dedup in relationships (map type via schema.lists)
+# ===================================================================
+
+
+class TestFuzzyRelationshipsDedup:
+    def test_relationships_space_dedup(self, tmp_path, story_id, setup_state):
+        """'小 薇' update matches existing '小薇'."""
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"relationships": {"小 薇": "深厚信任"}},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "小薇" in state["relationships"]
+        assert state["relationships"]["小薇"] == "深厚信任"
+        assert "小 薇" not in state["relationships"]
+
+
+# ===================================================================
+# Fuzzy dedup in systems (map type via schema.fields)
+# ===================================================================
+
+
+class TestFuzzySystemsDedup:
+    def test_systems_dot_dedup(self, tmp_path, story_id, setup_state):
+        """'死生・之道' matches existing '死生·之道'."""
+        setup_state(state={**INITIAL_STATE_WITH_SYSTEMS,
+                           "systems": {"死生·之道": "B級"}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": {"死生・之道": "A級"}},
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "死生·之道" in state["systems"]
+        assert state["systems"]["死生·之道"] == "A級"
+        assert "死生・之道" not in state["systems"]
+
+    def test_systems_removal_base_name_fallback(self, tmp_path, story_id, setup_state):
+        """Removing system by base-name fallback when key has paren suffix."""
+        setup_state(state={**INITIAL_STATE_WITH_SYSTEMS,
+                           "systems": {"修真之道（入門）": "C級"}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"systems": {"修真之道（進階）": None}},
+            SCHEMA_WITH_FIELDS_MAP,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "修真之道（入門）" not in state["systems"]
+        assert "修真之道（進階）" not in state["systems"]
+
+
+# ===================================================================
+# Fuzzy dedup via legacy inventory_add path
+# ===================================================================
+
+
+class TestFuzzyLegacyAdd:
+    def test_legacy_add_fuzzy_matches_existing(self, tmp_path, story_id, setup_state):
+        """Legacy inventory_add with space variation should match existing key."""
+        setup_state("main", {**INITIAL_STATE, "inventory": {"G 病毒·原始株": ""}})
+        app_module._apply_state_update_inner(
+            story_id, "main",
+            {"inventory_add": ["G病毒·原始株（已使用）"]},
+            SCHEMA,
+        )
+        state = _load_state(tmp_path, story_id)
+        assert "G 病毒·原始株" in state["inventory"]
+        assert "G病毒·原始株" not in state["inventory"]
