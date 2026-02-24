@@ -1476,6 +1476,45 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
     t.start()
 
 
+_NORMALIZE_DOTS_RE = re.compile(r'[‧・•]')
+_NORMALIZE_DASHES_RE = re.compile(r'[–\-ー]')
+
+
+def _normalize_map_key(key: str) -> str:
+    """Normalize a map key for fuzzy matching. Preserves semantics, normalizes characters."""
+    k = key.replace(' ', '').replace('\u3000', '')
+    k = k.replace('（', '(').replace('）', ')')
+    # Fullwidth→halfwidth BEFORE dot/dash regex so fullwidth variants are caught
+    result = []
+    for ch in k:
+        cp = ord(ch)
+        if 0xFF01 <= cp <= 0xFF5E:
+            result.append(chr(cp - 0xFEE0))
+        else:
+            result.append(ch)
+    k = ''.join(result)
+    k = _NORMALIZE_DOTS_RE.sub('·', k)
+    k = _NORMALIZE_DASHES_RE.sub('—', k)
+    return k
+
+
+def _resolve_map_keys(update_map: dict, existing_map: dict) -> dict:
+    """Rewrite update keys to match existing keys via fuzzy normalization."""
+    if not existing_map or not update_map:
+        return update_map
+    norm_to_existing = {}
+    for ek in existing_map:
+        norm_to_existing[_normalize_map_key(ek)] = ek
+    resolved = {}
+    for uk, uv in update_map.items():
+        norm_uk = _normalize_map_key(uk)
+        if norm_uk in norm_to_existing and uk != norm_to_existing[norm_uk]:
+            resolved[norm_to_existing[norm_uk]] = uv
+        else:
+            resolved[uk] = uv
+    return resolved
+
+
 _ITEM_BASE_RE = re.compile(r'\s*[（(].*$')
 _ITEM_QTY_RE = re.compile(r'\s*[x×]\d+$')
 
@@ -1580,6 +1619,9 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
                         if isinstance(item, str):
                             base, status = _parse_item_to_kv(item)
                             inv_map[base] = status
+            if inv_map:
+                existing = state.get(lkey, {})
+                update[lkey] = _resolve_map_keys(inv_map, existing)
 
     # Process map-type fields defined in schema.fields (e.g. systems)
     for field_def in schema.get("fields", []):
@@ -1588,9 +1630,17 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         key = field_def["key"]
         if key in update and isinstance(update[key], dict):
             existing = state.get(key, {})
+            update[key] = _resolve_map_keys(update[key], existing)
             for k, v in update[key].items():
                 if v is None:
-                    existing.pop(k, None)
+                    if k in existing:
+                        existing.pop(k)
+                    else:
+                        base = _extract_item_base_name(k)
+                        for ek in list(existing):
+                            if _extract_item_base_name(ek) == base:
+                                existing.pop(ek)
+                                break
                 else:
                     existing[k] = v
             state[key] = existing
@@ -1603,9 +1653,17 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         if list_type == "map":
             if key in update and isinstance(update[key], dict):
                 existing = state.get(key, {})
+                update[key] = _resolve_map_keys(update[key], existing)
                 for k, v in update[key].items():
                     if v is None:
-                        existing.pop(k, None)
+                        if k in existing:
+                            existing.pop(k)
+                        else:
+                            base = _extract_item_base_name(k)
+                            for ek in list(existing):
+                                if _extract_item_base_name(ek) == base:
+                                    existing.pop(ek)
+                                    break
                     else:
                         existing[k] = v
                 state[key] = existing
