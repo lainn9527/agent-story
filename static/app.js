@@ -2968,8 +2968,8 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 // Config Panel (provider / model switcher)
 // ---------------------------------------------------------------------------
 
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-2.0-flash"];
-const CLAUDE_MODELS = ["claude-sonnet-4-5-20250929", "claude-opus-4-6", "claude-haiku-4-5-20251001"];
+const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
+const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
 const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
 
 async function loadConfigPanel() {
