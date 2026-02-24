@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.12] - 2026-02-24
+
+### Fixed
+- **角色狀態重複項目**: LLM 跨回合常用微妙不同的名稱指同一物品（如 "G病毒原始株" vs "G 病毒·原始株"、"C級支線劇情" vs "C 級支線劇情"），導致道具欄/人際關係/體系累積重複。新增 fuzzy key matching 層，標準化空白、中間點、破折號、括號、全形英數字後比對，更新時自動對應到既有 key，並支援 base-name fallback 移除 ([#114])
+
+[#114]: https://github.com/lainn9527/agent-story/pull/114
+
 ## [0.20.11] - 2026-02-19
 
 ### Fixed
