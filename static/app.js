@@ -2970,7 +2970,33 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
-const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
+const CODEX_MODELS = ["gpt-5.3-codex", "gpt-5-codex"];
+const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude", codex_cli: "Codex" };
+const PROVIDER_MODELS = {
+  gemini: GEMINI_MODELS,
+  claude_cli: CLAUDE_MODELS,
+  codex_cli: CODEX_MODELS,
+};
+
+function getCurrentProviderModel(cfg, provider) {
+  if (provider === "gemini") return cfg.gemini?.model || GEMINI_MODELS[0];
+  if (provider === "codex_cli") return cfg.codex_cli?.model || CODEX_MODELS[0];
+  return cfg.claude_cli?.model || CLAUDE_MODELS[0];
+}
+
+function getProviderModels(provider, currentModel = "") {
+  const models = [...(PROVIDER_MODELS[provider] || CLAUDE_MODELS)];
+  if (currentModel && !models.includes(currentModel)) models.unshift(currentModel);
+  return models;
+}
+
+function buildProviderUpdate(provider, model) {
+  const update = { provider };
+  if (provider === "gemini") update.gemini = { model };
+  else if (provider === "codex_cli") update.codex_cli = { model };
+  else update.claude_cli = { model };
+  return update;
+}
 
 async function loadConfigPanel() {
   const provSel = document.getElementById("provider-select");
@@ -2994,7 +3020,7 @@ async function loadConfigPanel() {
     // Populate model dropdown based on current provider
     function updateModelDropdown(provider, currentModel) {
       modelSel.innerHTML = "";
-      const models = provider === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
+      const models = getProviderModels(provider, currentModel);
       for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m;
@@ -3004,29 +3030,22 @@ async function loadConfigPanel() {
       }
     }
 
-    const currentModel = cfg.provider === "gemini"
-      ? cfg.gemini.model
-      : cfg.claude_cli.model;
+    const currentModel = getCurrentProviderModel(cfg, cfg.provider);
     updateModelDropdown(cfg.provider, currentModel);
 
     // On provider change
     provSel.onchange = async () => {
       const newProv = provSel.value;
-      const models = newProv === "gemini" ? GEMINI_MODELS : CLAUDE_MODELS;
-      updateModelDropdown(newProv, models[0]);
-      const update = { provider: newProv };
-      if (newProv === "gemini") update.gemini = { model: models[0] };
-      else update.claude_cli = { model: models[0] };
-      await API.setConfig(update);
+      const models = getProviderModels(newProv);
+      const nextModel = models[0];
+      updateModelDropdown(newProv, nextModel);
+      await API.setConfig(buildProviderUpdate(newProv, nextModel));
     };
 
     // On model change
     modelSel.onchange = async () => {
       const prov = provSel.value;
-      const update = {};
-      if (prov === "gemini") update.gemini = { model: modelSel.value };
-      else update.claude_cli = { model: modelSel.value };
-      await API.setConfig(update);
+      await API.setConfig(buildProviderUpdate(prov, modelSel.value));
     };
   } catch (e) {
     console.error("loadConfigPanel error:", e);
@@ -3229,11 +3248,11 @@ async function loadAddonPanelState() {
       const sel = document.getElementById("addon-model-combined");
       if (sel) {
         sel.innerHTML = "";
-        const currentModel = cfg.provider === "gemini" ? cfg.gemini.model : cfg.claude_cli.model;
-        const providerModels = { gemini: GEMINI_MODELS, claude_cli: CLAUDE_MODELS };
-        for (const [prov, models] of Object.entries(providerModels)) {
+        const currentModel = getCurrentProviderModel(cfg, cfg.provider);
+        for (const [prov, label] of Object.entries(PROVIDER_LABELS)) {
+          const models = getProviderModels(prov);
           const group = document.createElement("optgroup");
-          group.label = PROVIDER_LABELS[prov] || prov;
+          group.label = label || prov;
           for (const m of models) {
             const opt = document.createElement("option");
             opt.value = prov + "|" + m;
@@ -3246,10 +3265,7 @@ async function loadAddonPanelState() {
 
         sel.onchange = async () => {
           const [newProv, newModel] = sel.value.split("|");
-          const update = { provider: newProv };
-          if (newProv === "gemini") update.gemini = { model: newModel };
-          else update.claude_cli = { model: newModel };
-          await API.setConfig(update);
+          await API.setConfig(buildProviderUpdate(newProv, newModel));
           // Sync drawer dropdowns
           loadConfigPanel();
         };

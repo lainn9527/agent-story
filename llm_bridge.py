@@ -1,7 +1,7 @@
 """LLM Bridge — dispatches GM calls to the configured provider.
 
 Swap provider by editing llm_config.json (auto-reloads on file change).
-Supported providers: "gemini", "claude_cli"
+Supported providers: "gemini", "claude_cli", "codex_cli"
 """
 
 import json
@@ -70,6 +70,9 @@ def _capture_usage(provider: str, model: str):
     if provider == "gemini":
         from gemini_bridge import get_last_usage as _gemini_usage
         usage = _gemini_usage()
+    elif provider == "codex_cli":
+        from codex_bridge import get_last_usage as _codex_usage
+        usage = _codex_usage()
     else:
         from claude_bridge import get_last_usage as _claude_usage
         usage = _claude_usage()
@@ -99,6 +102,16 @@ def call_claude_gm(
             user_message, system_prompt, recent_messages,
             gemini_cfg=g, model=model,
             session_id=session_id,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "codex_cli":
+        model = cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex")
+        from codex_bridge import call_codex_gm
+        result = call_codex_gm(
+            user_message, system_prompt, recent_messages,
+            session_id=session_id, model=model,
         )
         _capture_usage(provider, model)
         return result
@@ -146,6 +159,22 @@ def call_claude_gm_stream(
             yield (event_type, payload)
         return
 
+    if provider == "codex_cli":
+        if tools:
+            log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
+        model = cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex")
+        from codex_bridge import call_codex_gm_stream as _codex_stream
+        for event_type, payload in _codex_stream(
+            user_message, system_prompt, recent_messages,
+            session_id=session_id, model=model,
+        ):
+            if event_type == "done" and isinstance(payload, dict):
+                usage = payload.get("usage")
+                if usage:
+                    payload["usage"] = {**usage, "provider": provider, "model": model}
+            yield (event_type, payload)
+        return
+
     # Default: Claude CLI (tools not supported)
     if tools:
         log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
@@ -177,6 +206,13 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
             gemini_cfg=g, model=model,
             system_prompt=system_prompt,
         )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "codex_cli":
+        from codex_bridge import call_codex_oneshot
+        model = cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex")
+        result = call_codex_oneshot(prompt, system_prompt=system_prompt, model=model)
         _capture_usage(provider, model)
         return result
 

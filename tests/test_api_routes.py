@@ -152,6 +152,7 @@ def setup_story(tmp_path, story_id):
         "provider": "gemini",
         "gemini": {"api_keys": [{"key": "test_key_123", "tier": "free"}], "model": "gemini-2.5-flash"},
         "claude_cli": {"model": "claude-sonnet-4-5-20250929"},
+        "codex_cli": {"model": "gpt-5.3-codex"},
     }
     (tmp_path / "llm_config.json").write_text(json.dumps(config), encoding="utf-8")
 
@@ -492,10 +493,23 @@ class TestConfigAPI:
         data = resp.get_json()
         assert data["ok"] is True
         assert data["provider"] == "gemini"
+        assert data["codex_cli"]["model"] == "gpt-5.3-codex"
         assert "version" in data
         # API keys should NOT be exposed
         raw = json.dumps(data)
         assert "test_key_123" not in raw
+
+    def test_set_config_codex_cli(self, client, setup_story):
+        resp = client.post("/api/config", json={
+            "provider": "codex_cli",
+            "codex_cli": {"model": "gpt-5-codex"},
+        })
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        data = client.get("/api/config").get_json()
+        assert data["provider"] == "codex_cli"
+        assert data["codex_cli"]["model"] == "gpt-5-codex"
 
 
 # ===================================================================
