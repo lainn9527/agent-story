@@ -5,7 +5,7 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 
 ## Architecture
 - **Backend**: Flask on port 5051 (`app.py`)
-- **AI Bridge**: Multi-provider LLM bridge (`llm_bridge.py`) — dispatches to Gemini API or Claude CLI
+- **AI Bridge**: Multi-provider LLM bridge (`llm_bridge.py`) — dispatches to Gemini API, Claude CLI, or Codex CLI
 - **Frontend**: Vanilla HTML/CSS/JS, dark theme, single-page app with slide-out drawer
 - **Data**: Per-story isolation in `data/stories/<story_id>/`, SQLite for search indexes
 
@@ -17,11 +17,12 @@ Interactive story RPG with branching timelines, multi-story support, and rich na
 |------|---------|
 | `app.py` | Flask routes, multi-story support, unified tag pipeline |
 | `llm_bridge.py` | LLM provider dispatcher, auto-reloads `llm_config.json` |
-| `llm_config.json` | Provider config: switch `"provider"` between `"gemini"` / `"claude_cli"` |
+| `llm_config.json` | Provider config: switch `"provider"` between `"gemini"` / `"claude_cli"` / `"codex_cli"` |
 | `gemini_bridge.py` | Gemini API bridge (streaming + non-streaming), multi-key fallback |
 | `gemini_key_manager.py` | Gemini API key pool with rate-limit/expiry cooldown tracking |
 | `compaction.py` | Conversation compaction: rolling narrative recap via background LLM |
 | `claude_bridge.py` | Claude CLI bridge, `--output-format json` for session_id |
+| `codex_bridge.py` | Codex CLI bridge (`codex exec --json`) with model fallback |
 | `lore_db.py` | SQLite lore search engine (CJK bigram scoring) |
 | `usage_db.py` | SQLite token/cost tracking per story, WAL mode |
 | `event_db.py` | SQLite event tracing engine (CJK bigram search) |
@@ -179,7 +180,7 @@ Switch provider via drawer UI (⚙️ 設定) or by editing `llm_config.json` (a
 **Config format** (`llm_config.json`):
 ```json
 {
-  "provider": "gemini",
+  "provider": "codex_cli",
   "gemini": {
     "api_keys": [
       {"key": "AIza...", "tier": "free"},
@@ -187,10 +188,16 @@ Switch provider via drawer UI (⚙️ 設定) or by editing `llm_config.json` (a
     ],
     "model": "gemini-2.5-flash"
   },
-  "claude_cli": { "model": "claude-sonnet-4-5-20250929" }
+  "claude_cli": { "model": "claude-sonnet-4-5-20250929" },
+  "codex_cli": { "model": "default" }
 }
 ```
 Backward-compatible: old `"api_key": "string"` format auto-converts to single-element list.
+
+**Cross-machine deploy note (`codex_cli`)**:
+- `codex_bridge.py` resolves binary path from env var `CODEX_BIN`; fallback is `/usr/local/bin/codex`.
+- For multi-machine deploys, explicitly set `CODEX_BIN` in service env (systemd/pm2/launchd), e.g. `CODEX_BIN=/usr/local/bin/codex`.
+- If machine path differs (e.g. `/usr/bin/codex`), update `CODEX_BIN` instead of editing source code.
 
 **Multi-key Gemini fallback** (`gemini_key_manager.py`):
 - On HTTP 429 (rate limit), 400 (expired key), 401, 403 → mark key with 60s cooldown, try next
@@ -201,6 +208,7 @@ Backward-compatible: old `"api_key": "string"` format auto-converts to single-el
 |----------|--------|-----------|------|
 | `gemini` | `gemini.api_keys[]`, `gemini.model` | SSE via `streamGenerateContent` | Free tier / pay-per-token |
 | `claude_cli` | `claude_cli.model` | NDJSON via `--output-format stream-json` | Included in Claude subscription |
+| `codex_cli` | `codex_cli.model` (`default` recommended) | Single-chunk pseudo-stream via `codex exec --json` | Depends on Codex account/subscription |
 
 - `llm_bridge.py` exports `call_claude_gm`, `call_claude_gm_stream`, `call_oneshot`
 - `app.py` and `npc_evolution.py` import from `llm_bridge` (never directly from provider bridges)
