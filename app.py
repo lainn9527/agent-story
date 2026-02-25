@@ -4853,7 +4853,7 @@ def api_saves_create():
 
 @app.route("/api/saves/<save_id>/load", methods=["POST"])
 def api_saves_load(save_id):
-    """Load a save: create new branch from saved state and switch to it."""
+    """Load a save: switch back to the original branch where the save was created."""
     story_id = _active_story_id()
     saves = _load_json(_story_saves_path(story_id), [])
     save = next((s for s in saves if s["id"] == save_id), None)
@@ -4862,53 +4862,17 @@ def api_saves_load(save_id):
 
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
-    parent_branch_id = save["branch_id"]
-    branch_point_index = save["message_index"]
+    branch_id = save["branch_id"]
 
-    # Resolve parent (handle deleted branches gracefully)
-    if parent_branch_id != "main" and parent_branch_id not in branches:
+    if branch_id != "main" and branch_id not in branches:
         return jsonify({"ok": False, "error": "original branch no longer exists"}), 404
 
-    branch_id = f"branch_{uuid.uuid4().hex[:8]}"
-    now = datetime.now(timezone.utc).isoformat()
-
-    # Restore snapshots
-    _save_json(_story_character_state_path(story_id, branch_id), save.get("character_snapshot", {}))
-    _save_json(_story_npcs_path(story_id, branch_id), save.get("npc_snapshot", []))
-    _save_json(_story_messages_path(story_id, branch_id), [])
-
-    # Restore world day (world_day is a float, use set_world_day for correct format)
-    wd = save.get("world_day", 0)
-    set_world_day(story_id, branch_id, wd)
-
-    # Restore recap from snapshot (preferred) or fallback to parent copy
-    recap_snapshot = save.get("recap_snapshot")
-    if recap_snapshot:
-        save_recap(story_id, branch_id, recap_snapshot)
-    else:
-        copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
-    _save_branch_config(story_id, branch_id, _load_branch_config(story_id, parent_branch_id))
-    # Copy branch lore from parent
-    parent_bl = _load_branch_lore(story_id, parent_branch_id)
-    if parent_bl:
-        _save_branch_lore(story_id, branch_id, parent_bl)
-
-    save_name = save.get("name", "存檔")
-    branches[branch_id] = {
-        "id": branch_id,
-        "name": f"[存檔] {save_name}",
-        "title": save_name,
-        "parent_branch_id": parent_branch_id,
-        "branch_point_index": branch_point_index,
-        "created_at": now,
-        "session_id": None,
-        "character_state_file": f"character_state_{branch_id}.json",
-    }
     tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
 
-    log.info("save loaded: %s → new branch %s", save_id, branch_id)
-    return jsonify({"ok": True, "branch_id": branch_id, "branch": branches[branch_id]})
+    log.info("save loaded: %s → switched to branch %s", save_id, branch_id)
+    branch_meta = branches.get(branch_id, {"id": branch_id})
+    return jsonify({"ok": True, "branch_id": branch_id, "branch": branch_meta})
 
 
 @app.route("/api/saves/<save_id>", methods=["DELETE"])
