@@ -3137,8 +3137,12 @@ def api_branches_switch():
 
     story_id = _active_story_id()
     tree = _load_tree(story_id)
-    if branch_id not in tree.get("branches", {}):
+    branches = tree.get("branches", {})
+    if branch_id not in branches:
         return jsonify({"ok": False, "error": "branch not found"}), 404
+    branch = branches[branch_id]
+    if branch.get("deleted") or branch.get("merged") or branch.get("pruned"):
+        return jsonify({"ok": False, "error": "cannot switch to inactive branch"}), 400
 
     tree["active_branch_id"] = branch_id
     _clear_loaded_save_preview(tree)
@@ -3813,6 +3817,19 @@ def api_branches_promote():
         cur = b.get("parent_branch_id")
     ancestor_chain = list(reversed(ancestor_chain_reverse))
     keep_ids = set(ancestor_chain)
+
+    # Remove parent-continuation alternatives along kept lineage so promote
+    # results in a single route with no sibling switch variants.
+    for i in range(1, len(ancestor_chain)):
+        parent_id = ancestor_chain[i - 1]
+        child_id = ancestor_chain[i]
+        child_bp = branches.get(child_id, {}).get("branch_point_index")
+        if child_bp is None:
+            continue
+        parent_delta = _load_json(_story_messages_path(story_id, parent_id), [])
+        trimmed_delta = [m for m in parent_delta if m.get("index", 0) <= child_bp]
+        if len(trimmed_delta) != len(parent_delta):
+            _save_json(_story_messages_path(story_id, parent_id), trimmed_delta)
 
     # Build a parent -> children map once, then soft-delete sibling subtrees
     # that are not part of the kept lineage.
