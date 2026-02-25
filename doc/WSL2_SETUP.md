@@ -45,17 +45,92 @@ hostname -I
 
 ### 4. SSH Server (auto-start on WSL2 boot)
 
-Add to `/etc/wsl.conf`:
+Enable systemd and let it manage SSH. Add to `/etc/wsl.conf`:
+
 ```ini
 [boot]
-command = mkdir -p /run/sshd && /usr/sbin/sshd
+systemd=true
 ```
 
-### 5. Remote Access via Tailscale
+Then enable SSH via systemd:
+```bash
+sudo systemctl enable ssh
+sudo systemctl start ssh
+```
+
+> **Note:** Do not use `command = /usr/sbin/sshd` in `[boot]` when `systemd=true` is set — they conflict.
+
+### 5. Auto-start WSL2 on Windows Login
+
+WSL2 does not start automatically after a Windows reboot. Without this step, systemd never runs and SSH stays down.
+
+Run in **PowerShell (Administrator)**:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu --exec echo init"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 30)
+Register-ScheduledTask -TaskName "WSL2 AutoStart" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force
+```
+
+Replace `Ubuntu` with your distro name (check with `wsl -l`).
+
+**Verify** after setup:
+```powershell
+wsl --shutdown
+Start-ScheduledTask -TaskName "WSL2 AutoStart"
+# wait 10 seconds
+wsl -e bash -c "systemctl status ssh --no-pager"
+```
+
+Should show `Active: active (running)`.
+
+### 6. Auto-start RPG Server via systemd
+
+Create a systemd service so the Flask server starts automatically with WSL2:
+
+```bash
+sudo nano /etc/systemd/system/rpg-server.service
+```
+
+```ini
+[Unit]
+Description=Story RPG Server
+After=network.target ssh.service
+
+[Service]
+Type=simple
+User=eddylai
+WorkingDirectory=/home/eddylai/project/agent-story
+ExecStart=/usr/bin/python3 app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable rpg-server
+sudo systemctl start rpg-server
+```
+
+Verify:
+```bash
+sudo systemctl status rpg-server
+```
+
+### 7. Remote Access via Tailscale
 
 Install Tailscale on both Windows and the remote machine, log in with the same account. Use the Tailscale IP (`100.x.x.x`) to connect from anywhere.
 
 ## Starting the Server
+
+### Automatic (after setup above)
+
+Both SSH and the RPG server start automatically when WSL2 boots. No manual action needed after a Windows reboot.
 
 ### Manual start
 
@@ -90,3 +165,4 @@ This will:
 - The default `CLAUDE_BIN` in `claude_bridge.py` is set to a Mac path (`/Users/eddylai/.local/bin/claude`). The `CLAUDE_BIN` env var overrides this for WSL2.
 - Production on Mac uses `deploy.sh`; WSL2 uses `deploy_wsl2.sh`.
 - Data files (`data/`) are gitignored and not affected by deploys.
+- The `rpg-server` systemd service does not inherit shell env vars. If `PYTHONPATH` or `CLAUDE_BIN` are needed, add `Environment=` lines to the `[Service]` section.
