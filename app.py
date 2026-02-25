@@ -3762,7 +3762,7 @@ def api_branches_regenerate_stream():
 
 @app.route("/api/branches/promote", methods=["POST"])
 def api_branches_promote():
-    """Promote a branch to become the new main timeline."""
+    """Promote a branch by pruning alternative sibling routes along its lineage."""
     body = request.get_json(force=True)
     branch_id = body.get("branch_id", "").strip()
 
@@ -3776,69 +3776,77 @@ def api_branches_promote():
     if branch_id not in branches:
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
+    if branches[branch_id].get("deleted"):
+        return jsonify({"ok": False, "error": "cannot promote a deleted branch"}), 400
+    if branches[branch_id].get("merged"):
+        return jsonify({"ok": False, "error": "cannot promote a merged branch"}), 400
     if branches[branch_id].get("pruned"):
         return jsonify({"ok": False, "error": "cannot promote a pruned branch"}), 400
 
-    original = _load_json(_story_parsed_path(story_id), [])
-    original_count = len(original)
-    full_timeline = get_full_timeline(story_id, branch_id)
-    new_messages = [m for m in full_timeline if m.get("index", 0) >= original_count]
-    for m in new_messages:
-        m.pop("owner_branch_id", None)
-        m.pop("inherited", None)
-
-    ancestor_chain = []
+    # Build lineage from target branch upward.
+    # If a blank root is encountered, stop there and do not climb to global main.
+    ancestor_chain_reverse = []
     cur = branch_id
     visited = set()
-    while cur is not None and cur != "main" and cur not in visited:
-        visited.add(cur)
-        ancestor_chain.append(cur)
+    stopped_at_blank_root = False
+    while cur is not None and cur not in visited:
         b = branches.get(cur)
         if not b:
             break
+        visited.add(cur)
+        ancestor_chain_reverse.append(cur)
+        if b.get("blank"):
+            stopped_at_blank_root = True
+            break
         cur = b.get("parent_branch_id")
+    ancestor_chain = list(reversed(ancestor_chain_reverse))
+    keep_ids = set(ancestor_chain)
 
-    _save_json(_story_messages_path(story_id, "main"), new_messages)
-
-    # Copy recap and world_day from promoted branch to main
-    copy_recap_to_branch(story_id, branch_id, "main", -1)
-    copy_world_day(story_id, branch_id, "main")
-    copy_cheats(_story_dir(story_id), branch_id, "main")
-    # Merge branch lore from promoted branch into main (upsert, not overwrite)
-    _merge_branch_lore_into(story_id, branch_id, "main")
-    copy_dungeon_progress(story_id, branch_id, "main")
-
-    src_char = _story_character_state_path(story_id, branch_id)
-    dst_char = _story_character_state_path(story_id, "main")
-    if os.path.exists(src_char):
-        shutil.copy2(src_char, dst_char)
-
-    # Copy NPC data from promoted branch to main
-    src_npcs = _story_npcs_path(story_id, branch_id)
-    dst_npcs = _story_npcs_path(story_id, "main")
-    if os.path.exists(src_npcs):
-        shutil.copy2(src_npcs, dst_npcs)
-
-    branches_to_remove = set(ancestor_chain)
-    for bid, b in list(branches.items()):
-        if bid == "main":
+    # Build a parent -> children map once, then soft-delete sibling subtrees
+    # that are not part of the kept lineage.
+    children_map = {}
+    for bid, b in branches.items():
+        pid = b.get("parent_branch_id")
+        if pid is None:
             continue
-        if b.get("parent_branch_id") in branches_to_remove:
-            if bid in branches_to_remove:
-                continue
-            b["parent_branch_id"] = "main"
+        children_map.setdefault(pid, []).append(bid)
 
-    # Soft-delete ancestor branches (preserve data for timeline reconstruction)
+    branches_to_remove = set()
+
+    def _collect_subtree(root_id: str):
+        stack = [root_id]
+        seen = set()
+        while stack:
+            bid = stack.pop()
+            if bid in seen or bid in keep_ids:
+                continue
+            seen.add(bid)
+            branches_to_remove.add(bid)
+            stack.extend(children_map.get(bid, []))
+
+    for i in range(1, len(ancestor_chain)):
+        parent_id = ancestor_chain[i - 1]
+        kept_child_id = ancestor_chain[i]
+        for sibling_id in children_map.get(parent_id, []):
+            if sibling_id == kept_child_id or sibling_id in keep_ids:
+                continue
+            _collect_subtree(sibling_id)
+
+    # Soft-delete discarded sibling subtrees. Kept lineage is never deleted.
     now = datetime.now(timezone.utc).isoformat()
-    for bid in ancestor_chain:
+    for bid in sorted(branches_to_remove):
         branches[bid]["deleted"] = True
         branches[bid]["deleted_at"] = now
-        branches[bid]["was_main"] = True
 
-    tree["active_branch_id"] = "main"
+    tree["active_branch_id"] = branch_id
     _save_tree(story_id, tree)
 
-    return jsonify({"ok": True, "active_branch_id": "main"})
+    return jsonify({
+        "ok": True,
+        "active_branch_id": branch_id,
+        "deleted_branch_ids": sorted(branches_to_remove),
+        "stopped_at_blank_root": stopped_at_blank_root,
+    })
 
 
 @app.route("/api/branches/merge", methods=["POST"])

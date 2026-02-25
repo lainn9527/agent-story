@@ -1192,21 +1192,21 @@ function _btRenderTree(container, modal) {
       const promoteBtn = document.createElement("span");
       promoteBtn.className = "bt-action-btn bt-action-promote";
       promoteBtn.textContent = "\u2B06";
-      promoteBtn.title = "設為主時間線";
+      promoteBtn.title = "保留此路線（清理其他分支）";
       promoteBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!(await showConfirm(`確定要將分支「${branch.name || branch.id}」設為主時間線嗎？`))) return;
+        if (!(await showConfirm(`確定要保留分支「${branch.name || branch.id}」這條路線，並清理同層分歧嗎？`))) return;
         const res = await API.promoteBranch(branch.id);
         if (res.ok) {
-          currentBranchId = "main";
+          currentBranchId = res.active_branch_id || branch.id;
           await loadBranches();
-          await loadMessages("main");
-          const status = await API.status("main");
+          await loadMessages(currentBranchId);
+          const status = await API.status(currentBranchId);
           renderCharacterStatus(status);
           _btRenderTree(container, modal);
           scrollToBottom();
         } else {
-          alert(res.error || "設為主時間線失敗");
+          alert(res.error || "保留路線失敗");
         }
       });
       actions.appendChild(promoteBtn);
