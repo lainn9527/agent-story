@@ -107,7 +107,7 @@ def call_claude_gm(
         return result
 
     if provider == "codex_cli":
-        model = cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex")
+        model = cfg.get("codex_cli", {}).get("model", "default")
         from codex_bridge import call_codex_gm
         result = call_codex_gm(
             user_message, system_prompt, recent_messages,
@@ -162,7 +162,7 @@ def call_claude_gm_stream(
     if provider == "codex_cli":
         if tools:
             log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
-        model = cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex")
+        model = cfg.get("codex_cli", {}).get("model", "default")
         from codex_bridge import call_codex_gm_stream as _codex_stream
         for event_type, payload in _codex_stream(
             user_message, system_prompt, recent_messages,
@@ -211,7 +211,7 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 
     if provider == "codex_cli":
         from codex_bridge import call_codex_oneshot
-        model = cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex")
+        model = cfg.get("codex_cli", {}).get("model", "default")
         result = call_codex_oneshot(prompt, system_prompt=system_prompt, model=model)
         _capture_usage(provider, model)
         return result

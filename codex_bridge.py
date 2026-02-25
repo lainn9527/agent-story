@@ -12,7 +12,7 @@ log = logging.getLogger("rpg")
 CODEX_TIMEOUT = 300  # seconds
 CLEAN_CWD = "/tmp"   # avoid loading project instructions into prompt context
 CODEX_BIN = os.environ.get("CODEX_BIN", "/usr/local/bin/codex")
-DEFAULT_MODEL = "gpt-5.3-codex"
+DEFAULT_MODEL = "default"
 
 _tls = threading.local()
 
@@ -86,8 +86,8 @@ def _build_oneshot_prompt(prompt: str, system_prompt: str | None = None) -> str:
     return prompt
 
 
-def _codex_cmd(model: str) -> list[str]:
-    return [
+def _codex_cmd(model: str | None) -> list[str]:
+    cmd = [
         CODEX_BIN,
         "exec",
         "--ephemeral",
@@ -99,35 +99,27 @@ def _codex_cmd(model: str) -> list[str]:
         "--json",
         "-C",
         CLEAN_CWD,
-        "--model",
-        model or DEFAULT_MODEL,
-        "-",
     ]
+    selected = (model or DEFAULT_MODEL).strip()
+    if selected and selected != "default":
+        cmd.extend(["--model", selected])
+    cmd.append("-")
+    return cmd
 
 
-def _run_codex_json(prompt: str, model: str) -> tuple[str, dict | None, str | None]:
-    cmd = _codex_cmd(model)
-    t0 = time.time()
+def _looks_like_model_error(stderr_text: str) -> bool:
+    t = (stderr_text or "").lower()
+    return (
+        "unknown model" in t
+        or "model not found" in t
+        or "invalid model" in t
+    )
+
+
+def _parse_codex_json_output(stdout_text: str) -> tuple[str, dict | None]:
     response = ""
     usage = None
-
-    try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=CODEX_TIMEOUT,
-            cwd=CLEAN_CWD,
-        )
-    except subprocess.TimeoutExpired:
-        return "", None, "Codex 回應逾時，請稍後再試。"
-    except FileNotFoundError:
-        return "", None, "找不到 codex CLI。請確認已安裝 Codex CLI。"
-    except Exception as e:
-        return "", None, str(e)
-
-    for raw_line in result.stdout.splitlines():
+    for raw_line in stdout_text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
@@ -143,20 +135,65 @@ def _run_codex_json(prompt: str, model: str) -> tuple[str, dict | None, str | No
                     response = text
         elif data.get("type") == "turn.completed":
             usage = _normalize_usage(data.get("usage"))
+    return response, usage
 
-    elapsed = time.time() - t0
 
-    if result.returncode != 0:
-        err = result.stderr.strip() or f"Codex process exited with code {result.returncode}"
-        log.info("    codex_bridge: FAILED in %.1fs rc=%d", elapsed, result.returncode)
-        return "", usage, err
+def _run_codex_json(prompt: str, model: str) -> tuple[str, dict | None, str | None]:
+    t0 = time.time()
+    attempts = [model]
+    if model and model.strip() and model.strip() != "default":
+        # Retry without --model when configured model is invalid on this Codex CLI build.
+        attempts.append("default")
 
-    if not response:
-        log.info("    codex_bridge: empty response in %.1fs", elapsed)
-        return "", usage, "Codex 回傳空白回應"
+    last_err = ""
+    last_usage = None
 
-    log.info("    codex_bridge: OK in %.1fs response_len=%d", elapsed, len(response))
-    return response, usage, None
+    for idx, attempt_model in enumerate(attempts):
+        cmd = _codex_cmd(attempt_model)
+        try:
+            result = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=CODEX_TIMEOUT,
+                cwd=CLEAN_CWD,
+            )
+        except subprocess.TimeoutExpired:
+            return "", None, "Codex 回應逾時，請稍後再試。"
+        except FileNotFoundError:
+            return "", None, "找不到 codex CLI。請確認已安裝 Codex CLI。"
+        except Exception as e:
+            return "", None, str(e)
+
+        response, usage = _parse_codex_json_output(result.stdout)
+        elapsed = time.time() - t0
+        last_usage = usage
+
+        if result.returncode == 0 and response:
+            log.info("    codex_bridge: OK in %.1fs response_len=%d", elapsed, len(response))
+            return response, usage, None
+
+        stderr_text = (result.stderr or "").strip()
+        last_err = stderr_text or f"Codex process exited with code {result.returncode}"
+
+        should_retry = (
+            idx < len(attempts) - 1
+            and _looks_like_model_error(stderr_text)
+        )
+        if should_retry:
+            log.info("    codex_bridge: retrying with default model due to invalid configured model")
+            continue
+
+        if result.returncode != 0:
+            log.info("    codex_bridge: FAILED in %.1fs rc=%d", elapsed, result.returncode)
+        elif not response:
+            log.info("    codex_bridge: empty response in %.1fs", elapsed)
+        break
+
+    if not last_err:
+        last_err = "Codex 回傳空白回應"
+    return "", last_usage, last_err
 
 
 def call_codex_gm(
@@ -196,96 +233,18 @@ def call_codex_gm_stream(
     session_id: str | None = None,
     model: str = DEFAULT_MODEL,
 ):
-    """Stream a GM response from Codex CLI JSONL events."""
+    """Pseudo-stream Codex response as a single chunk.
+
+    Codex `exec --json` currently provides only completed message events
+    (no token deltas), so we emit one text chunk followed by done.
+    """
     del session_id  # kept for API compat
     _tls.last_usage = None
     prompt = _build_chat_prompt(user_message, system_prompt, recent_messages)
-    cmd = _codex_cmd(model)
-
-    log.info("    codex_bridge_stream: calling CLI prompt_len=%d", len(prompt))
-    t0 = time.time()
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            cwd=CLEAN_CWD,
-        )
-    except FileNotFoundError:
-        yield ("error", "找不到 codex CLI。請確認已安裝 Codex CLI。")
+    response, usage, err = _run_codex_json(prompt, model=model)
+    _tls.last_usage = usage
+    if err:
+        yield ("error", err)
         return
-    except Exception as e:
-        yield ("error", str(e))
-        return
-
-    try:
-        proc.stdin.write(prompt)
-        proc.stdin.close()
-    except Exception as e:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        yield ("error", str(e))
-        return
-
-    accumulated = ""
-    usage = None
-
-    try:
-        while True:
-            raw_line = proc.stdout.readline()
-            if not raw_line:
-                break
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            event_type = data.get("type")
-            if event_type == "item.completed":
-                item = data.get("item", {})
-                if isinstance(item, dict) and item.get("type") == "agent_message":
-                    text = _extract_agent_text(item)
-                    if text and text != accumulated:
-                        delta = text[len(accumulated):] if text.startswith(accumulated) else text
-                        accumulated = text
-                        if delta:
-                            yield ("text", delta)
-            elif event_type == "turn.completed":
-                usage = _normalize_usage(data.get("usage"))
-
-        proc.wait(timeout=10)
-        elapsed = time.time() - t0
-        _tls.last_usage = usage
-
-        if proc.returncode != 0 and not accumulated:
-            stderr_text = proc.stderr.read().strip() if proc.stderr else ""
-            error_msg = stderr_text or f"Codex process exited with code {proc.returncode}"
-            log.info("    codex_bridge_stream: FAILED in %.1fs rc=%d", elapsed, proc.returncode)
-            yield ("error", error_msg)
-            return
-
-        if not accumulated:
-            yield ("error", "Codex 回傳空白回應")
-            return
-
-        log.info("    codex_bridge_stream: OK in %.1fs response_len=%d", elapsed, len(accumulated))
-        yield ("done", {"response": accumulated, "session_id": None, "usage": usage})
-
-    except Exception as e:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        if accumulated:
-            yield ("done", {"response": accumulated, "session_id": None, "usage": usage})
-        else:
-            yield ("error", str(e))
+    yield ("text", response)
+    yield ("done", {"response": response, "session_id": None, "usage": usage})

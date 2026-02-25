@@ -5015,7 +5015,7 @@ def api_config_get():
             "model": cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929"),
         },
         "codex_cli": {
-            "model": cfg.get("codex_cli", {}).get("model", "gpt-5.3-codex"),
+            "model": cfg.get("codex_cli", {}).get("model", "default"),
         },
     })
 

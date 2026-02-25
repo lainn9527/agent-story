@@ -2970,7 +2970,7 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
-const CODEX_MODELS = ["gpt-5.3-codex", "gpt-5-codex"];
+const CODEX_MODELS = ["default", "gpt-5.3-codex", "gpt-5-codex"];
 const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude", codex_cli: "Codex" };
 const PROVIDER_MODELS = {
   gemini: GEMINI_MODELS,
