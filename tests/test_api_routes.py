@@ -257,6 +257,91 @@ class TestBranchesAPI:
         data = resp.get_json()
         assert data["ok"] is True
 
+    def test_promote_blank_route_prunes_only_non_path_siblings(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = {
+            "active_branch_id": "d",
+            "branches": {
+                "main": {
+                    "id": "main",
+                    "parent_branch_id": None,
+                    "branch_point_index": None,
+                    "name": "主線",
+                },
+                "main_sibling": {
+                    "id": "main_sibling",
+                    "parent_branch_id": "main",
+                    "branch_point_index": 1,
+                    "name": "主線旁支",
+                },
+                "blank_root": {
+                    "id": "blank_root",
+                    "parent_branch_id": "main",
+                    "branch_point_index": -1,
+                    "name": "空白根",
+                    "blank": True,
+                },
+                "a": {
+                    "id": "a",
+                    "parent_branch_id": "blank_root",
+                    "branch_point_index": 0,
+                },
+                "b_drop": {
+                    "id": "b_drop",
+                    "parent_branch_id": "a",
+                    "branch_point_index": 1,
+                },
+                "b_drop_child": {
+                    "id": "b_drop_child",
+                    "parent_branch_id": "b_drop",
+                    "branch_point_index": 2,
+                },
+                "b_keep": {
+                    "id": "b_keep",
+                    "parent_branch_id": "a",
+                    "branch_point_index": 1,
+                },
+                "c_drop": {
+                    "id": "c_drop",
+                    "parent_branch_id": "b_keep",
+                    "branch_point_index": 2,
+                },
+                "c_keep": {
+                    "id": "c_keep",
+                    "parent_branch_id": "b_keep",
+                    "branch_point_index": 2,
+                },
+                "d": {
+                    "id": "d",
+                    "parent_branch_id": "c_keep",
+                    "branch_point_index": 3,
+                },
+            },
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/promote", json={"branch_id": "d"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["active_branch_id"] == "d"
+        assert data["stopped_at_blank_root"] is True
+
+        updated_tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        branches = updated_tree["branches"]
+        assert updated_tree["active_branch_id"] == "d"
+
+        # Kept lineage must remain intact.
+        for bid in ["blank_root", "a", "b_keep", "c_keep", "d"]:
+            assert not branches[bid].get("deleted")
+
+        # Discarded sibling branches/subtrees are soft-deleted.
+        for bid in ["b_drop", "b_drop_child", "c_drop"]:
+            assert branches[bid].get("deleted") is True
+
+        # Promote stops at blank root; siblings under main are untouched.
+        assert not branches["main_sibling"].get("deleted")
+
     def test_delete_main_blocked(self, client, setup_story):
         resp = client.delete("/api/branches/main")
         # Deleting main should fail
