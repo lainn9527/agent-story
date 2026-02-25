@@ -358,6 +358,87 @@ class TestMessagesAPI:
 
 
 # ===================================================================
+# Game Saves
+# ===================================================================
+
+
+class TestSavesAPI:
+    def test_load_save_status_preview_keeps_timeline(self, client, setup_story, story_id):
+        # Create save at current branch head (snapshot reward_points=5000)
+        save_resp = client.post("/api/saves", json={"name": "B存檔"})
+        assert save_resp.status_code == 200
+        save = save_resp.get_json()["save"]
+
+        # Simulate later progress state on same branch (reward_points=123456)
+        state_path = app_module._story_character_state_path(story_id, "main")
+        with open(state_path, "r", encoding="utf-8") as f:
+            live_state = json.load(f)
+        live_state["reward_points"] = 123456
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(live_state, f, ensure_ascii=False)
+
+        # Load save should switch branch but keep full timeline visible
+        load_resp = client.post(f"/api/saves/{save['id']}/load")
+        assert load_resp.status_code == 200
+        assert load_resp.get_json()["ok"] is True
+
+        messages_resp = client.get("/api/messages?branch_id=main")
+        assert messages_resp.status_code == 200
+        assert len(messages_resp.get_json()["messages"]) == 4
+
+        # Status should show saved snapshot (5000), not current live state (123456)
+        status_resp = client.get("/api/status?branch_id=main")
+        assert status_resp.status_code == 200
+        status = status_resp.get_json()
+        assert status["reward_points"] == 5000
+        assert status["loaded_save_id"] == save["id"]
+
+    def test_send_after_load_save_uses_live_state(self, client, setup_story, story_id, monkeypatch):
+        # Save snapshot first (reward_points=5000)
+        save_resp = client.post("/api/saves", json={"name": "B存檔"})
+        save = save_resp.get_json()["save"]
+
+        # Move branch live state forward (reward_points=98765)
+        state_path = app_module._story_character_state_path(story_id, "main")
+        with open(state_path, "r", encoding="utf-8") as f:
+            live_state = json.load(f)
+        live_state["reward_points"] = 98765
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(live_state, f, ensure_ascii=False)
+
+        # Load save -> status preview uses snapshot
+        client.post(f"/api/saves/{save['id']}/load")
+        preview_status = client.get("/api/status?branch_id=main").get_json()
+        assert preview_status["reward_points"] == 5000
+
+        captured = {}
+
+        def fake_call_claude_gm(_user_text, system_prompt, _recent, session_id=None):
+            captured["system_prompt"] = system_prompt
+            assert session_id is None
+            return ("GM回覆", None)
+
+        monkeypatch.setattr(app_module, "call_claude_gm", fake_call_claude_gm)
+        monkeypatch.setattr(
+            app_module,
+            "_process_gm_response",
+            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+        )
+
+        send_resp = client.post("/api/send", json={"message": "繼續前進", "branch_id": "main"})
+        assert send_resp.status_code == 200
+        assert send_resp.get_json()["ok"] is True
+
+        # Send should still use branch live state (98765), not save snapshot (5000)
+        assert "98765" in captured["system_prompt"]
+
+        # Preview should be cleared after sending; status returns live state again
+        status_after_send = client.get("/api/status?branch_id=main").get_json()
+        assert status_after_send["reward_points"] == 98765
+        assert "loaded_save_id" not in status_after_send
+
+
+# ===================================================================
 # Events
 # ===================================================================
 
