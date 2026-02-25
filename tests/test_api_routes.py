@@ -342,6 +342,47 @@ class TestBranchesAPI:
         # Promote stops at blank root; siblings under main are untouched.
         assert not branches["main_sibling"].get("deleted")
 
+    def test_promote_non_leaf_rejected(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = {
+            "active_branch_id": "child",
+            "branches": {
+                "main": {
+                    "id": "main",
+                    "parent_branch_id": None,
+                    "branch_point_index": None,
+                },
+                "parent": {
+                    "id": "parent",
+                    "parent_branch_id": "main",
+                    "branch_point_index": 0,
+                },
+                "child": {
+                    "id": "child",
+                    "parent_branch_id": "parent",
+                    "branch_point_index": 1,
+                },
+                "leaf": {
+                    "id": "leaf",
+                    "parent_branch_id": "child",
+                    "branch_point_index": 2,
+                },
+            },
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/promote", json={"branch_id": "child"})
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["ok"] is False
+        assert data["error"] == "can only promote a leaf branch"
+
+        # Tree should remain unchanged.
+        updated_tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        assert updated_tree["branches"]["parent"].get("deleted") is not True
+        assert updated_tree["branches"]["child"].get("deleted") is not True
+        assert updated_tree["branches"]["leaf"].get("deleted") is not True
+
     def test_delete_main_blocked(self, client, setup_story):
         resp = client.delete("/api/branches/main")
         # Deleting main should fail

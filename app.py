@@ -3762,7 +3762,7 @@ def api_branches_regenerate_stream():
 
 @app.route("/api/branches/promote", methods=["POST"])
 def api_branches_promote():
-    """Promote a branch by pruning alternative sibling routes along its lineage."""
+    """Set branch as main timeline by keeping only root→leaf lineage."""
     body = request.get_json(force=True)
     branch_id = body.get("branch_id", "").strip()
 
@@ -3782,6 +3782,18 @@ def api_branches_promote():
         return jsonify({"ok": False, "error": "cannot promote a merged branch"}), 400
     if branches[branch_id].get("pruned"):
         return jsonify({"ok": False, "error": "cannot promote a pruned branch"}), 400
+
+    # Promote is only valid on leaf nodes.
+    has_active_child = any(
+        bid != branch_id
+        and b.get("parent_branch_id") == branch_id
+        and not b.get("deleted")
+        and not b.get("merged")
+        and not b.get("pruned")
+        for bid, b in branches.items()
+    )
+    if has_active_child:
+        return jsonify({"ok": False, "error": "can only promote a leaf branch"}), 400
 
     # Build lineage from target branch upward.
     # If a blank root is encountered, stop there and do not climb to global main.
