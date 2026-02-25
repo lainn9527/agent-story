@@ -316,6 +316,39 @@ def _save_tree(story_id: str, tree: dict):
     _save_json(_story_tree_path(story_id), tree)
 
 
+def _clear_loaded_save_preview(tree: dict) -> bool:
+    """Clear loaded-save status preview metadata from timeline tree."""
+    changed = False
+    if tree.pop("loaded_save_id", None) is not None:
+        changed = True
+    if tree.pop("loaded_save_branch_id", None) is not None:
+        changed = True
+    return changed
+
+
+def _get_loaded_save_preview(story_id: str, tree: dict, branch_id: str) -> dict | None:
+    """Return loaded save entry when status should show save snapshot preview."""
+    save_id = tree.get("loaded_save_id")
+    if not save_id:
+        return None
+
+    active_branch_id = tree.get("active_branch_id", "main")
+    if branch_id != active_branch_id:
+        return None
+
+    save_branch_id = tree.get("loaded_save_branch_id")
+    if save_branch_id and save_branch_id != branch_id:
+        return None
+
+    saves = _load_json(_story_saves_path(story_id), [])
+    save = next((s for s in saves if s.get("id") == save_id), None)
+    if not save:
+        return None
+    if save.get("branch_id") != branch_id:
+        return None
+    return save
+
+
 def _load_character_schema(story_id: str) -> dict:
     path = _story_character_schema_path(story_id)
     return _load_json(path, DEFAULT_CHARACTER_SCHEMA)
@@ -2710,6 +2743,9 @@ def api_send():
     if not branch:
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
+    if tree.get("loaded_save_branch_id") == branch_id and _clear_loaded_save_preview(tree):
+        _save_tree(story_id, tree)
+
     log.info("/api/send START  msg=%s branch=%s", user_text[:30], branch_id)
 
     # 1. Save player message
@@ -2828,6 +2864,9 @@ def api_send_stream():
         return Response(_sse_event({"type": "error", "message": "branch not found"}),
                         mimetype="text/event-stream")
 
+    if tree.get("loaded_save_branch_id") == branch_id and _clear_loaded_save_preview(tree):
+        _save_tree(story_id, tree)
+
     log.info("/api/send/stream START  msg=%s branch=%s", user_text[:30], branch_id)
 
     # 1. Save player message (before streaming starts)
@@ -2941,8 +2980,18 @@ def api_status():
     """Return character state for a branch."""
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
-    state = dict(_load_character_state(story_id, branch_id))
-    state["world_day"] = get_world_day(story_id, branch_id)
+    tree = _load_tree(story_id)
+    loaded_save = _get_loaded_save_preview(story_id, tree, branch_id)
+
+    if loaded_save:
+        state = dict(loaded_save.get("character_snapshot") or _load_character_state(story_id, branch_id))
+        state["world_day"] = loaded_save.get("world_day", get_world_day(story_id, branch_id))
+        state["loaded_save_id"] = loaded_save.get("id")
+        state["loaded_save_message_index"] = loaded_save.get("message_index")
+    else:
+        state = dict(_load_character_state(story_id, branch_id))
+        state["world_day"] = get_world_day(story_id, branch_id)
+
     state["dice_modifier"] = get_dice_modifier(_story_dir(story_id), branch_id)
     state["dice_always_success"] = get_dice_always_success(_story_dir(story_id), branch_id)
     state["pistol_mode"] = get_pistol_mode(_story_dir(story_id), branch_id)
@@ -3085,6 +3134,7 @@ def api_branches_switch():
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
     tree["active_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     return jsonify({"ok": True, "active_branch_id": branch_id})
@@ -4868,9 +4918,11 @@ def api_saves_load(save_id):
         return jsonify({"ok": False, "error": "original branch no longer exists"}), 404
 
     tree["active_branch_id"] = branch_id
+    tree["loaded_save_id"] = save_id
+    tree["loaded_save_branch_id"] = branch_id
     _save_tree(story_id, tree)
 
-    log.info("save loaded: %s → switched to branch %s", save_id, branch_id)
+    log.info("save loaded: %s → switched to branch %s (status preview on)", save_id, branch_id)
     branch_meta = branches.get(branch_id, {"id": branch_id})
     return jsonify({"ok": True, "branch_id": branch_id, "branch": branch_meta})
 
