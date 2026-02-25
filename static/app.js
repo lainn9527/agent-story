@@ -1524,7 +1524,11 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
   try {
 
-  await API.switchBranch(branchId);
+  const switchRes = await API.switchBranch(branchId);
+  if (!switchRes.ok) {
+    showAlert(switchRes.error || "切換分支失敗");
+    return;
+  }
   currentBranchId = branchId;
   updateBranchIndicator();
   renderBranchList();

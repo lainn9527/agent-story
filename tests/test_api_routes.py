@@ -251,6 +251,23 @@ class TestBranchesAPI:
         assert resp2.status_code == 200
         assert resp2.get_json()["ok"] is True
 
+    def test_switch_inactive_branch_rejected(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["branches"]["dead"] = {
+            "id": "dead",
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "deleted": True,
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/switch", json={"branch_id": "dead"})
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["ok"] is False
+        assert data["error"] == "cannot switch to inactive branch"
+
     def test_rename_branch(self, client, setup_story):
         resp = client.patch("/api/branches/main", json={"name": "新主線名"})
         assert resp.status_code == 200
@@ -320,6 +337,30 @@ class TestBranchesAPI:
         }
         tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
 
+        # Add parent continuation messages that would create sibling variants
+        # unless promote trims ancestors at each kept child branch point.
+        for bid in ["blank_root", "a", "b_keep", "c_keep", "d"]:
+            (setup_story / "branches" / bid).mkdir(parents=True, exist_ok=True)
+        (setup_story / "branches" / "a" / "messages.json").write_text(
+            json.dumps([{"index": 0, "role": "user", "content": "a0"},
+                        {"index": 2, "role": "assistant", "content": "a2_alt"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (setup_story / "branches" / "b_keep" / "messages.json").write_text(
+            json.dumps([{"index": 1, "role": "user", "content": "b1"},
+                        {"index": 3, "role": "assistant", "content": "b3_alt"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (setup_story / "branches" / "c_keep" / "messages.json").write_text(
+            json.dumps([{"index": 2, "role": "user", "content": "c2"},
+                        {"index": 4, "role": "assistant", "content": "c4_alt"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (setup_story / "branches" / "d" / "messages.json").write_text(
+            json.dumps([{"index": 3, "role": "user", "content": "d3"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
         resp = client.post("/api/branches/promote", json={"branch_id": "d"})
         assert resp.status_code == 200
         data = resp.get_json()
@@ -341,6 +382,20 @@ class TestBranchesAPI:
 
         # Promote stops at blank root; siblings under main are untouched.
         assert not branches["main_sibling"].get("deleted")
+
+        # Kept ancestors are trimmed at their kept child branch points,
+        # so there is no parent-continuation sibling variant left.
+        a_msgs = json.loads((setup_story / "branches" / "a" / "messages.json").read_text(encoding="utf-8"))
+        b_msgs = json.loads((setup_story / "branches" / "b_keep" / "messages.json").read_text(encoding="utf-8"))
+        c_msgs = json.loads((setup_story / "branches" / "c_keep" / "messages.json").read_text(encoding="utf-8"))
+        assert max(m["index"] for m in a_msgs) <= 1
+        assert max(m["index"] for m in b_msgs) <= 2
+        assert max(m["index"] for m in c_msgs) <= 3
+
+        msg_resp = client.get("/api/messages", query_string={"branch_id": "d"})
+        assert msg_resp.status_code == 200
+        sibling_groups = msg_resp.get_json()["sibling_groups"]
+        assert sibling_groups == {}
 
     def test_promote_non_leaf_rejected(self, client, setup_story):
         tree_path = setup_story / "timeline_tree.json"
