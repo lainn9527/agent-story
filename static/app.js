@@ -1067,10 +1067,19 @@ function openBranchTreeModal() {
 }
 
 function _btRenderTree(container, modal) {
-  // Build children map — blank branches are roots (same as main)
+  // Build children map — blank branches are roots (same as main).
+  // Also treat branches whose parent was soft-deleted (not in branches) as roots,
+  // so orphaned branches don't cause the tree to fall back to showing main.
   const childrenMap = {};
   for (const b of Object.values(branches)) {
-    const parent = b.blank ? "__root__" : (b.parent_branch_id || "__root__");
+    let parent;
+    if (b.blank) {
+      parent = "__root__";
+    } else if (!b.parent_branch_id || !branches[b.parent_branch_id]) {
+      parent = "__root__";  // parent is deleted/invisible — treat branch as root
+    } else {
+      parent = b.parent_branch_id;
+    }
     if (!childrenMap[parent]) childrenMap[parent] = [];
     childrenMap[parent].push(b);
   }
