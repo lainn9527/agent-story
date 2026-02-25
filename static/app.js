@@ -1220,7 +1220,7 @@ function _btRenderTree(container, modal) {
       });
       actions.appendChild(promoteBtn);
 
-      if (!branch.blank) {
+      if (!branch.blank && branches[branch.parent_branch_id]) {
         const mergeBtn = document.createElement("span");
         mergeBtn.className = "bt-action-btn";
         mergeBtn.textContent = "\u2934";
