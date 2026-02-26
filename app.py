@@ -2705,15 +2705,23 @@ def api_messages():
         result["summary_count"] = len(get_summaries(story_id, branch_id))
 
     # Detect incomplete branch (edit interrupted before GM response saved).
-    # Only triggers when delta has a user message but no GM response — this
-    # distinguishes crashed edits from manually-created or regen branches.
+    # Only trigger on leaf nodes. Mid-route user-only nodes can be valid when
+    # a child branch continues the conversation.
     branch_meta = tree.get("branches", {}).get(branch_id, {})
+    has_active_child = any(
+        b.get("parent_branch_id") == branch_id
+        and not b.get("deleted")
+        and not b.get("merged")
+        and not b.get("pruned")
+        for b in tree.get("branches", {}).values()
+    )
     if (branch_id != "main"
             and not branch_id.startswith("auto_")
             and not branch_meta.get("blank")
             and not branch_meta.get("deleted")
             and not branch_meta.get("merged")
             and not branch_meta.get("pruned")
+            and not has_active_child
             and any(m.get("role") == "user" for m in branch_delta)
             and not any(m.get("role") == "gm" for m in branch_delta)):
         parent_id = branch_meta.get("parent_branch_id", "main")
@@ -3143,6 +3151,36 @@ def api_branches_switch():
     branch = branches[branch_id]
     if branch.get("deleted") or branch.get("merged") or branch.get("pruned"):
         return jsonify({"ok": False, "error": "cannot switch to inactive branch"}), 400
+
+    # For promoted mainline, selecting an ancestor node should continue
+    # to the deepest active leaf on that same route.
+    mainline_leaf = tree.get("promoted_mainline_leaf_id")
+    if mainline_leaf in branches:
+        chain = []
+        cur = mainline_leaf
+        seen = set()
+        while cur is not None and cur not in seen and cur in branches:
+            seen.add(cur)
+            chain.append(cur)
+            cur = branches[cur].get("parent_branch_id")
+        chain_set = set(chain)
+        if branch_id in chain_set:
+            current = branch_id
+            visited = set()
+            while current not in visited:
+                visited.add(current)
+                children = [
+                    bid for bid, b in branches.items()
+                    if b.get("parent_branch_id") == current
+                    and not b.get("deleted")
+                    and not b.get("merged")
+                    and not b.get("pruned")
+                    and bid in chain_set
+                ]
+                if len(children) != 1:
+                    break
+                current = children[0]
+            branch_id = current
 
     tree["active_branch_id"] = branch_id
     _clear_loaded_save_preview(tree)

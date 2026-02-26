@@ -529,6 +529,37 @@ class TestMessagesAPI:
         messages = data["messages"]
         assert all(m["index"] > 2 for m in messages)
 
+    def test_no_incomplete_banner_for_user_only_mid_route_with_child(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["branches"]["mid"] = {
+            "id": "mid",
+            "parent_branch_id": "main",
+            "branch_point_index": 3,
+        }
+        tree["branches"]["leaf"] = {
+            "id": "leaf",
+            "parent_branch_id": "mid",
+            "branch_point_index": 4,
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        mid_dir = setup_story / "branches" / "mid"
+        leaf_dir = setup_story / "branches" / "leaf"
+        mid_dir.mkdir(parents=True, exist_ok=True)
+        leaf_dir.mkdir(parents=True, exist_ok=True)
+        # mid has user-only delta (historically flagged as incomplete)
+        (mid_dir / "messages.json").write_text(
+            json.dumps([{"index": 4, "role": "user", "content": "mid user only"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (leaf_dir / "messages.json").write_text("[]", encoding="utf-8")
+
+        resp = client.get("/api/messages", query_string={"branch_id": "mid"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "incomplete" not in data
+
     def test_get_status(self, client, setup_story):
         resp = client.get("/api/status")
         assert resp.status_code == 200
