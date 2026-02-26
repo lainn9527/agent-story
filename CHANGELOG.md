@@ -8,9 +8,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.20.13] - 2026-02-26
 
 ### Fixed
+- **命運骰結果洩漏至敘事**: GM 直接輸出「命運走向：順遂」「天命的機緣降臨」等命運骰結果，破壞沉浸感。根因：context injection 包含結果標籤名稱（天命/順遂/平淡/波折/劫數），system prompt 也列出完整定義。修正：(1) 新增 `_OUTCOME_GM_HINTS` 用方向性描述（極度有利/偏向有利/中性/偏向不利/極度不利）取代標籤名稱 (2) system prompt 移除結果列表 (3) `_process_gm_response()` 加入 `_FATE_LABEL_RE` 安全網清理殘留標籤 ([#123])
 - **存檔讀取語意穩定化**: `Load Save` 保持 bookmark 模式（顯示存檔快照狀態 preview，但不回滾分支訊息），並補齊 preview 生命周期清理（send/send_stream/switch/edit/regen/create）與 stale metadata 自癒；同時新增 save/load API 測試覆蓋 (`api_send_stream`、`api_branches_switch`、`api_branches_edit`、缺失 save/metadata 邊界案例) ([#120])
 
 [#120]: https://github.com/lainn9527/agent-story/pull/120
+[#123]: https://github.com/lainn9527/agent-story/pull/123
 
 ## [0.20.12] - 2026-02-24
 
