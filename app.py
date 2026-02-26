@@ -3804,7 +3804,7 @@ def api_branches_regenerate_stream():
 
 @app.route("/api/branches/promote", methods=["POST"])
 def api_branches_promote():
-    """Set branch as main timeline by keeping only root→leaf lineage."""
+    """Set branch as main timeline by keeping only root→target lineage."""
     body = request.get_json(force=True)
     branch_id = body.get("branch_id", "").strip()
 
@@ -3824,18 +3824,6 @@ def api_branches_promote():
         return jsonify({"ok": False, "error": "cannot promote a merged branch"}), 400
     if branches[branch_id].get("pruned"):
         return jsonify({"ok": False, "error": "cannot promote a pruned branch"}), 400
-
-    # Promote is only valid on leaf nodes.
-    has_active_child = any(
-        bid != branch_id
-        and b.get("parent_branch_id") == branch_id
-        and not b.get("deleted")
-        and not b.get("merged")
-        and not b.get("pruned")
-        for bid, b in branches.items()
-    )
-    if has_active_child:
-        return jsonify({"ok": False, "error": "can only promote a leaf branch"}), 400
 
     # Build lineage from target branch upward.
     # If a blank root is encountered, stop there and do not climb to global main.
@@ -3869,8 +3857,9 @@ def api_branches_promote():
         if len(trimmed_delta) != len(parent_delta):
             _save_json(_story_messages_path(story_id, parent_id), trimmed_delta)
 
-    # Build a parent -> children map once, then soft-delete sibling subtrees
-    # that are not part of the kept lineage.
+    # Build a parent -> children map once, then soft-delete everything under
+    # promote root except the kept lineage. This also prunes descendants of
+    # target branch when target is not a leaf.
     children_map = {}
     for bid, b in branches.items():
         pid = b.get("parent_branch_id")
@@ -3891,13 +3880,20 @@ def api_branches_promote():
             branches_to_remove.add(bid)
             stack.extend(children_map.get(bid, []))
 
-    for i in range(1, len(ancestor_chain)):
-        parent_id = ancestor_chain[i - 1]
-        kept_child_id = ancestor_chain[i]
-        for sibling_id in children_map.get(parent_id, []):
-            if sibling_id == kept_child_id or sibling_id in keep_ids:
-                continue
-            _collect_subtree(sibling_id)
+    # Prune inside promote root only.
+    promote_root_id = ancestor_chain[0] if ancestor_chain else branch_id
+    stack = [promote_root_id]
+    walked = set()
+    while stack:
+        current = stack.pop()
+        if current in walked:
+            continue
+        walked.add(current)
+        for child_id in children_map.get(current, []):
+            if child_id in keep_ids:
+                stack.append(child_id)
+            else:
+                _collect_subtree(child_id)
 
     # Soft-delete discarded sibling subtrees. Kept lineage is never deleted.
     now = datetime.now(timezone.utc).isoformat()
@@ -3906,6 +3902,7 @@ def api_branches_promote():
         branches[bid]["deleted_at"] = now
 
     tree["active_branch_id"] = branch_id
+    tree["promoted_mainline_leaf_id"] = branch_id
     _save_tree(story_id, tree)
 
     return jsonify({

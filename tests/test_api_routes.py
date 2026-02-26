@@ -251,6 +251,30 @@ class TestBranchesAPI:
         assert resp2.status_code == 200
         assert resp2.get_json()["ok"] is True
 
+    def test_switch_does_not_overwrite_promoted_mainline_marker(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["promoted_mainline_leaf_id"] = "kept_leaf"
+        tree["branches"]["kept_leaf"] = {
+            "id": "kept_leaf",
+            "parent_branch_id": "main",
+            "branch_point_index": 2,
+        }
+        tree["branches"]["other"] = {
+            "id": "other",
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/switch", json={"branch_id": "other"})
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        updated_tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        assert updated_tree["active_branch_id"] == "other"
+        assert updated_tree["promoted_mainline_leaf_id"] == "kept_leaf"
+
     def test_switch_inactive_branch_rejected(self, client, setup_story):
         tree_path = setup_story / "timeline_tree.json"
         tree = json.loads(tree_path.read_text(encoding="utf-8"))
@@ -397,7 +421,7 @@ class TestBranchesAPI:
         sibling_groups = msg_resp.get_json()["sibling_groups"]
         assert sibling_groups == {}
 
-    def test_promote_non_leaf_rejected(self, client, setup_story):
+    def test_promote_non_leaf_keeps_path_and_prunes_descendants(self, client, setup_story):
         tree_path = setup_story / "timeline_tree.json"
         tree = {
             "active_branch_id": "child",
@@ -422,21 +446,28 @@ class TestBranchesAPI:
                     "parent_branch_id": "child",
                     "branch_point_index": 2,
                 },
+                "sibling": {
+                    "id": "sibling",
+                    "parent_branch_id": "parent",
+                    "branch_point_index": 1,
+                },
             },
         }
         tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
 
         resp = client.post("/api/branches/promote", json={"branch_id": "child"})
-        assert resp.status_code == 400
+        assert resp.status_code == 200
         data = resp.get_json()
-        assert data["ok"] is False
-        assert data["error"] == "can only promote a leaf branch"
+        assert data["ok"] is True
+        assert data["active_branch_id"] == "child"
+        assert data["deleted_branch_ids"] == ["leaf", "sibling"]
 
-        # Tree should remain unchanged.
         updated_tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        assert updated_tree["promoted_mainline_leaf_id"] == "child"
         assert updated_tree["branches"]["parent"].get("deleted") is not True
         assert updated_tree["branches"]["child"].get("deleted") is not True
-        assert updated_tree["branches"]["leaf"].get("deleted") is not True
+        assert updated_tree["branches"]["leaf"].get("deleted") is True
+        assert updated_tree["branches"]["sibling"].get("deleted") is True
 
     def test_delete_main_blocked(self, client, setup_story):
         resp = client.delete("/api/branches/main")
