@@ -898,8 +898,12 @@ function _createBranchItem(branch) {
 
   const label = document.createElement("span");
   label.className = "drawer-item-label";
-  label.textContent = branch.title || branch.name || branch.id;
-  label.title = branch.name || branch.id;
+  const baseLabel = branch.title || branch.name || branch.id;
+  const forkAt = _formatBranchForkAt(branch);
+  label.textContent = forkAt ? `${baseLabel} (${forkAt})` : baseLabel;
+  label.title = forkAt
+    ? `${branch.name || branch.id} (${forkAt})`
+    : (branch.name || branch.id);
   item.appendChild(label);
 
   if (branch.id.startsWith("auto_")) {
@@ -963,6 +967,12 @@ function _createBranchItem(branch) {
   });
 
   return item;
+}
+
+function _formatBranchForkAt(branch) {
+  const bp = branch?.branch_point_index;
+  if (bp == null || bp < 0) return "";
+  return `from #${bp}`;
 }
 
 function startRenamingBranch(item, branch) {
@@ -1116,8 +1126,12 @@ function _btRenderTree(container, modal) {
 
     const name = document.createElement("span");
     name.className = "bt-name";
-    name.textContent = branch.title || branch.name || branch.id;
-    name.title = branch.name || branch.id;
+    const baseName = branch.title || branch.name || branch.id;
+    const forkAt = _formatBranchForkAt(branch);
+    name.textContent = forkAt ? `${baseName} (${forkAt})` : baseName;
+    name.title = forkAt
+      ? `${branch.name || branch.id} (${forkAt})`
+      : (branch.name || branch.id);
     item.appendChild(name);
 
     if (branch.id.startsWith("auto_")) {
@@ -1188,32 +1202,27 @@ function _btRenderTree(container, modal) {
         actions.appendChild(deepBtn);
       }
 
-      const activeChildren = (childrenMap[branch.id] || [])
-        .filter(k => !k.deleted && !k.merged && !k.pruned);
-      const isLeaf = activeChildren.length === 0;
-      if (isLeaf) {
-        const promoteBtn = document.createElement("span");
-        promoteBtn.className = "bt-action-btn bt-action-promote";
-        promoteBtn.textContent = "\u2B06";
-        promoteBtn.title = "設為主時間線（清理其他分支）";
-        promoteBtn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          if (!(await showConfirm(`確定要將分支「${branch.name || branch.id}」設為主時間線，並清理其餘分支嗎？`))) return;
-          const res = await API.promoteBranch(branch.id);
-          if (res.ok) {
-            currentBranchId = res.active_branch_id || branch.id;
-            await loadBranches();
-            await loadMessages(currentBranchId);
-            const status = await API.status(currentBranchId);
-            renderCharacterStatus(status);
-            _btRenderTree(container, modal);
-            scrollToBottom();
-          } else {
-            alert(res.error || "設為主時間線失敗");
-          }
-        });
-        actions.appendChild(promoteBtn);
-      }
+      const promoteBtn = document.createElement("span");
+      promoteBtn.className = "bt-action-btn bt-action-promote";
+      promoteBtn.textContent = "\u2B06";
+      promoteBtn.title = "設為主時間線（清理其他分支）";
+      promoteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!(await showConfirm(`確定要將分支「${branch.name || branch.id}」設為主時間線，並清理其餘分支嗎？`))) return;
+        const res = await API.promoteBranch(branch.id);
+        if (res.ok) {
+          currentBranchId = res.active_branch_id || branch.id;
+          await loadBranches();
+          await loadMessages(currentBranchId);
+          const status = await API.status(currentBranchId);
+          renderCharacterStatus(status);
+          _btRenderTree(container, modal);
+          scrollToBottom();
+        } else {
+          alert(res.error || "設為主時間線失敗");
+        }
+      });
+      actions.appendChild(promoteBtn);
 
       if (!branch.blank) {
         const mergeBtn = document.createElement("span");
