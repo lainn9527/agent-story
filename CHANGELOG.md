@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.13] - 2026-02-26
+
+### Fixed
+- **存檔讀取語意穩定化**: `Load Save` 保持 bookmark 模式（顯示存檔快照狀態 preview，但不回滾分支訊息），並補齊 preview 生命周期清理（send/send_stream/switch/edit/regen/create）與 stale metadata 自癒；同時新增 save/load API 測試覆蓋 (`api_send_stream`、`api_branches_switch`、`api_branches_edit`、缺失 save/metadata 邊界案例) ([#120])
+
+[#120]: https://github.com/lainn9527/agent-story/pull/120
+
 ## [0.20.12] - 2026-02-24
 
 ### Fixed
