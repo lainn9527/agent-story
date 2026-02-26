@@ -2743,7 +2743,7 @@ def api_send():
     if not branch:
         return jsonify({"ok": False, "error": "branch not found"}), 404
 
-    if tree.get("loaded_save_branch_id") == branch_id and _clear_loaded_save_preview(tree):
+    if _clear_loaded_save_preview(tree):
         _save_tree(story_id, tree)
 
     log.info("/api/send START  msg=%s branch=%s", user_text[:30], branch_id)
@@ -2864,7 +2864,7 @@ def api_send_stream():
         return Response(_sse_event({"type": "error", "message": "branch not found"}),
                         mimetype="text/event-stream")
 
-    if tree.get("loaded_save_branch_id") == branch_id and _clear_loaded_save_preview(tree):
+    if _clear_loaded_save_preview(tree):
         _save_tree(story_id, tree)
 
     log.info("/api/send/stream START  msg=%s branch=%s", user_text[:30], branch_id)
@@ -2981,13 +2981,18 @@ def api_status():
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
     tree = _load_tree(story_id)
+    active_branch_id = tree.get("active_branch_id", "main")
     loaded_save = _get_loaded_save_preview(story_id, tree, branch_id)
+
+    # Self-heal stale preview metadata (e.g. save deleted after load).
+    if branch_id == active_branch_id and tree.get("loaded_save_id") and not loaded_save:
+        if _clear_loaded_save_preview(tree):
+            _save_tree(story_id, tree)
 
     if loaded_save:
         state = dict(loaded_save.get("character_snapshot") or _load_character_state(story_id, branch_id))
         state["world_day"] = loaded_save.get("world_day", get_world_day(story_id, branch_id))
         state["loaded_save_id"] = loaded_save.get("id")
-        state["loaded_save_message_index"] = loaded_save.get("message_index")
     else:
         state = dict(_load_character_state(story_id, branch_id))
         state["world_day"] = get_world_day(story_id, branch_id)
@@ -3069,6 +3074,7 @@ def api_branches_create():
         "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     return jsonify({"ok": True, "branch": branches[branch_id]})
@@ -3117,6 +3123,7 @@ def api_branches_blank():
         "blank": True,
     }
     tree["active_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     return jsonify({"ok": True, "branch": branches[branch_id]})
@@ -3405,6 +3412,7 @@ def api_branches_edit_stream():
     }
     tree["active_branch_id"] = branch_id
     tree["last_played_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     # Build prompt context
@@ -3547,6 +3555,7 @@ def api_branches_regenerate():
         "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     t0 = time.time()
@@ -3672,6 +3681,7 @@ def api_branches_regenerate_stream():
     }
     tree["active_branch_id"] = branch_id
     tree["last_played_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     # Build prompt context
@@ -4923,7 +4933,9 @@ def api_saves_load(save_id):
     _save_tree(story_id, tree)
 
     log.info("save loaded: %s → switched to branch %s (status preview on)", save_id, branch_id)
-    branch_meta = branches.get(branch_id, {"id": branch_id})
+    branch_meta = branches.get(branch_id)
+    if not branch_meta:
+        return jsonify({"ok": False, "error": "branch metadata missing"}), 500
     return jsonify({"ok": True, "branch_id": branch_id, "branch": branch_meta})
 
 
@@ -4936,6 +4948,9 @@ def api_saves_delete(save_id):
     if len(new_saves) == len(saves):
         return jsonify({"ok": False, "error": "save not found"}), 404
     _save_json(_story_saves_path(story_id), new_saves)
+    tree = _load_tree(story_id)
+    if tree.get("loaded_save_id") == save_id and _clear_loaded_save_preview(tree):
+        _save_tree(story_id, tree)
     log.info("save deleted: %s", save_id)
     return jsonify({"ok": True})
 
