@@ -477,6 +477,32 @@ class TestSavesAPI:
         status_after_switch = client.get("/api/status?branch_id=main").get_json()
         assert "loaded_save_id" not in status_after_switch
 
+    def test_edit_after_load_save_clears_preview(self, client, setup_story, monkeypatch):
+        save_resp = client.post("/api/saves", json={"name": "B存檔"})
+        save = save_resp.get_json()["save"]
+        client.post(f"/api/saves/{save['id']}/load")
+        preview_status = client.get("/api/status?branch_id=main").get_json()
+        assert preview_status["loaded_save_id"] == save["id"]
+
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("GM回覆", None))
+        monkeypatch.setattr(
+            app_module,
+            "_process_gm_response",
+            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+        )
+
+        edit_resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "另一條分支訊息",
+        })
+        assert edit_resp.status_code == 200
+        assert edit_resp.get_json()["ok"] is True
+
+        branch_id = edit_resp.get_json()["branch"]["id"]
+        status_after_edit = client.get(f"/api/status?branch_id={branch_id}").get_json()
+        assert "loaded_save_id" not in status_after_edit
+
     def test_status_self_heals_when_loaded_save_missing(self, client, setup_story, story_id):
         save_resp = client.post("/api/saves", json={"name": "B存檔"})
         save = save_resp.get_json()["save"]
@@ -521,6 +547,36 @@ class TestSavesAPI:
         status_after_second_load = client.get("/api/status?branch_id=main").get_json()
         assert status_after_second_load["loaded_save_id"] == save2["id"]
         assert status_after_second_load["reward_points"] == 77777
+
+    def test_load_save_missing_branch_metadata_has_no_side_effect(self, client, setup_story, story_id):
+        branch_resp = client.post("/api/branches", json={
+            "name": "次分支",
+            "branch_point_index": 1,
+        })
+        assert branch_resp.status_code == 200
+        side_branch_id = branch_resp.get_json()["branch"]["id"]
+
+        client.post("/api/branches/switch", json={"branch_id": "main"})
+        save_resp = client.post("/api/saves", json={"name": "主線存檔"})
+        save = save_resp.get_json()["save"]
+        assert save["branch_id"] == "main"
+        client.post("/api/branches/switch", json={"branch_id": side_branch_id})
+
+        tree_path = app_module._story_tree_path(story_id)
+        with open(tree_path, "r", encoding="utf-8") as f:
+            tree = json.load(f)
+        tree["branches"].pop("main", None)  # simulate corrupted metadata
+        with open(tree_path, "w", encoding="utf-8") as f:
+            json.dump(tree, f, ensure_ascii=False)
+
+        load_resp = client.post(f"/api/saves/{save['id']}/load")
+        assert load_resp.status_code == 500
+
+        with open(tree_path, "r", encoding="utf-8") as f:
+            tree_after = json.load(f)
+        assert tree_after["active_branch_id"] == side_branch_id
+        assert "loaded_save_id" not in tree_after
+        assert "loaded_save_branch_id" not in tree_after
 
 
 # ===================================================================
