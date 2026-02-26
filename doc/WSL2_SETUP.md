@@ -137,6 +137,7 @@ Both SSH and the RPG server start automatically when WSL2 boots. No manual actio
 ```bash
 PYTHONPATH="$HOME/.local/lib/python3.12/site-packages" \
 CLAUDE_BIN="$HOME/.npm-global/bin/claude" \
+CODEX_BIN="${CODEX_BIN:-$(command -v codex)}" \
 nohup /usr/bin/python3 app.py >> server.log 2>&1 &
 ```
 
@@ -158,11 +159,13 @@ This will:
 |----------|-----------|---------|
 | `PYTHONPATH` | `~/.local/lib/python3.12/site-packages` | User-installed Python packages |
 | `CLAUDE_BIN` | `~/.npm-global/bin/claude` | Claude CLI path (overrides Mac default) |
+| `CODEX_BIN` | `$(command -v codex)` (or absolute path) | Codex CLI path for `codex_cli` provider |
 | `PORT` | `5051` (default) | Flask server port |
 
 ## Notes
 
 - The default `CLAUDE_BIN` in `claude_bridge.py` is set to a Mac path (`/Users/eddylai/.local/bin/claude`). The `CLAUDE_BIN` env var overrides this for WSL2.
+- If you use `codex_cli` provider, set `CODEX_BIN` explicitly on each machine. Fallback is `/usr/local/bin/codex`, which may not exist on WSL2/Linux hosts.
 - Production on Mac uses `deploy.sh`; WSL2 uses `deploy_wsl2.sh`.
 - Data files (`data/`) are gitignored and not affected by deploys.
 - The `rpg-server` systemd service does not inherit shell env vars. If `PYTHONPATH` or `CLAUDE_BIN` are needed, add `Environment=` lines to the `[Service]` section.

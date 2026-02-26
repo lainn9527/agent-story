@@ -5123,6 +5123,9 @@ def api_config_get():
         "claude_cli": {
             "model": cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929"),
         },
+        "codex_cli": {
+            "model": cfg.get("codex_cli", {}).get("model", "default"),
+        },
     })
 
 
@@ -5151,6 +5154,12 @@ def api_config_set():
             cfg["claude_cli"] = {}
         if "model" in data["claude_cli"]:
             cfg["claude_cli"]["model"] = data["claude_cli"]["model"]
+
+    if "codex_cli" in data and isinstance(data["codex_cli"], dict):
+        if "codex_cli" not in cfg:
+            cfg["codex_cli"] = {}
+        if "model" in data["codex_cli"]:
+            cfg["codex_cli"]["model"] = data["codex_cli"]["model"]
 
     with open(_LLM_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)

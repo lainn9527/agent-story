@@ -624,7 +624,7 @@ def main():
     parser.add_argument("--organize-orphans", action="store_true", help="Organize orphan topics (rule-based + LLM)")
     parser.add_argument("--apply", action="store_true", help="Apply changes (with --organize-orphans, default is dry-run)")
     parser.add_argument("--delay", type=float, default=3.0, help="Delay between LLM calls (default: 3s)")
-    parser.add_argument("--provider", default="claude_cli", choices=["claude_cli", "gemini"],
+    parser.add_argument("--provider", default="claude_cli", choices=["claude_cli", "gemini", "codex_cli"],
                         help="LLM provider for script calls (default: claude_cli)")
     args = parser.parse_args()
 

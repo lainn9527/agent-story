@@ -106,7 +106,7 @@ class AutoPlayConfig:
     skip_images: bool = True
     resume: bool = False
     branch_id: str | None = None  # For resume mode
-    provider: str | None = None   # Override LLM provider ("gemini" / "claude_cli")
+    provider: str | None = None   # Override LLM provider ("gemini" / "claude_cli" / "codex_cli")
     max_errors: int = 10          # Max consecutive errors before stopping
     web_search: bool = True       # Enable web search enrichment for lore/dungeons
 
@@ -759,7 +759,7 @@ def print_summary(state: RunState, story_id: str, branch_id: str):
 def auto_play(config: AutoPlayConfig):
     """Run the auto-play loop."""
     # Auto-play defaults to claude_cli and disables web search to avoid
-    # any Gemini API usage.  Pass --provider gemini / --web-search to override.
+    # any Gemini API usage. Pass --provider gemini / --web-search to override.
     if config.provider is None:
         config.provider = "claude_cli"
     set_provider(config.provider)
@@ -968,7 +968,7 @@ def parse_args() -> AutoPlayConfig:
         help="Branch ID to resume (required with --resume)",
     )
     parser.add_argument(
-        "--provider", type=str, default=None, choices=["gemini", "claude_cli"],
+        "--provider", type=str, default=None, choices=["gemini", "claude_cli", "codex_cli"],
         help="Override LLM provider (default: use llm_config.json)",
     )
     parser.add_argument(
