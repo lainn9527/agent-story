@@ -437,6 +437,91 @@ class TestSavesAPI:
         assert status_after_send["reward_points"] == 98765
         assert "loaded_save_id" not in status_after_send
 
+    def test_send_stream_after_load_save_clears_preview(self, client, setup_story, monkeypatch):
+        save_resp = client.post("/api/saves", json={"name": "B存檔"})
+        save = save_resp.get_json()["save"]
+        client.post(f"/api/saves/{save['id']}/load")
+        preview_status = client.get("/api/status?branch_id=main").get_json()
+        assert preview_status["loaded_save_id"] == save["id"]
+
+        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None):
+            assert session_id is None
+            yield ("done", {"response": "GM串流回覆", "usage": None})
+
+        monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
+        monkeypatch.setattr(
+            app_module,
+            "_process_gm_response",
+            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+        )
+
+        resp = client.post("/api/send/stream", json={"message": "繼續推進", "branch_id": "main"})
+        assert resp.status_code == 200
+        data = resp.get_data(as_text=True)
+        assert "\"type\": \"done\"" in data
+
+        status_after_stream = client.get("/api/status?branch_id=main").get_json()
+        assert "loaded_save_id" not in status_after_stream
+
+    def test_switch_branch_clears_loaded_save_preview(self, client, setup_story):
+        save_resp = client.post("/api/saves", json={"name": "B存檔"})
+        save = save_resp.get_json()["save"]
+        client.post(f"/api/saves/{save['id']}/load")
+        preview_status = client.get("/api/status?branch_id=main").get_json()
+        assert preview_status["loaded_save_id"] == save["id"]
+
+        switch_resp = client.post("/api/branches/switch", json={"branch_id": "main"})
+        assert switch_resp.status_code == 200
+        assert switch_resp.get_json()["ok"] is True
+
+        status_after_switch = client.get("/api/status?branch_id=main").get_json()
+        assert "loaded_save_id" not in status_after_switch
+
+    def test_status_self_heals_when_loaded_save_missing(self, client, setup_story, story_id):
+        save_resp = client.post("/api/saves", json={"name": "B存檔"})
+        save = save_resp.get_json()["save"]
+        client.post(f"/api/saves/{save['id']}/load")
+        preview_status = client.get("/api/status?branch_id=main").get_json()
+        assert preview_status["loaded_save_id"] == save["id"]
+
+        saves_path = app_module._story_saves_path(story_id)
+        with open(saves_path, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False)
+
+        status_after_missing = client.get("/api/status?branch_id=main").get_json()
+        assert "loaded_save_id" not in status_after_missing
+        assert status_after_missing["reward_points"] == 5000
+
+        tree_path = app_module._story_tree_path(story_id)
+        with open(tree_path, "r", encoding="utf-8") as f:
+            tree = json.load(f)
+        assert "loaded_save_id" not in tree
+        assert "loaded_save_branch_id" not in tree
+
+    def test_loading_another_save_overrides_preview(self, client, setup_story, story_id):
+        save1_resp = client.post("/api/saves", json={"name": "存檔1"})
+        save1 = save1_resp.get_json()["save"]
+
+        state_path = app_module._story_character_state_path(story_id, "main")
+        with open(state_path, "r", encoding="utf-8") as f:
+            live_state = json.load(f)
+        live_state["reward_points"] = 77777
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(live_state, f, ensure_ascii=False)
+
+        save2_resp = client.post("/api/saves", json={"name": "存檔2"})
+        save2 = save2_resp.get_json()["save"]
+
+        client.post(f"/api/saves/{save1['id']}/load")
+        status_after_first_load = client.get("/api/status?branch_id=main").get_json()
+        assert status_after_first_load["loaded_save_id"] == save1["id"]
+        assert status_after_first_load["reward_points"] == 5000
+
+        client.post(f"/api/saves/{save2['id']}/load")
+        status_after_second_load = client.get("/api/status?branch_id=main").get_json()
+        assert status_after_second_load["loaded_save_id"] == save2["id"]
+        assert status_after_second_load["reward_points"] == 77777
+
 
 # ===================================================================
 # Events
