@@ -2401,6 +2401,10 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     gm_response = re.sub(r"^---\s*", "", gm_response).strip()
     gm_response = re.sub(r"\n---\n", "\n", gm_response).strip()
 
+    # Strip fate direction labels the GM may have output (safety net)
+    gm_response = _FATE_LABEL_RE.sub("", gm_response).strip()
+    gm_response = re.sub(r"\n{3,}", "\n\n", gm_response)
+
     # Deduplicate reward point hints — keep only the last occurrence
     reward_hints = list(_REWARD_HINT_RE.finditer(gm_response))
     if len(reward_hints) > 1:
