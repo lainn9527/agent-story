@@ -3265,6 +3265,7 @@ def api_branches_edit():
         "character_state_file": f"character_state_{branch_id}.json",
     }
     tree["active_branch_id"] = branch_id
+    _clear_loaded_save_preview(tree)
     _save_tree(story_id, tree)
 
     t0 = time.time()
@@ -4927,15 +4928,16 @@ def api_saves_load(save_id):
     if branch_id != "main" and branch_id not in branches:
         return jsonify({"ok": False, "error": "original branch no longer exists"}), 404
 
+    branch_meta = branches.get(branch_id)
+    if not branch_meta:
+        return jsonify({"ok": False, "error": "branch metadata missing"}), 500
+
     tree["active_branch_id"] = branch_id
     tree["loaded_save_id"] = save_id
     tree["loaded_save_branch_id"] = branch_id
     _save_tree(story_id, tree)
 
     log.info("save loaded: %s → switched to branch %s (status preview on)", save_id, branch_id)
-    branch_meta = branches.get(branch_id)
-    if not branch_meta:
-        return jsonify({"ok": False, "error": "branch metadata missing"}), 500
     return jsonify({"ok": True, "branch_id": branch_id, "branch": branch_meta})
 
 
