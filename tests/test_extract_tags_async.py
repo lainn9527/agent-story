@@ -292,6 +292,9 @@ class TestAsyncLoreExtraction:
         branch_lore = json.loads(branch_lore_path.read_text(encoding="utf-8"))
         topics = [e["topic"] for e in branch_lore]
         assert "新體系" in topics
+        saved = next(e for e in branch_lore if e["topic"] == "新體系")
+        assert saved.get("source", {}).get("branch_id") == "main"
+        assert saved.get("source", {}).get("msg_index") == 1
 
         # Base lore should remain empty
         design_dir = tmp_path / "story_design" / story_id
