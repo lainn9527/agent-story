@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.15] - 2026-02-27
+
+### Changed
+- **Extraction prompt 防膨脹改進**: 新增「道具欄清理原則」（禁止場景狀態寫入 inventory、已消耗/已融合道具自動移除、召喚物簡化追蹤、隊友狀態歸入 relationships、50 項 soft cap）和「技能列表維護原則」（升級時移除舊版本、同系列只保留最高階、systems 已涵蓋的不重複列出），解決 character_state 正向回饋膨脹問題 ([#125])
+
+[#125]: https://github.com/lainn9527/agent-story/pull/125
+
 ## [0.20.14] - 2026-02-27
 
 ### Added
