@@ -197,7 +197,7 @@ def _is_numeric_value(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 1800.0) / 1000
+STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 20000.0) / 1000
 STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFLIGHT", 4))
 _STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
 

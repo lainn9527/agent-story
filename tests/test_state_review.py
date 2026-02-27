@@ -11,6 +11,12 @@ import pytest
 import app as app_module
 
 
+@pytest.fixture(autouse=True)
+def _disable_llm_reviewer_for_deterministic_tests(monkeypatch):
+    """This file validates deterministic gate behavior; keep reviewer off."""
+    monkeypatch.setattr(app_module, "STATE_REVIEW_LLM", "off")
+
+
 # Schema matching the real project
 SCHEMA = {
     "fields": [
