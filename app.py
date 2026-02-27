@@ -162,10 +162,10 @@ VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死�
 
 # State validation gate mode: "off" | "warn" | "enforce"
 # "off" = no validation, "warn" = validate + log but apply original, "enforce" = apply sanitized
-STATE_REVIEW_MODE = os.environ.get("STATE_REVIEW_MODE", "warn")
+STATE_REVIEW_MODE = os.environ.get("STATE_REVIEW_MODE", "enforce")
 
 # LLM reviewer: only active when STATE_REVIEW_MODE=enforce and STATE_REVIEW_LLM=on
-STATE_REVIEW_LLM = os.environ.get("STATE_REVIEW_LLM", "off")
+STATE_REVIEW_LLM = os.environ.get("STATE_REVIEW_LLM", "on")
 
 
 def _parse_env_float(name: str, default: float) -> float:
