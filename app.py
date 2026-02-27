@@ -160,6 +160,61 @@ DEFAULT_CHARACTER_SCHEMA = {
 
 VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}
 
+# State validation gate mode: "off" | "warn" | "enforce"
+# "off" = no validation, "warn" = validate + log but apply original, "enforce" = apply sanitized
+STATE_REVIEW_MODE = os.environ.get("STATE_REVIEW_MODE", "enforce")
+
+# LLM reviewer: only active when STATE_REVIEW_MODE=enforce and STATE_REVIEW_LLM=on
+STATE_REVIEW_LLM = os.environ.get("STATE_REVIEW_LLM", "on")
+
+
+def _parse_env_float(name: str, default: float) -> float:
+    """Parse float env var with safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        log.warning("invalid %s=%r, using default %s", name, raw, default)
+        return default
+
+
+def _parse_env_int(name: str, default: int) -> int:
+    """Parse int env var with safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        log.warning("invalid %s=%r, using default %s", name, raw, default)
+        return default
+
+
+def _is_numeric_value(value: object) -> bool:
+    """True for int/float but not bool (bool is a subclass of int in Python)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 20000.0) / 1000
+STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFLIGHT", 4))
+_STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
+
+# Scene-transient keys that should never be persisted (used by validation gate + inner)
+_SCENE_KEYS = {
+    "location", "location_update", "location_details",
+    "threat_level", "combat_status", "escape_options", "escape_route",
+    "noise_level", "facility_status", "npc_status", "weapons_status",
+    "tool_status", "available_escape", "available_locations",
+    "status_update", "current_predicament",
+}
+# LLM intermediate instruction keys that leak into state
+_INSTRUCTION_KEYS = {
+    "inventory_use", "inventory_update", "skill_update",
+    "status_change", "state_change", "note", "notes",
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers — generic
@@ -1174,6 +1229,297 @@ def _get_schema_known_keys(schema: dict) -> set[str]:
     return known
 
 
+def _validate_state_update(update: dict, schema: dict, current_state: dict) -> tuple[dict, list[dict]]:
+    """Deterministic validation gate for state updates.
+
+    Returns (sanitized_update, violations) where sanitized_update has invalid
+    keys dropped and violations is a list of dicts describing each issue.
+    Pure function, no side effects.
+    """
+    sanitized = {}
+    violations = []
+
+    # Build schema-aware lookup sets
+    schema_list_keys = set()       # base keys for list-type fields (e.g. "completed_missions")
+    schema_add_keys = set()        # e.g. "completed_missions_add", "inventory_add" (fallback)
+    schema_remove_keys = set()     # e.g. "completed_missions_remove", "inventory_remove" (fallback)
+    map_type_keys = set()          # keys with type=map (lists or fields)
+    for l in schema.get("lists", []):
+        lkey = l["key"]
+        schema_list_keys.add(lkey)
+        if l.get("type") == "map":
+            map_type_keys.add(lkey)
+        # Include both explicit keys AND fallback f"{lkey}_add"/f"{lkey}_remove"
+        # because _apply_state_update_inner supports both paths (backward compat
+        # for map-type lists that don't declare state_add_key in schema).
+        schema_add_keys.add(l.get("state_add_key") or f"{lkey}_add")
+        schema_remove_keys.add(l.get("state_remove_key") or f"{lkey}_remove")
+    for f in schema.get("fields", []):
+        if f.get("type") == "map":
+            map_type_keys.add(f["key"])
+
+    direct_overwrite_keys = set(schema.get("direct_overwrite_keys", []))
+
+    for key, val in update.items():
+        # Rule 8: Scene/instruction keys — drop early
+        if key in _SCENE_KEYS:
+            violations.append({"key": key, "rule": "scene_key", "value": val, "action": "drop"})
+            continue
+        if key in _INSTRUCTION_KEYS:
+            violations.append({"key": key, "rule": "instruction_key", "value": val, "action": "drop"})
+            continue
+
+        # Rule 1: invalid current_phase
+        if key == "current_phase" and val not in VALID_PHASES:
+            violations.append({"key": key, "rule": "invalid_phase", "value": val, "action": "drop"})
+            continue
+
+        # Rule 2: reward_points_delta must be numeric
+        if key == "reward_points_delta" and not _is_numeric_value(val):
+            violations.append({"key": key, "rule": "non_numeric_delta", "value": val, "action": "drop"})
+            continue
+
+        # Rule 3: reward_points must be numeric
+        if key == "reward_points" and not _is_numeric_value(val):
+            violations.append({"key": key, "rule": "non_numeric_points", "value": val, "action": "drop"})
+            continue
+
+        # Rule 4: map-type fields must be dict
+        if key in map_type_keys and not isinstance(val, dict):
+            violations.append({"key": key, "rule": "map_not_dict", "value": type(val).__name__, "action": "drop"})
+            continue
+
+        # Rule 5: _add/_remove suffix where base is not a schema list
+        if key.endswith("_add") or key.endswith("_remove"):
+            if key not in schema_add_keys and key not in schema_remove_keys:
+                violations.append({"key": key, "rule": "non_schema_add_remove", "value": val, "action": "drop"})
+                continue
+
+        # Rule 6: _add/_remove value — string → wrap [str], non-str/non-list → drop
+        if key in schema_add_keys or key in schema_remove_keys:
+            if isinstance(val, str):
+                val = [val]  # backward compat: wrap string in list
+            elif not isinstance(val, list):
+                violations.append({"key": key, "rule": "add_remove_not_list", "value": type(val).__name__, "action": "drop"})
+                continue
+
+        # Rule 7: *_delta key with non-numeric value
+        if key.endswith("_delta") and key != "reward_points_delta":
+            if not _is_numeric_value(val):
+                violations.append({"key": key, "rule": "delta_non_numeric", "value": val, "action": "drop"})
+                continue
+
+        # Rule 9: direct overwrite text field must be string
+        # (current_phase already handled by rule 1; these are text fields like
+        # gene_lock, physique, spirit, current_status — only strings are valid)
+        if key in direct_overwrite_keys and key != "current_phase":
+            if not isinstance(val, str):
+                violations.append({"key": key, "rule": "overwrite_not_string", "value": type(val).__name__, "action": "drop"})
+                continue
+
+        sanitized[key] = val
+
+    return sanitized, violations
+
+
+def _review_state_update_llm(
+    current_state: dict,
+    schema: dict,
+    original_update: dict,
+    sanitized_update: dict,
+    violations: list[dict],
+    story_id: str = "",
+    branch_id: str = "",
+) -> dict | None:
+    """Ask LLM to produce a repair patch for violated state update keys.
+
+    Returns a merged candidate update (sanitized + patch - drop_keys), or None
+    on any failure (timeout, parse error, malformed output).
+    """
+    from llm_bridge import call_oneshot
+
+    schema_summary_lines = []
+    for f in schema.get("fields", []):
+        schema_summary_lines.append(f"  {f['key']}: {f.get('type', 'text')}")
+    for l in schema.get("lists", []):
+        ltype = l.get("type", "list")
+        schema_summary_lines.append(f"  {l['key']}: {ltype}")
+        if l.get("state_add_key"):
+            schema_summary_lines.append(f"    (add: {l['state_add_key']})")
+    schema_summary = "\n".join(schema_summary_lines)
+
+    violations_text = json.dumps(violations, ensure_ascii=False, indent=2)
+
+    prompt = (
+        "你是 RPG 角色狀態更新的審核員。GM 產生了一份狀態更新，但其中部分欄位違反規則被擋下。\n"
+        "請根據被擋下的內容，判斷是否能修正後保留，或者應該丟棄。\n\n"
+        f"## 角色 Schema\n{schema_summary}\n\n"
+        f"## 合法 current_phase 值\n{json.dumps(sorted(VALID_PHASES), ensure_ascii=False)}\n\n"
+        f"## 當前角色狀態（節錄）\n{json.dumps({k: current_state[k] for k in list(current_state)[:15]}, ensure_ascii=False, indent=2)}\n\n"
+        f"## 原始更新\n{json.dumps(original_update, ensure_ascii=False, indent=2)}\n\n"
+        f"## 已通過驗證的部分\n{json.dumps(sanitized_update, ensure_ascii=False, indent=2)}\n\n"
+        f"## 被擋下的違規項目\n{violations_text}\n\n"
+        "## 輸出格式（嚴格 JSON）\n"
+        "```json\n"
+        "{\n"
+        '  "patch": {},\n'
+        '  "drop_keys": [],\n'
+        '  "reason": ""\n'
+        "}\n"
+        "```\n\n"
+        "規則：\n"
+        "- patch: 修正後可保留的 key-value（必須符合 schema 型別）\n"
+        "- drop_keys: 確定要丟棄的 key（從 sanitized 中移除）\n"
+        "- reason: 一句話說明判斷理由\n"
+        "- 不要憑空新增原始更新中沒有的 key\n"
+        "- 不要輸出 location/threat_level 等場景型 key\n"
+        "- 只輸出 JSON，不要任何解釋\n"
+    )
+
+    permit_lock = threading.Lock()
+    permit_released = False
+
+    def _release_permit_once():
+        nonlocal permit_released
+        with permit_lock:
+            if permit_released:
+                return
+            permit_released = True
+        _STATE_REVIEW_LLM_SEM.release()
+
+    try:
+        if not _STATE_REVIEW_LLM_SEM.acquire(blocking=False):
+            log.warning(
+                "state_reviewer: inflight limit reached (%d), fallback",
+                STATE_REVIEW_LLM_MAX_INFLIGHT,
+            )
+            return None
+
+        # Use a daemon thread so timeout fallback returns immediately without
+        # waiting for a potentially stuck provider call to finish.
+        result_box: dict = {"result": None, "error": None}
+
+        def _call():
+            try:
+                t0 = time.time()
+                result_box["result"] = call_oneshot(prompt)
+                if story_id:
+                    _log_llm_usage(
+                        story_id,
+                        "oneshot_state_review",
+                        time.time() - t0,
+                        branch_id=branch_id,
+                    )
+            except Exception as e:
+                result_box["error"] = e
+            finally:
+                _release_permit_once()
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(STATE_REVIEW_LLM_TIMEOUT)
+        if t.is_alive():
+            log.warning("state_reviewer: LLM timeout (%.1fs), fallback", STATE_REVIEW_LLM_TIMEOUT)
+            _release_permit_once()
+            return None
+
+        if result_box["error"] is not None:
+            raise result_box["error"]
+
+        result = result_box["result"]
+
+        if not result:
+            return None
+        result = result.strip()
+        if result.startswith("```"):
+            lines = result.split("\n")
+            lines = [l for l in lines if not l.startswith("```")]
+            result = "\n".join(lines)
+
+        parsed = json.loads(result)
+        if not isinstance(parsed, dict):
+            return None
+
+        patch = parsed.get("patch", {})
+        drop_keys = parsed.get("drop_keys", [])
+
+        if not isinstance(patch, dict):
+            log.warning("state_reviewer: patch is not dict, fallback")
+            return None
+        if not isinstance(drop_keys, list):
+            log.warning("state_reviewer: drop_keys is not list, fallback")
+            return None
+
+        # Hard guard: reviewer must not inject keys that weren't present in
+        # original update/sanitized update. Keep only in-scope keys.
+        allowed_patch_keys = set(original_update.keys()) | set(sanitized_update.keys())
+        if patch:
+            dropped_patch_keys = [k for k in patch if k not in allowed_patch_keys]
+            if dropped_patch_keys:
+                log.warning(
+                    "state_reviewer: dropped %d out-of-scope patch keys: %s",
+                    len(dropped_patch_keys),
+                    dropped_patch_keys[:5],
+                )
+                patch = {k: v for k, v in patch.items() if k in allowed_patch_keys}
+
+        # Build candidate: sanitized + patch - drop_keys
+        candidate = dict(sanitized_update)
+        candidate.update(patch)
+        for k in drop_keys:
+            if isinstance(k, str):
+                candidate.pop(k, None)
+
+        return candidate
+
+    except Exception as e:
+        _release_permit_once()
+        log.warning("state_reviewer: failed (%s), fallback", e)
+        return None
+
+
+def _run_state_gate(update: dict, schema: dict, current_state: dict,
+                    label: str = "state_gate", allow_llm: bool = True,
+                    story_id: str = "", branch_id: str = "") -> dict:
+    """Run state validation gate and return the update to use.
+
+    Respects STATE_REVIEW_MODE:
+    - "off": return update unchanged, no validation
+    - "warn": validate + log, but return original update
+    - "enforce": validate + log, return sanitized update
+      - If STATE_REVIEW_LLM=on and allow_llm=True, also asks LLM reviewer
+        to repair violations, then re-validates the result
+    """
+    if STATE_REVIEW_MODE == "off":
+        return update
+
+    sanitized, violations = _validate_state_update(update, schema, current_state)
+    if violations:
+        log.warning("%s: %d violations: %s",
+                    label, len(violations),
+                    [(v["key"], v["rule"]) for v in violations])
+
+    if STATE_REVIEW_MODE == "enforce":
+        # Phase 2: LLM reviewer (only when there are violations to review)
+        if (violations and allow_llm
+                and STATE_REVIEW_LLM == "on"):
+            candidate = _review_state_update_llm(
+                current_state, schema, update, sanitized, violations,
+                story_id=story_id, branch_id=branch_id)
+            if candidate is not None:
+                # Second pass: validate reviewer output
+                final, v2 = _validate_state_update(candidate, schema, current_state)
+                if v2:
+                    log.warning("%s: reviewer output had %d violations, using sanitized",
+                                label, len(v2))
+                    return sanitized
+                log.info("%s: reviewer repaired %d keys", label,
+                         len(candidate) - len(sanitized))
+                return final
+        return sanitized
+    return update
+
+
 def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_keys: set[str]):
     """Background: use LLM to remap non-standard STATE fields, then re-apply."""
     import threading
@@ -1217,8 +1563,13 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
             if normalized == update:
                 return
             log.info("    state_normalize: remapped %d unknown keys, re-applying", len(unknown))
-            _apply_state_update_inner(story_id, branch_id, normalized,
-                                      _load_character_schema(story_id))
+            norm_schema = _load_character_schema(story_id)
+            normalized = _run_state_gate(
+                normalized, norm_schema,
+                _load_character_state(story_id, branch_id),
+                label="state_gate(normalize)", allow_llm=False,
+                story_id=story_id, branch_id=branch_id)
+            _apply_state_update_inner(story_id, branch_id, normalized, norm_schema)
         except Exception as e:
             log.info("    state_normalize: failed (%s), skipping", e)
 
@@ -1819,10 +2170,10 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 
     # Generic *_delta handling: apply as addition to base field
     for key in list(update.keys()):
-        if key.endswith("_delta") and isinstance(update[key], (int, float)):
+        if key.endswith("_delta") and _is_numeric_value(update[key]):
             base_key = key[:-6]  # strip "_delta"
             current = state.get(base_key)
-            if isinstance(current, (int, float)):
+            if _is_numeric_value(current):
                 state[base_key] = current + update[key]
             elif base_key == "reward_points":
                 state[base_key] = state.get(base_key, 0) + update[key]
@@ -1832,7 +2183,7 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
     # Only applies when delta is absent — delta takes precedence when both present.
     if "reward_points" in update and "reward_points_delta" not in update:
         val = update["reward_points"]
-        if isinstance(val, (int, float)):
+        if _is_numeric_value(val):
             state["reward_points"] = int(val)
 
     # Direct overwrite fields from schema
@@ -1861,19 +2212,8 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 
     # Keys managed by other systems — never save to character state
     _SYSTEM_KEYS = {"world_day", "world_time", "branch_title"}
-    # Scene-transient keys that should never be persisted
-    _SCENE_KEYS = {
-        "location", "location_update", "location_details",
-        "threat_level", "combat_status", "escape_options", "escape_route",
-        "noise_level", "facility_status", "npc_status", "weapons_status",
-        "tool_status", "available_escape", "available_locations",
-        "status_update", "current_predicament",
-    }
-    # LLM intermediate instruction keys that leak into state
-    _INSTRUCTION_KEYS = {
-        "inventory_use", "inventory_update", "skill_update",
-        "status_change", "state_change", "note", "notes",
-    }
+    # Defense-in-depth: still filter scene/instruction keys here as backup
+    # (primary filtering is in _validate_state_update gate)
 
     # Save extra keys — only non-delta, non-handled, string/number fields
     for key, val in update.items():
@@ -1891,27 +2231,29 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 def _apply_state_update(story_id: str, branch_id: str, update: dict):
     """Apply a STATE update dict to the branch's character state file.
 
-    1. Immediately applies the raw update (never blocks)
-    2. Validates dungeon growth constraints (hard cap)
-    3. Kicks off background LLM normalization for non-standard fields
+    1. Runs deterministic validation gate (if enabled)
+    2. Immediately applies the (possibly sanitized) update
+    3. Validates dungeon growth constraints (hard cap)
+    4. Kicks off background LLM normalization for non-standard fields
     """
-    # Soft-validate current_phase (log only, never block)
-    phase = update.get("current_phase")
-    if phase and phase not in VALID_PHASES:
-        log.warning("Invalid current_phase '%s' (expected one of %s)", phase, VALID_PHASES)
-
     schema = _load_character_schema(story_id)
 
-    # Capture old state for dungeon validation
-    old_state = copy.deepcopy(_load_character_state(story_id, branch_id))
+    # Load once, reuse for gate + dungeon validation
+    current_state = _load_character_state(story_id, branch_id)
+    old_state = copy.deepcopy(current_state)
 
-    # Apply immediately with raw update
+    # Deterministic validation gate
+    update = _run_state_gate(
+        update, schema, current_state,
+        label="state_gate", story_id=story_id, branch_id=branch_id,
+    )
+
+    # Apply immediately
     _apply_state_update_inner(story_id, branch_id, update, schema)
 
     # Hard constraint validation (dungeon system)
     new_state = _load_character_state(story_id, branch_id)
     validate_dungeon_progression(story_id, branch_id, new_state, old_state)
-    # BE-C1: save modified new_state back to disk (validate_dungeon_progression may have capped fields)
     _save_json(_story_character_state_path(story_id, branch_id), new_state)
 
     # Background: normalize non-standard fields and re-apply
