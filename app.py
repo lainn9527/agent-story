@@ -910,6 +910,52 @@ def _merge_branch_lore_into(story_id: str, src_branch_id: str, dst_branch_id: st
     _save_branch_lore(story_id, dst_branch_id, dst)
 
 
+def _copy_branch_lore_for_fork(story_id: str, source_branch_id: str, target_branch_id: str,
+                               branch_point_index: int | None):
+    """Copy source branch lore to a fork, filtered by fork time when possible.
+
+    Entries with `source.msg_index` newer than branch_point are excluded so a fork
+    does not inherit future discoveries. Legacy entries without source metadata are kept.
+    """
+    src = _load_branch_lore(story_id, source_branch_id)
+    if not src:
+        return
+
+    if branch_point_index is None:
+        _save_branch_lore(story_id, target_branch_id, src)
+        return
+
+    filtered: list[dict] = []
+    skipped_future = 0
+    for entry in src:
+        source = entry.get("source")
+        if not isinstance(source, dict):
+            # Legacy entries (no source metadata): keep for backward compatibility.
+            filtered.append(entry)
+            continue
+
+        msg_index = source.get("msg_index")
+        try:
+            msg_index_int = int(msg_index)
+        except (TypeError, ValueError):
+            # Invalid/unknown source index: keep conservatively.
+            filtered.append(entry)
+            continue
+
+        if msg_index_int <= branch_point_index:
+            filtered.append(entry)
+        else:
+            skipped_future += 1
+
+    if filtered:
+        _save_branch_lore(story_id, target_branch_id, filtered)
+    if skipped_future:
+        log.info(
+            "    branch_lore fork filtered %d future entries (src=%s dst=%s bp=%s)",
+            skipped_future, source_branch_id, target_branch_id, branch_point_index,
+        )
+
+
 def _search_branch_lore(story_id: str, branch_id: str, query: str,
                          token_budget: int = 1500,
                          context: dict | None = None) -> str:
@@ -1416,6 +1462,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     log.info("    lore skip (user-edited): '%s'", resolved_topic)
                     continue
                 entry["edited_by"] = "auto"
+                entry["source"] = {
+                    "branch_id": branch_id,
+                    "msg_index": msg_index,
+                    "excerpt": gm_text[:100],
+                    "timestamp": datetime.now().isoformat(),
+                }
                 _save_branch_lore_entry(story_id, branch_id, entry, prefix_registry=prefix_reg)
                 all_topic_categories[entry.get("topic", topic)] = category
                 saved_counts["lore"] += 1
@@ -3079,10 +3131,7 @@ def api_branches_create():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
-    # Copy branch lore from source (child inherits parent's branch-specific lore)
-    _src_bl = _load_branch_lore(story_id, source_branch_id)
-    if _src_bl:
-        _save_branch_lore(story_id, branch_id, _src_bl)
+    _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
@@ -3295,10 +3344,7 @@ def api_branches_edit():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
-    # Copy branch lore from source (child inherits parent's branch-specific lore)
-    _src_bl = _load_branch_lore(story_id, source_branch_id)
-    if _src_bl:
-        _save_branch_lore(story_id, branch_id, _src_bl)
+    _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -3442,10 +3488,7 @@ def api_branches_edit_stream():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
-    # Copy branch lore from source (child inherits parent's branch-specific lore)
-    _src_bl = _load_branch_lore(story_id, source_branch_id)
-    if _src_bl:
-        _save_branch_lore(story_id, branch_id, _src_bl)
+    _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -3595,10 +3638,7 @@ def api_branches_regenerate():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
-    # Copy branch lore from source (child inherits parent's branch-specific lore)
-    _src_bl = _load_branch_lore(story_id, source_branch_id)
-    if _src_bl:
-        _save_branch_lore(story_id, branch_id, _src_bl)
+    _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
@@ -3721,10 +3761,7 @@ def api_branches_regenerate_stream():
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
-    # Copy branch lore from source (child inherits parent's branch-specific lore)
-    _src_bl = _load_branch_lore(story_id, source_branch_id)
-    if _src_bl:
-        _save_branch_lore(story_id, branch_id, _src_bl)
+    _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 

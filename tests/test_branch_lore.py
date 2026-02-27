@@ -693,6 +693,51 @@ class TestBranchOperationsWithLore:
         assert len(parent_lore) == 1
         assert parent_lore[0]["topic"] == "shared"
 
+    def test_fork_excludes_future_branch_lore_by_source_msg_index(self, client, setup_story, story_id):
+        """Fork should not inherit branch lore extracted after branch_point_index."""
+        app_module._save_branch_lore(story_id, "main", [
+            {
+                "category": "體系",
+                "topic": "過去設定",
+                "content": "可繼承",
+                "source": {"branch_id": "main", "msg_index": 1},
+            },
+            {
+                "category": "體系",
+                "topic": "未來設定",
+                "content": "不應繼承",
+                "source": {"branch_id": "main", "msg_index": 3},
+            },
+        ])
+
+        resp = client.post("/api/branches", json={
+            "name": "分支",
+            "branch_point_index": 1,
+        })
+        assert resp.status_code == 200
+        bid = resp.get_json()["branch"]["id"]
+
+        lore = app_module._load_branch_lore(story_id, bid)
+        topics = {e["topic"] for e in lore}
+        assert "過去設定" in topics
+        assert "未來設定" not in topics
+
+    def test_fork_keeps_legacy_branch_lore_without_source(self, client, setup_story, story_id):
+        """Legacy entries without source metadata should still be inherited."""
+        app_module._save_branch_lore(story_id, "main", [
+            {"category": "體系", "topic": "舊格式設定", "content": "legacy"},
+        ])
+        resp = client.post("/api/branches", json={
+            "name": "分支",
+            "branch_point_index": 1,
+        })
+        assert resp.status_code == 200
+        bid = resp.get_json()["branch"]["id"]
+
+        lore = app_module._load_branch_lore(story_id, bid)
+        topics = {e["topic"] for e in lore}
+        assert "舊格式設定" in topics
+
 
 # ===================================================================
 # Integration: Inline LORE Tag → Branch Lore
