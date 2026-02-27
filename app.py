@@ -1466,7 +1466,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     "branch_id": branch_id,
                     "msg_index": msg_index,
                     "excerpt": gm_text[:100],
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 _save_branch_lore_entry(story_id, branch_id, entry, prefix_registry=prefix_reg)
                 all_topic_categories[entry.get("topic", topic)] = category
@@ -2487,7 +2487,7 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
             "branch_id": branch_id,
             "msg_index": msg_index,
             "excerpt": gm_response[:100],
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         lore_entry["edited_by"] = "auto"
         _save_branch_lore_entry(story_id, branch_id, lore_entry)

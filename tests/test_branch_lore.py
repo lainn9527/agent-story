@@ -738,6 +738,41 @@ class TestBranchOperationsWithLore:
         topics = {e["topic"] for e in lore}
         assert "舊格式設定" in topics
 
+    def test_edit_branch_excludes_future_branch_lore_by_source_msg_index(
+        self, client, setup_story, story_id, monkeypatch
+    ):
+        """Edit flow should also apply branch_lore fork filtering by branch point."""
+        app_module._save_branch_lore(story_id, "main", [
+            {
+                "category": "體系",
+                "topic": "可繼承_編輯路徑",
+                "content": "past",
+                "source": {"branch_id": "main", "msg_index": 1},
+            },
+            {
+                "category": "體系",
+                "topic": "不應繼承_編輯路徑",
+                "content": "future",
+                "source": {"branch_id": "main", "msg_index": 3},
+            },
+        ])
+
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("GM回覆", None))
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+
+        resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "改變了的訊息",
+        })
+        assert resp.status_code == 200
+        bid = resp.get_json()["branch"]["id"]
+
+        lore = app_module._load_branch_lore(story_id, bid)
+        topics = {e["topic"] for e in lore}
+        assert "可繼承_編輯路徑" in topics
+        assert "不應繼承_編輯路徑" not in topics
+
 
 # ===================================================================
 # Integration: Inline LORE Tag → Branch Lore
