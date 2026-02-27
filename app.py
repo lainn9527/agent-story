@@ -192,6 +192,11 @@ def _parse_env_int(name: str, default: int) -> int:
         return default
 
 
+def _is_numeric_value(value: object) -> bool:
+    """True for int/float but not bool (bool is a subclass of int in Python)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 1800.0) / 1000
 STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFLIGHT", 4))
 _STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
@@ -1224,12 +1229,12 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
             continue
 
         # Rule 2: reward_points_delta must be numeric
-        if key == "reward_points_delta" and not isinstance(val, (int, float)):
+        if key == "reward_points_delta" and not _is_numeric_value(val):
             violations.append({"key": key, "rule": "non_numeric_delta", "value": val, "action": "drop"})
             continue
 
         # Rule 3: reward_points must be numeric
-        if key == "reward_points" and not isinstance(val, (int, float)):
+        if key == "reward_points" and not _is_numeric_value(val):
             violations.append({"key": key, "rule": "non_numeric_points", "value": val, "action": "drop"})
             continue
 
@@ -1254,7 +1259,7 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
 
         # Rule 7: *_delta key with non-numeric value
         if key.endswith("_delta") and key != "reward_points_delta":
-            if not isinstance(val, (int, float)):
+            if not _is_numeric_value(val):
                 violations.append({"key": key, "rule": "delta_non_numeric", "value": val, "action": "drop"})
                 continue
 
@@ -1325,6 +1330,17 @@ def _review_state_update_llm(
         "- 只輸出 JSON，不要任何解釋\n"
     )
 
+    permit_lock = threading.Lock()
+    permit_released = False
+
+    def _release_permit_once():
+        nonlocal permit_released
+        with permit_lock:
+            if permit_released:
+                return
+            permit_released = True
+        _STATE_REVIEW_LLM_SEM.release()
+
     try:
         if not _STATE_REVIEW_LLM_SEM.acquire(blocking=False):
             log.warning(
@@ -1351,13 +1367,14 @@ def _review_state_update_llm(
             except Exception as e:
                 result_box["error"] = e
             finally:
-                _STATE_REVIEW_LLM_SEM.release()
+                _release_permit_once()
 
         t = threading.Thread(target=_call, daemon=True)
         t.start()
         t.join(STATE_REVIEW_LLM_TIMEOUT)
         if t.is_alive():
             log.warning("state_reviewer: LLM timeout (%.1fs), fallback", STATE_REVIEW_LLM_TIMEOUT)
+            _release_permit_once()
             return None
 
         if result_box["error"] is not None:
@@ -1410,6 +1427,7 @@ def _review_state_update_llm(
         return candidate
 
     except Exception as e:
+        _release_permit_once()
         log.warning("state_reviewer: failed (%s), fallback", e)
         return None
 
@@ -2100,10 +2118,10 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 
     # Generic *_delta handling: apply as addition to base field
     for key in list(update.keys()):
-        if key.endswith("_delta") and isinstance(update[key], (int, float)):
+        if key.endswith("_delta") and _is_numeric_value(update[key]):
             base_key = key[:-6]  # strip "_delta"
             current = state.get(base_key)
-            if isinstance(current, (int, float)):
+            if _is_numeric_value(current):
                 state[base_key] = current + update[key]
             elif base_key == "reward_points":
                 state[base_key] = state.get(base_key, 0) + update[key]
@@ -2113,7 +2131,7 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
     # Only applies when delta is absent — delta takes precedence when both present.
     if "reward_points" in update and "reward_points_delta" not in update:
         val = update["reward_points"]
-        if isinstance(val, (int, float)):
+        if _is_numeric_value(val):
             state["reward_points"] = int(val)
 
     # Direct overwrite fields from schema

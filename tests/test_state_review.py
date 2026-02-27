@@ -112,6 +112,18 @@ class TestValidateRewardPoints:
         assert sanitized["reward_points_delta"] == -100
         assert violations == []
 
+    def test_reward_points_delta_bool_dropped(self):
+        update = {"reward_points_delta": True}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert "reward_points_delta" not in sanitized
+        assert violations[0]["rule"] == "non_numeric_delta"
+
+    def test_reward_points_bool_dropped(self):
+        update = {"reward_points": False}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert "reward_points" not in sanitized
+        assert violations[0]["rule"] == "non_numeric_points"
+
 
 class TestValidateMapFields:
     def test_map_field_not_dict(self):
@@ -228,6 +240,12 @@ class TestValidateDelta:
         update = {"hp_delta": 50}
         sanitized, _ = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
         assert sanitized["hp_delta"] == 50
+
+    def test_delta_bool_dropped(self):
+        update = {"hp_delta": True}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert "hp_delta" not in sanitized
+        assert violations[0]["rule"] == "delta_non_numeric"
 
 
 class TestValidateSceneKeys:
@@ -424,6 +442,16 @@ class TestIntegrationEnforceMode:
         # Everything applied as-is (location blocked by inner, phase applied)
         assert state["current_phase"] == "戰鬥中"
         assert "location" not in state  # inner still blocks scene keys
+
+    def test_off_mode_bool_numeric_not_applied(self, tmp_path, story_id, setup_state, monkeypatch):
+        monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "off")
+        monkeypatch.setattr(app_module, "validate_dungeon_progression", lambda *a, **kw: None)
+        monkeypatch.setattr(app_module, "_normalize_state_async", lambda *a, **kw: None)
+
+        setup_state()
+        app_module._apply_state_update(story_id, "main", {"reward_points_delta": True})
+        state = _load_state(tmp_path, story_id)
+        assert state["reward_points"] == 5000
 
 
 # ===================================================================

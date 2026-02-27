@@ -172,6 +172,41 @@ class TestReviewerBasics:
         assert result is None
         assert elapsed < 0.15
 
+    def test_reviewer_timeout_releases_inflight_slot_once(self, monkeypatch):
+        """Timeout path should release slot; worker finally must not double-release."""
+        import time
+
+        class _CountingSemaphore:
+            def __init__(self):
+                self.release_calls = 0
+
+            def acquire(self, blocking=False):
+                return True
+
+            def release(self):
+                self.release_calls += 1
+
+        sem = _CountingSemaphore()
+        monkeypatch.setattr(app_module, "_STATE_REVIEW_LLM_SEM", sem)
+
+        def slow_call(*args, **kwargs):
+            time.sleep(0.05)
+            return "{}"
+
+        old_timeout = app_module.STATE_REVIEW_LLM_TIMEOUT
+        app_module.STATE_REVIEW_LLM_TIMEOUT = 0.01
+        try:
+            with patch("llm_bridge.call_oneshot", side_effect=slow_call):
+                result = app_module._review_state_update_llm(
+                    INITIAL_STATE, SCHEMA, {}, {}, [])
+            # Wait for worker thread to exit and run its finally block.
+            time.sleep(0.08)
+        finally:
+            app_module.STATE_REVIEW_LLM_TIMEOUT = old_timeout
+
+        assert result is None
+        assert sem.release_calls == 1
+
     def test_reviewer_returns_none_on_exception(self):
         with patch("llm_bridge.call_oneshot", side_effect=RuntimeError("API down")):
             result = app_module._review_state_update_llm(
