@@ -161,6 +161,34 @@ class TestValidateAddRemove:
         sanitized, _ = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
         assert sanitized["abilities_remove"] == ["火球術"]
 
+    def test_inventory_add_fallback_kept(self):
+        """P1 regression: inventory_add uses fallback key (no explicit state_add_key in schema)."""
+        update = {"inventory_add": ["新道具"]}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert sanitized["inventory_add"] == ["新道具"]
+        assert violations == []
+
+    def test_inventory_remove_fallback_kept(self):
+        """P1 regression: inventory_remove uses fallback key."""
+        update = {"inventory_remove": ["封印之鏡"]}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert sanitized["inventory_remove"] == ["封印之鏡"]
+        assert violations == []
+
+    def test_inventory_add_string_wrapped(self):
+        """P1 regression: inventory_add string value → wrapped in list."""
+        update = {"inventory_add": "單一道具"}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert sanitized["inventory_add"] == ["單一道具"]
+        assert violations == []
+
+    def test_relationships_add_fallback_kept(self):
+        """Relationships map also has fallback _add/_remove keys."""
+        update = {"relationships_add": ["新NPC"]}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert sanitized["relationships_add"] == ["新NPC"]
+        assert violations == []
+
     def test_add_string_wrapped_to_list(self):
         """Backward compat: string value for _add key → wrapped in list."""
         update = {"abilities_add": "火球術"}
@@ -225,23 +253,30 @@ class TestValidateInstructionKeys:
 
 
 class TestValidateDirectOverwrite:
-    def test_direct_overwrite_text_not_string(self):
+    def test_direct_overwrite_list_dropped(self):
         update = {"gene_lock": ["第一階", "第二階"]}
         sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
         assert "gene_lock" not in sanitized
-        assert violations[0]["rule"] == "overwrite_bad_type"
+        assert violations[0]["rule"] == "overwrite_not_string"
 
     def test_direct_overwrite_string_kept(self):
         update = {"gene_lock": "第一階"}
         sanitized, _ = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
         assert sanitized["gene_lock"] == "第一階"
 
-    def test_direct_overwrite_number_kept(self):
-        """Numbers are acceptable for direct overwrite fields."""
+    def test_direct_overwrite_number_dropped(self):
+        """Text fields (gene_lock, physique, etc.) must be strings — numbers are rejected."""
         update = {"physique": 5}
         sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
-        assert sanitized["physique"] == 5
-        assert violations == []
+        assert "physique" not in sanitized
+        assert violations[0]["rule"] == "overwrite_not_string"
+
+    def test_direct_overwrite_bool_dropped(self):
+        """Booleans are not valid for text overwrite fields."""
+        update = {"spirit": True}
+        sanitized, violations = app_module._validate_state_update(update, SCHEMA, INITIAL_STATE)
+        assert "spirit" not in sanitized
+        assert violations[0]["rule"] == "overwrite_not_string"
 
 
 class TestValidateMultipleViolations:
@@ -434,3 +469,39 @@ class TestEnforceLegacyStringWrapping:
         app_module._apply_state_update(story_id, "main", update)
         state = _load_state(tmp_path, story_id)
         assert "生化危機" in state["completed_missions"]
+
+    def test_enforce_inventory_add_fallback(self, tmp_path, story_id, setup_state, monkeypatch):
+        """P1 regression: inventory_add (fallback key, no explicit state_add_key) must work in enforce mode."""
+        monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "enforce")
+        monkeypatch.setattr(app_module, "validate_dungeon_progression", lambda *a, **kw: None)
+        monkeypatch.setattr(app_module, "_normalize_state_async", lambda *a, **kw: None)
+
+        setup_state()
+        update = {"inventory_add": ["新道具"]}
+        app_module._apply_state_update(story_id, "main", update)
+        state = _load_state(tmp_path, story_id)
+        assert "新道具" in state["inventory"]
+
+    def test_enforce_inventory_remove_fallback(self, tmp_path, story_id, setup_state, monkeypatch):
+        """P1 regression: inventory_remove (fallback key) must work in enforce mode."""
+        monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "enforce")
+        monkeypatch.setattr(app_module, "validate_dungeon_progression", lambda *a, **kw: None)
+        monkeypatch.setattr(app_module, "_normalize_state_async", lambda *a, **kw: None)
+
+        setup_state()
+        update = {"inventory_remove": ["封印之鏡"]}
+        app_module._apply_state_update(story_id, "main", update)
+        state = _load_state(tmp_path, story_id)
+        assert "封印之鏡" not in state["inventory"]
+
+    def test_enforce_inventory_add_string_fallback(self, tmp_path, story_id, setup_state, monkeypatch):
+        """P1 regression: inventory_add string → wrapped in list, not dropped, in enforce mode."""
+        monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "enforce")
+        monkeypatch.setattr(app_module, "validate_dungeon_progression", lambda *a, **kw: None)
+        monkeypatch.setattr(app_module, "_normalize_state_async", lambda *a, **kw: None)
+
+        setup_state()
+        update = {"inventory_add": "單一道具"}
+        app_module._apply_state_update(story_id, "main", update)
+        state = _load_state(tmp_path, story_id)
+        assert "單一道具" in state["inventory"]

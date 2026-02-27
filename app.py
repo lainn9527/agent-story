@@ -1158,17 +1158,19 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
 
     # Build schema-aware lookup sets
     schema_list_keys = set()       # base keys for list-type fields (e.g. "completed_missions")
-    schema_add_keys = set()        # e.g. "completed_missions_add"
-    schema_remove_keys = set()     # e.g. "completed_missions_remove"
+    schema_add_keys = set()        # e.g. "completed_missions_add", "inventory_add" (fallback)
+    schema_remove_keys = set()     # e.g. "completed_missions_remove", "inventory_remove" (fallback)
     map_type_keys = set()          # keys with type=map (lists or fields)
     for l in schema.get("lists", []):
-        schema_list_keys.add(l["key"])
+        lkey = l["key"]
+        schema_list_keys.add(lkey)
         if l.get("type") == "map":
-            map_type_keys.add(l["key"])
-        if l.get("state_add_key"):
-            schema_add_keys.add(l["state_add_key"])
-        if l.get("state_remove_key"):
-            schema_remove_keys.add(l["state_remove_key"])
+            map_type_keys.add(lkey)
+        # Include both explicit keys AND fallback f"{lkey}_add"/f"{lkey}_remove"
+        # because _apply_state_update_inner supports both paths (backward compat
+        # for map-type lists that don't declare state_add_key in schema).
+        schema_add_keys.add(l.get("state_add_key") or f"{lkey}_add")
+        schema_remove_keys.add(l.get("state_remove_key") or f"{lkey}_remove")
     for f in schema.get("fields", []):
         if f.get("type") == "map":
             map_type_keys.add(f["key"])
@@ -1224,10 +1226,12 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
                 violations.append({"key": key, "rule": "delta_non_numeric", "value": val, "action": "drop"})
                 continue
 
-        # Rule 9: direct overwrite text field must be string (except current_phase, already handled)
+        # Rule 9: direct overwrite text field must be string
+        # (current_phase already handled by rule 1; these are text fields like
+        # gene_lock, physique, spirit, current_status — only strings are valid)
         if key in direct_overwrite_keys and key != "current_phase":
-            if not isinstance(val, (str, int, float, bool)):
-                violations.append({"key": key, "rule": "overwrite_bad_type", "value": type(val).__name__, "action": "drop"})
+            if not isinstance(val, str):
+                violations.append({"key": key, "rule": "overwrite_not_string", "value": type(val).__name__, "action": "drop"})
                 continue
 
         sanitized[key] = val
