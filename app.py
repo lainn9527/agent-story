@@ -160,6 +160,24 @@ DEFAULT_CHARACTER_SCHEMA = {
 
 VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}
 
+# State validation gate mode: "off" | "warn" | "enforce"
+# "off" = no validation, "warn" = validate + log but apply original, "enforce" = apply sanitized
+STATE_REVIEW_MODE = os.environ.get("STATE_REVIEW_MODE", "warn")
+
+# Scene-transient keys that should never be persisted (used by validation gate + inner)
+_SCENE_KEYS = {
+    "location", "location_update", "location_details",
+    "threat_level", "combat_status", "escape_options", "escape_route",
+    "noise_level", "facility_status", "npc_status", "weapons_status",
+    "tool_status", "available_escape", "available_locations",
+    "status_update", "current_predicament",
+}
+# LLM intermediate instruction keys that leak into state
+_INSTRUCTION_KEYS = {
+    "inventory_use", "inventory_update", "skill_update",
+    "status_change", "state_change", "note", "notes",
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers — generic
@@ -1128,6 +1146,116 @@ def _get_schema_known_keys(schema: dict) -> set[str]:
     return known
 
 
+def _validate_state_update(update: dict, schema: dict, current_state: dict) -> tuple[dict, list[dict]]:
+    """Deterministic validation gate for state updates.
+
+    Returns (sanitized_update, violations) where sanitized_update has invalid
+    keys dropped and violations is a list of dicts describing each issue.
+    Pure function, no side effects.
+    """
+    sanitized = {}
+    violations = []
+
+    # Build schema-aware lookup sets
+    schema_list_keys = set()       # base keys for list-type fields (e.g. "completed_missions")
+    schema_add_keys = set()        # e.g. "completed_missions_add"
+    schema_remove_keys = set()     # e.g. "completed_missions_remove"
+    map_type_keys = set()          # keys with type=map (lists or fields)
+    for l in schema.get("lists", []):
+        schema_list_keys.add(l["key"])
+        if l.get("type") == "map":
+            map_type_keys.add(l["key"])
+        if l.get("state_add_key"):
+            schema_add_keys.add(l["state_add_key"])
+        if l.get("state_remove_key"):
+            schema_remove_keys.add(l["state_remove_key"])
+    for f in schema.get("fields", []):
+        if f.get("type") == "map":
+            map_type_keys.add(f["key"])
+
+    direct_overwrite_keys = set(schema.get("direct_overwrite_keys", []))
+
+    for key, val in update.items():
+        # Rule 8: Scene/instruction keys — drop early
+        if key in _SCENE_KEYS:
+            violations.append({"key": key, "rule": "scene_key", "value": val, "action": "drop"})
+            continue
+        if key in _INSTRUCTION_KEYS:
+            violations.append({"key": key, "rule": "instruction_key", "value": val, "action": "drop"})
+            continue
+
+        # Rule 1: invalid current_phase
+        if key == "current_phase" and val not in VALID_PHASES:
+            violations.append({"key": key, "rule": "invalid_phase", "value": val, "action": "drop"})
+            continue
+
+        # Rule 2: reward_points_delta must be numeric
+        if key == "reward_points_delta" and not isinstance(val, (int, float)):
+            violations.append({"key": key, "rule": "non_numeric_delta", "value": val, "action": "drop"})
+            continue
+
+        # Rule 3: reward_points must be numeric
+        if key == "reward_points" and not isinstance(val, (int, float)):
+            violations.append({"key": key, "rule": "non_numeric_points", "value": val, "action": "drop"})
+            continue
+
+        # Rule 4: map-type fields must be dict
+        if key in map_type_keys and not isinstance(val, dict):
+            violations.append({"key": key, "rule": "map_not_dict", "value": type(val).__name__, "action": "drop"})
+            continue
+
+        # Rule 5: _add/_remove suffix where base is not a schema list
+        if key.endswith("_add") or key.endswith("_remove"):
+            if key not in schema_add_keys and key not in schema_remove_keys:
+                violations.append({"key": key, "rule": "non_schema_add_remove", "value": val, "action": "drop"})
+                continue
+
+        # Rule 6: _add/_remove value — string → wrap [str], non-str/non-list → drop
+        if key in schema_add_keys or key in schema_remove_keys:
+            if isinstance(val, str):
+                val = [val]  # backward compat: wrap string in list
+            elif not isinstance(val, list):
+                violations.append({"key": key, "rule": "add_remove_not_list", "value": type(val).__name__, "action": "drop"})
+                continue
+
+        # Rule 7: *_delta key with non-numeric value
+        if key.endswith("_delta") and key != "reward_points_delta":
+            if not isinstance(val, (int, float)):
+                violations.append({"key": key, "rule": "delta_non_numeric", "value": val, "action": "drop"})
+                continue
+
+        # Rule 9: direct overwrite text field must be string (except current_phase, already handled)
+        if key in direct_overwrite_keys and key != "current_phase":
+            if not isinstance(val, (str, int, float, bool)):
+                violations.append({"key": key, "rule": "overwrite_bad_type", "value": type(val).__name__, "action": "drop"})
+                continue
+
+        sanitized[key] = val
+
+    return sanitized, violations
+
+
+def _run_state_gate(update: dict, schema: dict, current_state: dict, label: str = "state_gate") -> dict:
+    """Run state validation gate and return the update to use.
+
+    Respects STATE_REVIEW_MODE:
+    - "off": return update unchanged, no validation
+    - "warn": validate + log, but return original update
+    - "enforce": validate + log, return sanitized update
+    """
+    if STATE_REVIEW_MODE == "off":
+        return update
+
+    sanitized, violations = _validate_state_update(update, schema, current_state)
+    if violations:
+        log.warning("%s: %d violations: %s",
+                    label, len(violations),
+                    [(v["key"], v["rule"]) for v in violations])
+    if STATE_REVIEW_MODE == "enforce":
+        return sanitized
+    return update
+
+
 def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_keys: set[str]):
     """Background: use LLM to remap non-standard STATE fields, then re-apply."""
     import threading
@@ -1171,8 +1299,12 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
             if normalized == update:
                 return
             log.info("    state_normalize: remapped %d unknown keys, re-applying", len(unknown))
-            _apply_state_update_inner(story_id, branch_id, normalized,
-                                      _load_character_schema(story_id))
+            norm_schema = _load_character_schema(story_id)
+            normalized = _run_state_gate(
+                normalized, norm_schema,
+                _load_character_state(story_id, branch_id),
+                label="state_gate(normalize)")
+            _apply_state_update_inner(story_id, branch_id, normalized, norm_schema)
         except Exception as e:
             log.info("    state_normalize: failed (%s), skipping", e)
 
@@ -1809,19 +1941,8 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 
     # Keys managed by other systems — never save to character state
     _SYSTEM_KEYS = {"world_day", "world_time", "branch_title"}
-    # Scene-transient keys that should never be persisted
-    _SCENE_KEYS = {
-        "location", "location_update", "location_details",
-        "threat_level", "combat_status", "escape_options", "escape_route",
-        "noise_level", "facility_status", "npc_status", "weapons_status",
-        "tool_status", "available_escape", "available_locations",
-        "status_update", "current_predicament",
-    }
-    # LLM intermediate instruction keys that leak into state
-    _INSTRUCTION_KEYS = {
-        "inventory_use", "inventory_update", "skill_update",
-        "status_change", "state_change", "note", "notes",
-    }
+    # Defense-in-depth: still filter scene/instruction keys here as backup
+    # (primary filtering is in _validate_state_update gate)
 
     # Save extra keys — only non-delta, non-handled, string/number fields
     for key, val in update.items():
@@ -1839,27 +1960,26 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 def _apply_state_update(story_id: str, branch_id: str, update: dict):
     """Apply a STATE update dict to the branch's character state file.
 
-    1. Immediately applies the raw update (never blocks)
-    2. Validates dungeon growth constraints (hard cap)
-    3. Kicks off background LLM normalization for non-standard fields
+    1. Runs deterministic validation gate (if enabled)
+    2. Immediately applies the (possibly sanitized) update
+    3. Validates dungeon growth constraints (hard cap)
+    4. Kicks off background LLM normalization for non-standard fields
     """
-    # Soft-validate current_phase (log only, never block)
-    phase = update.get("current_phase")
-    if phase and phase not in VALID_PHASES:
-        log.warning("Invalid current_phase '%s' (expected one of %s)", phase, VALID_PHASES)
-
     schema = _load_character_schema(story_id)
 
-    # Capture old state for dungeon validation
-    old_state = copy.deepcopy(_load_character_state(story_id, branch_id))
+    # Load once, reuse for gate + dungeon validation
+    current_state = _load_character_state(story_id, branch_id)
+    old_state = copy.deepcopy(current_state)
 
-    # Apply immediately with raw update
+    # Deterministic validation gate
+    update = _run_state_gate(update, schema, current_state, label="state_gate")
+
+    # Apply immediately
     _apply_state_update_inner(story_id, branch_id, update, schema)
 
     # Hard constraint validation (dungeon system)
     new_state = _load_character_state(story_id, branch_id)
     validate_dungeon_progression(story_id, branch_id, new_state, old_state)
-    # BE-C1: save modified new_state back to disk (validate_dungeon_progression may have capped fields)
     _save_json(_story_character_state_path(story_id, branch_id), new_state)
 
     # Background: normalize non-standard fields and re-apply
