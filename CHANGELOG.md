@@ -5,6 +5,13 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.14] - 2026-02-27
+
+### Added
+- **戰力等級框架**: System prompt 新增 D/C/B/A/S 五級戰力定義、級間差距規則（同級/+1/+2/+3）、GM 約束（敵人強度一致、成長有跡可循、副本難度匹配、禁止套路化以弱勝強），解決 GM 無視等級邊界的問題 ([#124])
+
+[#124]: https://github.com/lainn9527/agent-story/pull/124
+
 ## [0.20.13] - 2026-02-26
 
 ### Fixed
