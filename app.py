@@ -164,6 +164,10 @@ VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死�
 # "off" = no validation, "warn" = validate + log but apply original, "enforce" = apply sanitized
 STATE_REVIEW_MODE = os.environ.get("STATE_REVIEW_MODE", "warn")
 
+# LLM reviewer: only active when STATE_REVIEW_MODE=enforce and STATE_REVIEW_LLM=on
+STATE_REVIEW_LLM = os.environ.get("STATE_REVIEW_LLM", "off")
+STATE_REVIEW_LLM_TIMEOUT = float(os.environ.get("STATE_REVIEW_LLM_TIMEOUT_MS", "1800")) / 1000
+
 # Scene-transient keys that should never be persisted (used by validation gate + inner)
 _SCENE_KEYS = {
     "location", "location_update", "location_details",
@@ -1239,13 +1243,113 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
     return sanitized, violations
 
 
-def _run_state_gate(update: dict, schema: dict, current_state: dict, label: str = "state_gate") -> dict:
+def _review_state_update_llm(
+    current_state: dict,
+    schema: dict,
+    original_update: dict,
+    sanitized_update: dict,
+    violations: list[dict],
+) -> dict | None:
+    """Ask LLM to produce a repair patch for violated state update keys.
+
+    Returns a merged candidate update (sanitized + patch - drop_keys), or None
+    on any failure (timeout, parse error, malformed output).
+    """
+    from llm_bridge import call_oneshot
+
+    schema_summary_lines = []
+    for f in schema.get("fields", []):
+        schema_summary_lines.append(f"  {f['key']}: {f.get('type', 'text')}")
+    for l in schema.get("lists", []):
+        ltype = l.get("type", "list")
+        schema_summary_lines.append(f"  {l['key']}: {ltype}")
+        if l.get("state_add_key"):
+            schema_summary_lines.append(f"    (add: {l['state_add_key']})")
+    schema_summary = "\n".join(schema_summary_lines)
+
+    violations_text = json.dumps(violations, ensure_ascii=False, indent=2)
+
+    prompt = (
+        "你是 RPG 角色狀態更新的審核員。GM 產生了一份狀態更新，但其中部分欄位違反規則被擋下。\n"
+        "請根據被擋下的內容，判斷是否能修正後保留，或者應該丟棄。\n\n"
+        f"## 角色 Schema\n{schema_summary}\n\n"
+        f"## 合法 current_phase 值\n{json.dumps(sorted(VALID_PHASES), ensure_ascii=False)}\n\n"
+        f"## 當前角色狀態（節錄）\n{json.dumps({k: current_state[k] for k in list(current_state)[:15]}, ensure_ascii=False, indent=2)}\n\n"
+        f"## 原始更新\n{json.dumps(original_update, ensure_ascii=False, indent=2)}\n\n"
+        f"## 已通過驗證的部分\n{json.dumps(sanitized_update, ensure_ascii=False, indent=2)}\n\n"
+        f"## 被擋下的違規項目\n{violations_text}\n\n"
+        "## 輸出格式（嚴格 JSON）\n"
+        "```json\n"
+        "{\n"
+        '  "patch": {},\n'
+        '  "drop_keys": [],\n'
+        '  "reason": ""\n'
+        "}\n"
+        "```\n\n"
+        "規則：\n"
+        "- patch: 修正後可保留的 key-value（必須符合 schema 型別）\n"
+        "- drop_keys: 確定要丟棄的 key（從 sanitized 中移除）\n"
+        "- reason: 一句話說明判斷理由\n"
+        "- 不要憑空新增原始更新中沒有的 key\n"
+        "- 不要輸出 location/threat_level 等場景型 key\n"
+        "- 只輸出 JSON，不要任何解釋\n"
+    )
+
+    try:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_oneshot, prompt)
+            result = future.result(timeout=STATE_REVIEW_LLM_TIMEOUT)
+
+        if not result:
+            return None
+        result = result.strip()
+        if result.startswith("```"):
+            lines = result.split("\n")
+            lines = [l for l in lines if not l.startswith("```")]
+            result = "\n".join(lines)
+
+        parsed = json.loads(result)
+        if not isinstance(parsed, dict):
+            return None
+
+        patch = parsed.get("patch", {})
+        drop_keys = parsed.get("drop_keys", [])
+
+        if not isinstance(patch, dict):
+            log.warning("state_reviewer: patch is not dict, fallback")
+            return None
+        if not isinstance(drop_keys, list):
+            log.warning("state_reviewer: drop_keys is not list, fallback")
+            return None
+
+        # Build candidate: sanitized + patch - drop_keys
+        candidate = dict(sanitized_update)
+        candidate.update(patch)
+        for k in drop_keys:
+            if isinstance(k, str):
+                candidate.pop(k, None)
+
+        return candidate
+
+    except concurrent.futures.TimeoutError:
+        log.warning("state_reviewer: LLM timeout (%.1fs), fallback", STATE_REVIEW_LLM_TIMEOUT)
+        return None
+    except Exception as e:
+        log.warning("state_reviewer: failed (%s), fallback", e)
+        return None
+
+
+def _run_state_gate(update: dict, schema: dict, current_state: dict,
+                    label: str = "state_gate", allow_llm: bool = True) -> dict:
     """Run state validation gate and return the update to use.
 
     Respects STATE_REVIEW_MODE:
     - "off": return update unchanged, no validation
     - "warn": validate + log, but return original update
     - "enforce": validate + log, return sanitized update
+      - If STATE_REVIEW_LLM=on and allow_llm=True, also asks LLM reviewer
+        to repair violations, then re-validates the result
     """
     if STATE_REVIEW_MODE == "off":
         return update
@@ -1255,7 +1359,23 @@ def _run_state_gate(update: dict, schema: dict, current_state: dict, label: str 
         log.warning("%s: %d violations: %s",
                     label, len(violations),
                     [(v["key"], v["rule"]) for v in violations])
+
     if STATE_REVIEW_MODE == "enforce":
+        # Phase 2: LLM reviewer (only when there are violations to review)
+        if (violations and allow_llm
+                and STATE_REVIEW_LLM == "on"):
+            candidate = _review_state_update_llm(
+                current_state, schema, update, sanitized, violations)
+            if candidate is not None:
+                # Second pass: validate reviewer output
+                final, v2 = _validate_state_update(candidate, schema, current_state)
+                if v2:
+                    log.warning("%s: reviewer output had %d violations, using sanitized",
+                                label, len(v2))
+                    return sanitized
+                log.info("%s: reviewer repaired %d keys", label,
+                         len(candidate) - len(sanitized))
+                return final
         return sanitized
     return update
 
@@ -1307,7 +1427,7 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
             normalized = _run_state_gate(
                 normalized, norm_schema,
                 _load_character_state(story_id, branch_id),
-                label="state_gate(normalize)")
+                label="state_gate(normalize)", allow_llm=False)
             _apply_state_update_inner(story_id, branch_id, normalized, norm_schema)
         except Exception as e:
             log.info("    state_normalize: failed (%s), skipping", e)
