@@ -151,12 +151,11 @@ class TestReviewerBasics:
         assert result["current_phase"] == "副本中"
 
     def test_reviewer_returns_none_on_timeout(self):
-        """Timeout should return None (fallback)."""
-        import concurrent.futures
+        """Timeout should return None quickly (fallback)."""
+        import time
 
         def slow_call(*args, **kwargs):
-            import time
-            time.sleep(10)
+            time.sleep(0.2)
             return "{}"
 
         with patch("llm_bridge.call_oneshot", side_effect=slow_call):
@@ -164,17 +163,73 @@ class TestReviewerBasics:
             old_timeout = app_module.STATE_REVIEW_LLM_TIMEOUT
             app_module.STATE_REVIEW_LLM_TIMEOUT = 0.01
             try:
+                t0 = time.time()
                 result = app_module._review_state_update_llm(
                     INITIAL_STATE, SCHEMA, {}, {}, [])
+                elapsed = time.time() - t0
             finally:
                 app_module.STATE_REVIEW_LLM_TIMEOUT = old_timeout
         assert result is None
+        assert elapsed < 0.15
 
     def test_reviewer_returns_none_on_exception(self):
         with patch("llm_bridge.call_oneshot", side_effect=RuntimeError("API down")):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
+
+    def test_reviewer_drops_out_of_scope_patch_keys(self):
+        """Reviewer patch must not inject keys absent from original/sanitized update."""
+        reviewer_response = json.dumps({
+            "patch": {"current_phase": "副本中", "修真境界": "元嬰"},
+            "drop_keys": [],
+            "reason": "修正",
+        })
+        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+            result = app_module._review_state_update_llm(
+                current_state=INITIAL_STATE,
+                schema=SCHEMA,
+                original_update={"current_phase": "戰鬥"},
+                sanitized_update={},
+                violations=[{"key": "current_phase", "rule": "invalid_phase",
+                             "value": "戰鬥", "action": "drop"}],
+            )
+        assert result is not None
+        assert result["current_phase"] == "副本中"
+        assert "修真境界" not in result
+
+    def test_reviewer_logs_usage_when_story_context_provided(self):
+        reviewer_response = json.dumps({
+            "patch": {"current_phase": "副本中"},
+            "drop_keys": [],
+            "reason": "",
+        })
+        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+            with patch.object(app_module, "_log_llm_usage") as mock_usage:
+                result = app_module._review_state_update_llm(
+                    current_state=INITIAL_STATE,
+                    schema=SCHEMA,
+                    original_update={"current_phase": "戰鬥"},
+                    sanitized_update={},
+                    violations=[{"key": "current_phase", "rule": "invalid_phase",
+                                 "value": "戰鬥", "action": "drop"}],
+                    story_id="s1",
+                    branch_id="main",
+                )
+        assert result is not None
+        mock_usage.assert_called_once()
+
+    def test_reviewer_inflight_limit_returns_none(self, monkeypatch):
+        class _BusySemaphore:
+            def acquire(self, blocking=False):
+                return False
+
+        monkeypatch.setattr(app_module, "_STATE_REVIEW_LLM_SEM", _BusySemaphore())
+        with patch("llm_bridge.call_oneshot") as mock_call:
+            result = app_module._review_state_update_llm(
+                INITIAL_STATE, SCHEMA, {"current_phase": "戰鬥"}, {}, [])
+        assert result is None
+        mock_call.assert_not_called()
 
 
 # ===================================================================
@@ -239,7 +294,7 @@ class TestRunStateGateWithReviewer:
         assert result["gene_lock"] == "第一階"
 
     def test_reviewer_output_revalidated(self, monkeypatch):
-        """Reviewer outputs scene key → second gate catches it, fallback to sanitized."""
+        """Out-of-scope reviewer keys are dropped; valid in-scope fix still applies."""
         monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "enforce")
         monkeypatch.setattr(app_module, "STATE_REVIEW_LLM", "on")
 
@@ -253,8 +308,8 @@ class TestRunStateGateWithReviewer:
             result = app_module._run_state_gate(
                 {"current_phase": "戰鬥", "gene_lock": "第一階"},
                 SCHEMA, INITIAL_STATE)
-        # Second gate catches location → falls back to sanitized (no current_phase)
-        assert "current_phase" not in result
+        # location is out-of-scope and dropped; current_phase repair still applies.
+        assert result["current_phase"] == "副本中"
         assert "location" not in result
         assert result["gene_lock"] == "第一階"
 
@@ -317,3 +372,30 @@ class TestRunStateGateWithReviewer:
                 SCHEMA, INITIAL_STATE)
         assert result["current_phase"] == "副本中"
         assert result["inventory_add"] == ["新道具"]
+
+    def test_reviewer_cannot_inject_new_top_level_keys(self, monkeypatch):
+        monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "enforce")
+        monkeypatch.setattr(app_module, "STATE_REVIEW_LLM", "on")
+
+        reviewer_response = json.dumps({
+            "patch": {"current_phase": "副本中", "修真境界": "元嬰"},
+            "drop_keys": [],
+            "reason": "修正",
+        })
+        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+            result = app_module._run_state_gate(
+                {"current_phase": "戰鬥", "gene_lock": "第一階"},
+                SCHEMA, INITIAL_STATE)
+        assert result["current_phase"] == "副本中"
+        assert result["gene_lock"] == "第一階"
+        assert "修真境界" not in result
+
+
+class TestEnvParsingHelpers:
+    def test_parse_env_float_invalid_falls_back(self, monkeypatch):
+        monkeypatch.setenv("TEST_FLOAT_ENV", "bad")
+        assert app_module._parse_env_float("TEST_FLOAT_ENV", 12.5) == 12.5
+
+    def test_parse_env_int_invalid_falls_back(self, monkeypatch):
+        monkeypatch.setenv("TEST_INT_ENV", "bad")
+        assert app_module._parse_env_int("TEST_INT_ENV", 7) == 7

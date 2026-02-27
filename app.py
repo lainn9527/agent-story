@@ -166,7 +166,35 @@ STATE_REVIEW_MODE = os.environ.get("STATE_REVIEW_MODE", "warn")
 
 # LLM reviewer: only active when STATE_REVIEW_MODE=enforce and STATE_REVIEW_LLM=on
 STATE_REVIEW_LLM = os.environ.get("STATE_REVIEW_LLM", "off")
-STATE_REVIEW_LLM_TIMEOUT = float(os.environ.get("STATE_REVIEW_LLM_TIMEOUT_MS", "1800")) / 1000
+
+
+def _parse_env_float(name: str, default: float) -> float:
+    """Parse float env var with safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        log.warning("invalid %s=%r, using default %s", name, raw, default)
+        return default
+
+
+def _parse_env_int(name: str, default: int) -> int:
+    """Parse int env var with safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        log.warning("invalid %s=%r, using default %s", name, raw, default)
+        return default
+
+
+STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 1800.0) / 1000
+STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFLIGHT", 4))
+_STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
 
 # Scene-transient keys that should never be persisted (used by validation gate + inner)
 _SCENE_KEYS = {
@@ -1249,6 +1277,8 @@ def _review_state_update_llm(
     original_update: dict,
     sanitized_update: dict,
     violations: list[dict],
+    story_id: str = "",
+    branch_id: str = "",
 ) -> dict | None:
     """Ask LLM to produce a repair patch for violated state update keys.
 
@@ -1296,10 +1326,44 @@ def _review_state_update_llm(
     )
 
     try:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_oneshot, prompt)
-            result = future.result(timeout=STATE_REVIEW_LLM_TIMEOUT)
+        if not _STATE_REVIEW_LLM_SEM.acquire(blocking=False):
+            log.warning(
+                "state_reviewer: inflight limit reached (%d), fallback",
+                STATE_REVIEW_LLM_MAX_INFLIGHT,
+            )
+            return None
+
+        # Use a daemon thread so timeout fallback returns immediately without
+        # waiting for a potentially stuck provider call to finish.
+        result_box: dict = {"result": None, "error": None}
+
+        def _call():
+            try:
+                t0 = time.time()
+                result_box["result"] = call_oneshot(prompt)
+                if story_id:
+                    _log_llm_usage(
+                        story_id,
+                        "oneshot_state_review",
+                        time.time() - t0,
+                        branch_id=branch_id,
+                    )
+            except Exception as e:
+                result_box["error"] = e
+            finally:
+                _STATE_REVIEW_LLM_SEM.release()
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(STATE_REVIEW_LLM_TIMEOUT)
+        if t.is_alive():
+            log.warning("state_reviewer: LLM timeout (%.1fs), fallback", STATE_REVIEW_LLM_TIMEOUT)
+            return None
+
+        if result_box["error"] is not None:
+            raise result_box["error"]
+
+        result = result_box["result"]
 
         if not result:
             return None
@@ -1323,6 +1387,19 @@ def _review_state_update_llm(
             log.warning("state_reviewer: drop_keys is not list, fallback")
             return None
 
+        # Hard guard: reviewer must not inject keys that weren't present in
+        # original update/sanitized update. Keep only in-scope keys.
+        allowed_patch_keys = set(original_update.keys()) | set(sanitized_update.keys())
+        if patch:
+            dropped_patch_keys = [k for k in patch if k not in allowed_patch_keys]
+            if dropped_patch_keys:
+                log.warning(
+                    "state_reviewer: dropped %d out-of-scope patch keys: %s",
+                    len(dropped_patch_keys),
+                    dropped_patch_keys[:5],
+                )
+                patch = {k: v for k, v in patch.items() if k in allowed_patch_keys}
+
         # Build candidate: sanitized + patch - drop_keys
         candidate = dict(sanitized_update)
         candidate.update(patch)
@@ -1332,16 +1409,14 @@ def _review_state_update_llm(
 
         return candidate
 
-    except concurrent.futures.TimeoutError:
-        log.warning("state_reviewer: LLM timeout (%.1fs), fallback", STATE_REVIEW_LLM_TIMEOUT)
-        return None
     except Exception as e:
         log.warning("state_reviewer: failed (%s), fallback", e)
         return None
 
 
 def _run_state_gate(update: dict, schema: dict, current_state: dict,
-                    label: str = "state_gate", allow_llm: bool = True) -> dict:
+                    label: str = "state_gate", allow_llm: bool = True,
+                    story_id: str = "", branch_id: str = "") -> dict:
     """Run state validation gate and return the update to use.
 
     Respects STATE_REVIEW_MODE:
@@ -1365,7 +1440,8 @@ def _run_state_gate(update: dict, schema: dict, current_state: dict,
         if (violations and allow_llm
                 and STATE_REVIEW_LLM == "on"):
             candidate = _review_state_update_llm(
-                current_state, schema, update, sanitized, violations)
+                current_state, schema, update, sanitized, violations,
+                story_id=story_id, branch_id=branch_id)
             if candidate is not None:
                 # Second pass: validate reviewer output
                 final, v2 = _validate_state_update(candidate, schema, current_state)
@@ -1427,7 +1503,8 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
             normalized = _run_state_gate(
                 normalized, norm_schema,
                 _load_character_state(story_id, branch_id),
-                label="state_gate(normalize)", allow_llm=False)
+                label="state_gate(normalize)", allow_llm=False,
+                story_id=story_id, branch_id=branch_id)
             _apply_state_update_inner(story_id, branch_id, normalized, norm_schema)
         except Exception as e:
             log.info("    state_normalize: failed (%s), skipping", e)
@@ -2096,7 +2173,10 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     old_state = copy.deepcopy(current_state)
 
     # Deterministic validation gate
-    update = _run_state_gate(update, schema, current_state, label="state_gate")
+    update = _run_state_gate(
+        update, schema, current_state,
+        label="state_gate", story_id=story_id, branch_id=branch_id,
+    )
 
     # Apply immediately
     _apply_state_update_inner(story_id, branch_id, update, schema)
