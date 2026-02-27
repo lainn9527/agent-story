@@ -14,6 +14,9 @@ git checkout FETCH_HEAD
 echo "==> Restarting server on port 5051..."
 lsof -ti:5051 | xargs kill 2>/dev/null || true
 sleep 1
+# Force production-safe run mode on deploy.
+export FLASK_ENV=production
+export FLASK_DEBUG=0
 nohup python3 app.py >> server_stderr.log 2>&1 &
 sleep 2
 
