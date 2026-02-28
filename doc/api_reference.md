@@ -42,6 +42,7 @@
 | POST | `/api/send` | 送出玩家訊息，取得完整 GM 回覆 | body: `message`, `branch_id` |
 | POST | `/api/send/stream` | `send` 的 SSE 版本 | body: `message`, `branch_id` |
 | GET | `/api/status` | 取得角色狀態（含 world_day、cheat 狀態） | `branch_id` |
+| POST | `/api/state/rebuild` | 由 canonical JSON 強制重建分支 `state.db` | body: `branch_id`（可選，預設 active branch） |
 
 ## 分支管理
 
@@ -150,4 +151,3 @@
 注意：
 
 - 目前建議在 dungeon API 明確傳 `branch_id`，避免走 fallback path。
-

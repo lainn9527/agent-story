@@ -9,7 +9,7 @@ Browser (static/app.js, templates/index.html)
   -> Flask app (app.py)
       -> LLM bridge (llm_bridge.py)
           -> gemini_bridge.py 或 claude_bridge.py
-      -> Lore / Event / Usage SQLite
+      -> Lore / Event / Usage / State SQLite
       -> JSON runtime files (messages/state/npcs/branch tree/saves...)
       -> Background threads (tag extraction, compaction, NPC evolution, image gen)
 ```
@@ -33,6 +33,10 @@ Browser (static/app.js, templates/index.html)
   - Gemini API 或 Claude CLI 的實際呼叫
 - `lore_db.py` / `event_db.py` / `usage_db.py`
   - 各自獨立 SQLite
+- `state_db.py`
+  - 分支級角色狀態索引（`state.db`）
+  - 把 inventory/ability/relationship/mission/system/npc 做可檢索化
+  - 支援 lazy rebuild 與分類輸出 `[相關角色狀態]`
 - `dungeon_system.py`
   - 副本模板、進度、成長限制與驗證
 - `compaction.py`
@@ -66,6 +70,7 @@ Browser (static/app.js, templates/index.html)
   - `messages.json`
   - `character_state.json`
   - `npcs.json`
+  - `state.db`
   - `branch_lore.json`
   - `conversation_recap.json`
   - `world_day.json`
@@ -92,8 +97,8 @@ Browser (static/app.js, templates/index.html)
 ## 5) `/api/send` 核心管線
 
 1. 寫入玩家訊息到分支 delta。
-2. 建構 system prompt（角色狀態 + lore + NPC + recap + 副本上下文）。
-3. 對玩家訊息做 context augmentation（lore/events/npc 活動/骰子提示）。
+2. 建構 system prompt（核心角色狀態 + lore + NPC 摘要 + recap + 副本上下文）。
+3. 對玩家訊息做 context augmentation（lore/events/npc 活動/state RAG/戰力提醒/骰子提示）。
 4. 記錄 request trace，呼叫 LLM（stream 或 non-stream），再記錄 response trace。
 5. `_process_gm_response()`：
    - 移除 echo 回來的 context 區塊
@@ -112,6 +117,8 @@ Browser (static/app.js, templates/index.html)
 
 - 直接從 GM 回覆內的顯式 tag 解析並套用。
 - 優先保證即時可見狀態。
+- `_apply_state_update_inner()` 套用 canonical `character_state.json` 後，會同步 `replace_categories_batch(...)` 更新 `state.db`（inventory/ability/relationship/mission/system）。
+- `_save_npc()` 與 `/api/npcs/<id> DELETE` 會同步 upsert/delete `state.db` 的 npc 類別，確保索引與 `npcs.json` 一致。
 
 ### 非同步抽取（背景）
 
@@ -130,6 +137,9 @@ Browser (static/app.js, templates/index.html)
 - schema migration（例如 abilities 欄位）
 - lore index 初始化
 - incomplete branch 清理
+- state index lazy rebuild（首次 state search 若無 `state.db` 則自動由 JSON 重建）
+
+此外，branch fork/edit/regen/blank/merge 會以目標分支快照（`state_snapshot` / `npcs_snapshot`）重建 `state.db`，確保索引語義與分支時點一致（不是直接繼承 parent 的最新索引）。
 
 ## 8) 併發與鎖
 
