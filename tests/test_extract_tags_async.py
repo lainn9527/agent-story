@@ -407,6 +407,7 @@ class TestNpcTier:
         prompt = mock_llm.call_args[0][0]
         assert '"tier": "D-~S+ 或 null"' in prompt
         assert "D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+" in prompt
+        assert "請省略 tier 欄位（不要輸出 null 覆蓋）" in prompt
 
     def test_save_npc_normalizes_tier_value(self, story_id, setup_story):
         """_save_npc should normalize variants like 's-級' to allowlist value."""
