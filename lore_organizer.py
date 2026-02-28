@@ -17,6 +17,8 @@ import threading
 import time as _time
 from datetime import datetime, timezone, timedelta
 
+from llm_trace import write_trace as write_llm_trace
+
 log = logging.getLogger("rpg")
 
 # ---------------------------------------------------------------------------
@@ -26,6 +28,28 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
+LLM_TRACE_ENABLED = os.environ.get("LLM_TRACE_ENABLED", "1").lower() not in {"0", "false", "off", "no"}
+try:
+    LLM_TRACE_RETENTION_DAYS = max(1, int(os.environ.get("LLM_TRACE_RETENTION_DAYS", "14")))
+except ValueError:
+    LLM_TRACE_RETENTION_DAYS = 14
+
+
+def _trace_llm(story_id: str, stage: str, payload: dict, tags: dict | None = None):
+    if not LLM_TRACE_ENABLED:
+        return
+    try:
+        write_llm_trace(
+            data_dir=DATA_DIR,
+            story_id=story_id,
+            stage=stage,
+            payload=payload,
+            source="lore_organizer",
+            tags=tags or {"mode": "oneshot"},
+            retention_days=LLM_TRACE_RETENTION_DAYS,
+        )
+    except Exception:
+        pass
 
 
 def _story_dir(story_id: str) -> str:
@@ -407,9 +431,23 @@ def _organize_orphans_llm(story_id: str):
         "只輸出 JSON。"
     )
 
+    _trace_llm(
+        story_id,
+        "lore_organizer_request",
+        {
+            "prompt": prompt,
+            "batch_size": len(batch),
+            "orphan_topics": [o.get("topic", "") for o in batch],
+        },
+    )
     t0 = _time.time()
     result = call_oneshot(prompt)
     usage_db.log_from_bridge(story_id, "lore_organize", _time.time() - t0)
+    _trace_llm(
+        story_id,
+        "lore_organizer_response_raw",
+        {"response": result},
+    )
     if not result:
         log.warning("lore_organizer: LLM returned empty response")
         state["last_organized_at"] = datetime.now(timezone.utc).isoformat()
