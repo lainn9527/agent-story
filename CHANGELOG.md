@@ -5,6 +5,19 @@ All notable changes to the Story RPG project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **戰力等級演出指南（全等級）**: `story_design/story_original/system_prompt.txt` 新增 D/C/B/A/S 五級敘事落地表（攻擊描寫、環境影響、受傷描寫、旁觀者反應）與反面檢查，補齊「等級定義」到「實際演出」的落差。 ([#134])
+- **NPC tier 結構化資料流**: async extraction prompt 新增 `tier` 欄位，支援 15 個 sub-tier（`D-/D/D+/.../S+`）；`_save_npc()` 新增 allowlist 正規化，確保 NPC 強度標記可穩定持久化。 ([#134])
+
+### Changed
+- **GM 上下文注入 tier 證據**: `npc_profiles` 會顯示 `【X 級】`，`critical_facts` 會顯示 `·X級`；有已知 `tier` 且分類為 ally/hostile 的 NPC 時，`_build_augmented_message()` 會注入 `[戰力等級提醒]`。 ([#134])
+- **同請求 NPC 讀取優化**: `/api/send`、`/api/send/stream`、`/api/branches/edit*`、`/api/branches/regenerate*` 路徑改為單次載入 `npcs`，並傳入 `_build_story_system_prompt()` / `_build_augmented_message()`，避免同回合重複讀檔。 ([#134])
+
+### Fixed
+- **tier 覆蓋穩定性**: extraction prompt 補充規則「既有 NPC 若本回合無法判定 tier，省略欄位不要輸出 null」，搭配 `_save_npc()` 的 invalid-tier 忽略邏輯，避免合法 tier 被不確定輸出污染。 ([#134])
+
 ## [0.20.16] - 2026-02-28
 
 ### Added
@@ -22,6 +35,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 [#128]: https://github.com/lainn9527/agent-story/pull/128
 [#132]: https://github.com/lainn9527/agent-story/pull/132
+[#134]: https://github.com/lainn9527/agent-story/pull/134
 
 ## [0.20.15] - 2026-02-27
 

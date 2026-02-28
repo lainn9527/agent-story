@@ -28,9 +28,9 @@
 - `character_state`: 當前角色狀態 JSON
 - `narrative_recap`: 壓縮摘要（`conversation_recap.json`）
 - `world_lore`: 精簡 lore 摘要（非全文）
-- `npc_profiles`: 當前分支 NPC 檔案摘要
+- `npc_profiles`: 當前分支 NPC 檔案摘要（含 `【X 級】` tier 標記）
 - `team_rules`: branch config 的組隊模式規則（`free_agent` / `fixed_team`）
-- `critical_facts`: 關鍵事實區塊（phase、world day、關鍵道具、NPC 關係）
+- `critical_facts`: 關鍵事實區塊（phase、world day、關鍵道具、NPC 關係與 tier）
 - `dungeon_context`: 副本進度/節點/成長限制上下文
 
 ### 2.3 模式切換對 prompt 的影響
@@ -52,9 +52,17 @@
 2. `[相關分支設定]`（branch lore bigram 搜尋）
 3. `[相關事件追蹤]`（非 blank branch）
 4. `[NPC 近期動態]`
-5. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
-6. `---`
-7. 原始玩家輸入
+5. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
+6. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
+7. `---`
+8. 原始玩家輸入
+
+### 2.5 戰力等級一致性（Tier Consistency）
+
+- `system_prompt.txt` 內新增「戰力等級敘事指南（演出落地）」：五大等級 D/C/B/A/S 的具體演出維度與反面檢查。
+- `prompts.py` fallback 模板同步保留精簡版等級框架，避免 fallback 路徑退化。
+- NPC tier 採 15 個 sub-tier：`D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+`。
+- `_save_npc()` 會做 tier allowlist 正規化；不合法值直接忽略、不覆蓋既有合法值。
 
 ---
 
@@ -104,6 +112,7 @@
 
 - lore 提取有「通用設定」門檻，避免把一次性劇情寫進知識庫
 - event 有 title dedup + status 升級規則（planted -> triggered -> resolved）
+- NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
 - state 提取遵守 schema（map/list/_delta 規則）
 - time 有上限（單次最多 30 天）
 - dungeon 進度提取時會給 node id 對照
