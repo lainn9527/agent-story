@@ -247,6 +247,10 @@ STATE_RAG_TOKEN_BUDGET = max(200, _parse_env_int("STATE_RAG_TOKEN_BUDGET", 2000)
 _PENDING_EXTRACT_LOCK = threading.Lock()
 _PENDING_EXTRACT: set[tuple[str, str, int]] = set()
 
+# Thread-safe lock registry for branch messages.json read-modify-write operations.
+_BRANCH_MESSAGES_LOCKS: dict[str, threading.Lock] = {}
+_BRANCH_MESSAGES_LOCKS_META = threading.Lock()
+
 # Scene-transient keys that should never be persisted (used by validation gate + inner)
 _SCENE_KEYS = {
     "location", "location_update", "location_details",
@@ -295,21 +299,77 @@ def _mark_extract_done(story_id: str, branch_id: str, msg_index: int):
         _PENDING_EXTRACT.discard((story_id, branch_id, msg_index))
 
 
+def _has_pending_extract(story_id: str, branch_id: str, target_index: int, include_prior: bool) -> bool:
+    with _PENDING_EXTRACT_LOCK:
+        if include_prior:
+            return any(
+                sid == story_id and bid == branch_id and idx <= target_index
+                for sid, bid, idx in _PENDING_EXTRACT
+            )
+        return (story_id, branch_id, target_index) in _PENDING_EXTRACT
+
+
 def _wait_extract_done(story_id: str, branch_id: str, msg_index: int, timeout_s: float = 8.0):
-    """Best-effort wait for async extraction of a specific message index to finish."""
+    """Best-effort wait for async extraction at/before a target index to finish."""
     if msg_index is None or msg_index < 0:
         return
     deadline = time.time() + max(0.0, timeout_s)
     while time.time() < deadline:
-        with _PENDING_EXTRACT_LOCK:
-            pending = (story_id, branch_id, msg_index) in _PENDING_EXTRACT
+        pending = _has_pending_extract(story_id, branch_id, msg_index, include_prior=True)
         if not pending:
             return
         time.sleep(0.05)
     log.warning(
-        "extract_wait timeout: story=%s branch=%s msg=%s",
+        "extract_wait timeout: story=%s branch=%s max_msg=%s",
         story_id, branch_id, msg_index,
     )
+
+
+def _get_branch_messages_lock(story_id: str, branch_id: str) -> threading.Lock:
+    """Get/create a per-branch lock for messages.json RMW operations."""
+    key = f"{story_id}:{branch_id}"
+    with _BRANCH_MESSAGES_LOCKS_META:
+        if key not in _BRANCH_MESSAGES_LOCKS:
+            _BRANCH_MESSAGES_LOCKS[key] = threading.Lock()
+        return _BRANCH_MESSAGES_LOCKS[key]
+
+
+def _load_branch_messages(story_id: str, branch_id: str) -> list[dict]:
+    """Thread-safe load of branch messages delta."""
+    path = _story_messages_path(story_id, branch_id)
+    lock = _get_branch_messages_lock(story_id, branch_id)
+    with lock:
+        data = _load_json(path, [])
+    return data if isinstance(data, list) else []
+
+
+def _save_branch_messages(story_id: str, branch_id: str, messages: list[dict]):
+    """Thread-safe overwrite of branch messages delta."""
+    path = _story_messages_path(story_id, branch_id)
+    lock = _get_branch_messages_lock(story_id, branch_id)
+    with lock:
+        _save_json(path, messages)
+
+
+def _upsert_branch_message(story_id: str, branch_id: str, message: dict):
+    """Thread-safe upsert by message index (avoids stale list overwrite races)."""
+    path = _story_messages_path(story_id, branch_id)
+    lock = _get_branch_messages_lock(story_id, branch_id)
+    with lock:
+        msgs = _load_json(path, [])
+        if not isinstance(msgs, list):
+            msgs = []
+        idx = message.get("index")
+        replaced = False
+        for i, existing in enumerate(msgs):
+            if existing.get("index") == idx:
+                msgs[i] = message
+                replaced = True
+                break
+        if not replaced:
+            msgs.append(message)
+        msgs.sort(key=lambda m: m.get("index", 0))
+        _save_json(path, msgs)
 
 
 # ---------------------------------------------------------------------------
@@ -2694,7 +2754,7 @@ def get_full_timeline(story_id: str, branch_id: str) -> list[dict]:
         if bp_index is not None:
             timeline = [m for m in timeline if m.get("index", 0) <= bp_index]
 
-        delta = _load_json(_story_messages_path(story_id, branch["id"]), [])
+        delta = _load_branch_messages(story_id, branch["id"])
         for m in delta:
             m["owner_branch_id"] = branch["id"]
         timeline.extend(delta)
@@ -2791,7 +2851,7 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
     for (parent_id, bp_index), children in fork_map.items():
         children.sort(key=lambda b: b.get("created_at", ""))
 
-        parent_delta = _load_json(_story_messages_path(story_id, parent_id), [])
+        parent_delta = _load_branch_messages(story_id, parent_id)
         parent_has_continuation = any(m.get("index", 0) > bp_index for m in parent_delta)
         if parent_id == "main" and not parent_has_continuation:
             parsed = _load_json(parsed_path, [])
@@ -2810,7 +2870,7 @@ def _get_sibling_groups(story_id: str, branch_id: str) -> dict:
 
         for child in children:
             # Skip orphan branches (empty messages from interrupted stream)
-            child_msgs = _load_json(_story_messages_path(story_id, child["id"]), [])
+            child_msgs = _load_branch_messages(story_id, child["id"])
             if not child_msgs:
                 continue
             variants.append({
@@ -2894,7 +2954,7 @@ def _auto_prune_siblings(story_id: str, branch_id: str, current_msg_index: int) 
         if bp_index is None or (current_msg_index - bp_index) < PRUNE_DEPTH_THRESHOLD:
             continue
         # Must be a short/abandoned branch
-        delta_msgs = _load_json(_story_messages_path(story_id, bid), [])
+        delta_msgs = _load_branch_messages(story_id, bid)
         if len(delta_msgs) > PRUNE_MAX_DELTA_MSGS:
             continue
         # Must not have active children
@@ -2957,7 +3017,7 @@ def _migrate_to_timeline_tree(story_id: str):
 
     # Ensure messages_main.json exists
     if not os.path.exists(main_msgs_path):
-        _save_json(main_msgs_path, [])
+        _save_branch_messages(story_id, "main", [])
 
 
 def _migrate_to_stories():
@@ -3320,22 +3380,24 @@ def _sync_gm_message_snapshot_after_async(story_id: str, branch_id: str, msg_ind
     updates that GM message's snapshot fields to the post-async canonical values.
     """
     path = _story_messages_path(story_id, branch_id)
+    lock = _get_branch_messages_lock(story_id, branch_id)
     for attempt in range(5):
-        delta = _load_json(path, [])
-        updated = False
-        for msg in delta:
-            if msg.get("index") != msg_index or msg.get("role") != "gm":
-                continue
-            msg["state_snapshot"] = _load_character_state(story_id, branch_id)
-            msg["npcs_snapshot"] = _load_npcs(story_id, branch_id)
-            msg["world_day_snapshot"] = get_world_day(story_id, branch_id)
-            msg["dungeon_progress_snapshot"] = get_dungeon_progress_snapshot(story_id, branch_id)
-            msg["snapshot_async_synced_at"] = datetime.now(timezone.utc).isoformat()
-            updated = True
-            break
-        if updated:
-            _save_json(path, delta)
-            return
+        with lock:
+            delta = _load_json(path, [])
+            updated = False
+            for msg in delta:
+                if msg.get("index") != msg_index or msg.get("role") != "gm":
+                    continue
+                msg["state_snapshot"] = _load_character_state(story_id, branch_id)
+                msg["npcs_snapshot"] = _load_npcs(story_id, branch_id)
+                msg["world_day_snapshot"] = get_world_day(story_id, branch_id)
+                msg["dungeon_progress_snapshot"] = get_dungeon_progress_snapshot(story_id, branch_id)
+                msg["snapshot_async_synced_at"] = datetime.now(timezone.utc).isoformat()
+                updated = True
+                break
+            if updated:
+                _save_json(path, delta)
+                return
         # GM message may not be persisted yet if stream/save race occurs.
         time.sleep(0.1)
     log.info(
@@ -3507,7 +3569,7 @@ def api_init():
     # 5. Ensure main messages file exists
     main_msgs_path = _story_messages_path(story_id, "main")
     if not os.path.exists(main_msgs_path):
-        _save_json(main_msgs_path, [])
+        _save_branch_messages(story_id, "main", [])
 
     # 7. Load story metadata
     registry = _load_stories_registry()
@@ -3537,7 +3599,7 @@ def api_messages():
     original_count = len(original)
 
     tree = _load_tree(story_id)
-    branch_delta = _load_json(_story_messages_path(story_id, branch_id), [])
+    branch_delta = _load_branch_messages(story_id, branch_id)
     delta_indices = {m.get("index") for m in branch_delta}
 
     for msg in timeline:
@@ -3637,8 +3699,6 @@ def api_send():
 
     # 1. Save player message
     t0 = time.time()
-    delta_path = _story_messages_path(story_id, branch_id)
-    delta_msgs = _load_json(delta_path, [])
     full_timeline = get_full_timeline(story_id, branch_id)
 
     player_msg = {
@@ -3646,8 +3706,7 @@ def api_send():
         "content": user_text,
         "index": len(full_timeline),
     }
-    delta_msgs.append(player_msg)
-    _save_json(delta_path, delta_msgs)
+    _upsert_branch_message(story_id, branch_id, player_msg)
     full_timeline.append(player_msg)
     log.info("  save_user_msg: %.0fms", (time.time() - t0) * 1000)
 
@@ -3681,7 +3740,7 @@ def api_send():
     )
     if dice_result:
         player_msg["dice"] = dice_result
-        _save_json(delta_path, delta_msgs)
+        _upsert_branch_message(story_id, branch_id, player_msg)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     # 4. Call Claude (stateless)
@@ -3733,8 +3792,7 @@ def api_send():
     if image_info:
         gm_msg["image"] = image_info
     gm_msg.update(snapshots)
-    delta_msgs.append(gm_msg)
-    _save_json(delta_path, delta_msgs)
+    _upsert_branch_message(story_id, branch_id, gm_msg)
     log.info("  save_gm_msg: %.0fms", (time.time() - t0) * 1000)
 
     # 7. Trigger NPC evolution if due
@@ -3786,8 +3844,6 @@ def api_send_stream():
     log.info("/api/send/stream START  msg=%s branch=%s", user_text[:30], branch_id)
 
     # 1. Save player message (before streaming starts)
-    delta_path = _story_messages_path(story_id, branch_id)
-    delta_msgs = _load_json(delta_path, [])
     full_timeline = get_full_timeline(story_id, branch_id)
 
     player_msg = {
@@ -3795,8 +3851,7 @@ def api_send_stream():
         "content": user_text,
         "index": len(full_timeline),
     }
-    delta_msgs.append(player_msg)
-    _save_json(delta_path, delta_msgs)
+    _upsert_branch_message(story_id, branch_id, player_msg)
     full_timeline.append(player_msg)
 
     # 1b. Process /gm dice command (金手指)
@@ -3824,7 +3879,7 @@ def api_send_stream():
     )
     if dice_result:
         player_msg["dice"] = dice_result
-        _save_json(delta_path, delta_msgs)
+        _upsert_branch_message(story_id, branch_id, player_msg)
 
     gm_msg_index = len(full_timeline)
     _trace_llm(
@@ -3884,8 +3939,7 @@ def api_send_stream():
                     if image_info:
                         gm_msg["image"] = image_info
                     gm_msg.update(snapshots)
-                    delta_msgs.append(gm_msg)
-                    _save_json(delta_path, delta_msgs)
+                    _upsert_branch_message(story_id, branch_id, gm_msg)
 
                     # NPC evolution
                     turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
@@ -4023,7 +4077,7 @@ def api_branches_create():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
-    _save_json(_story_messages_path(story_id, branch_id), [])
+    _save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
         "id": branch_id,
@@ -4064,7 +4118,7 @@ def api_branches_blank():
     blank_npcs = []
     _save_json(_story_npcs_path(story_id, branch_id), blank_npcs)
     rebuild_state_db_from_json(story_id, branch_id, state=blank_state, npcs=blank_npcs)
-    _save_json(_story_messages_path(story_id, branch_id), [])
+    _save_branch_messages(story_id, branch_id, [])
 
     # Initialize blank dungeon progress (no history)
     from dungeon_system import _save_dungeon_progress
@@ -4251,7 +4305,7 @@ def api_branches_edit():
         "index": user_msg_index,
     }
     delta = [user_msg]
-    _save_json(_story_messages_path(story_id, branch_id), delta)
+    _save_branch_messages(story_id, branch_id, delta)
 
     branches[branch_id] = {
         "id": branch_id,
@@ -4287,7 +4341,7 @@ def api_branches_edit():
     )
     if dice_result:
         user_msg["dice"] = dice_result
-        _save_json(_story_messages_path(story_id, branch_id), delta)
+        _upsert_branch_message(story_id, branch_id, user_msg)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     _trace_llm(
@@ -4337,8 +4391,7 @@ def api_branches_edit():
     if image_info:
         gm_msg["image"] = image_info
     gm_msg.update(snapshots)
-    delta.append(gm_msg)
-    _save_json(_story_messages_path(story_id, branch_id), delta)
+    _upsert_branch_message(story_id, branch_id, gm_msg)
 
     # Trigger compaction if due
     recap = load_recap(story_id, branch_id)
@@ -4427,7 +4480,7 @@ def api_branches_edit_stream():
         "index": user_msg_index,
     }
     delta = [user_msg]
-    _save_json(_story_messages_path(story_id, branch_id), delta)
+    _save_branch_messages(story_id, branch_id, delta)
 
     branches[branch_id] = {
         "id": branch_id,
@@ -4461,7 +4514,7 @@ def api_branches_edit_stream():
     )
     if dice_result:
         user_msg["dice"] = dice_result
-        _save_json(_story_messages_path(story_id, branch_id), delta)
+        _upsert_branch_message(story_id, branch_id, user_msg)
 
     _trace_llm(
         stage="gm_request",
@@ -4519,8 +4572,7 @@ def api_branches_edit_stream():
                     if image_info:
                         gm_msg["image"] = image_info
                     gm_msg.update(snapshots)
-                    delta.append(gm_msg)
-                    _save_json(_story_messages_path(story_id, branch_id), delta)
+                    _upsert_branch_message(story_id, branch_id, gm_msg)
 
                     # Trigger compaction if due
                     recap = load_recap(story_id, branch_id)
@@ -4541,7 +4593,7 @@ def api_branches_edit_stream():
             yield _sse_event({"type": "error", "message": str(e)})
         finally:
             # If generator is GC'd mid-stream (client disconnect), clean up empty branch
-            delta_now = _load_json(_story_messages_path(story_id, branch_id), [])
+            delta_now = _load_branch_messages(story_id, branch_id)
             has_gm = any(m.get("role") == "gm" for m in delta_now)
             if not has_gm:
                 log.info("/api/branches/edit/stream cleanup orphan branch %s", branch_id)
@@ -4601,7 +4653,7 @@ def api_branches_regenerate():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
-    _save_json(_story_messages_path(story_id, branch_id), [])
+    _save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
         "id": branch_id,
@@ -4688,7 +4740,7 @@ def api_branches_regenerate():
     if dice_result:
         gm_msg["dice"] = dice_result
     gm_msg.update(snapshots)
-    _save_json(_story_messages_path(story_id, branch_id), [gm_msg])
+    _save_branch_messages(story_id, branch_id, [gm_msg])
 
     # Trigger compaction if due
     recap = load_recap(story_id, branch_id)
@@ -4756,7 +4808,7 @@ def api_branches_regenerate_stream():
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
-    _save_json(_story_messages_path(story_id, branch_id), [])
+    _save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
         "id": branch_id,
@@ -4848,7 +4900,7 @@ def api_branches_regenerate_stream():
                     if dice_result:
                         gm_msg["dice"] = dice_result
                     gm_msg.update(snapshots)
-                    _save_json(_story_messages_path(story_id, branch_id), [gm_msg])
+                    _save_branch_messages(story_id, branch_id, [gm_msg])
 
                     # Trigger compaction if due
                     recap = load_recap(story_id, branch_id)
@@ -4868,7 +4920,7 @@ def api_branches_regenerate_stream():
             yield _sse_event({"type": "error", "message": str(e)})
         finally:
             # If generator is GC'd mid-stream (client disconnect), clean up empty branch
-            msgs = _load_json(_story_messages_path(story_id, branch_id), [])
+            msgs = _load_branch_messages(story_id, branch_id)
             if not msgs:
                 log.info("/api/branches/regenerate/stream cleanup orphan branch %s", branch_id)
                 _cleanup_branch(story_id, branch_id)
@@ -4926,10 +4978,10 @@ def api_branches_promote():
         child_bp = branches.get(child_id, {}).get("branch_point_index")
         if child_bp is None:
             continue
-        parent_delta = _load_json(_story_messages_path(story_id, parent_id), [])
+        parent_delta = _load_branch_messages(story_id, parent_id)
         trimmed_delta = [m for m in parent_delta if m.get("index", 0) <= child_bp]
         if len(trimmed_delta) != len(parent_delta):
-            _save_json(_story_messages_path(story_id, parent_id), trimmed_delta)
+            _save_branch_messages(story_id, parent_id, trimmed_delta)
 
     # Build a parent -> children map once, then soft-delete everything under
     # promote root except the kept lineage. This also prunes descendants of
@@ -5021,15 +5073,15 @@ def api_branches_merge():
     # 1. Merge child's delta messages into parent
     #    Keep parent messages at or before branch point, then append child messages.
     branch_point = child.get("branch_point_index", -1)
-    parent_msgs = _load_json(_story_messages_path(story_id, parent_id), [])
+    parent_msgs = _load_branch_messages(story_id, parent_id)
     kept = [m for m in parent_msgs if m.get("index", 0) <= branch_point]
 
-    child_msgs = _load_json(_story_messages_path(story_id, branch_id), [])
+    child_msgs = _load_branch_messages(story_id, branch_id)
     for m in child_msgs:
         m.pop("owner_branch_id", None)
         m.pop("inherited", None)
     kept.extend(child_msgs)
-    _save_json(_story_messages_path(story_id, parent_id), kept)
+    _save_branch_messages(story_id, parent_id, kept)
 
     # 2. Copy character state
     src_char = _story_character_state_path(story_id, branch_id)
@@ -5122,7 +5174,7 @@ def api_branches_delete(branch_id):
 
     if active_children:
         # Load deleted branch's delta messages before we remove the branch dir
-        deleted_delta = _load_json(_story_messages_path(story_id, branch_id), [])
+        deleted_delta = _load_branch_messages(story_id, branch_id)
 
         for child in active_children:
             child_id = child["id"]
@@ -5134,8 +5186,8 @@ def api_branches_delete(branch_id):
                     # Inherit messages from deleted's delta up to child's bp
                     inherited = [m for m in deleted_delta if m.get("index", 0) <= child_bp]
                     if inherited:
-                        child_delta = _load_json(_story_messages_path(story_id, child_id), [])
-                        _save_json(_story_messages_path(story_id, child_id), inherited + child_delta)
+                        child_delta = _load_branch_messages(story_id, child_id)
+                        _save_branch_messages(story_id, child_id, inherited + child_delta)
                         child["branch_point_index"] = deleted_bp
                     # else: deleted_delta empty → treat like Case B (keep bp, just reparent)
                 else:
@@ -5271,7 +5323,7 @@ def api_stories_create():
     _save_tree(story_id, tree)
 
     # Empty main messages
-    _save_json(_story_messages_path(story_id, "main"), [])
+    _save_branch_messages(story_id, "main", [])
 
     # Initial character state for main branch
     ds = default_state if default_state else {"name": "—"}
