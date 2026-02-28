@@ -71,6 +71,7 @@ pytest tests/test_extract_tags_async.py -q
 | `deploy_wsl2.sh` | WSL2 環境更新與 systemd 重啟 |
 | `scripts/backfill_snapshots.py` | 回填歷史 GM 訊息 snapshot |
 | `scripts/backfill_branch_titles.py` | 回填分支標題 |
+| `scripts/backfill_npc_lifecycle.py` | 回填 NPC lifecycle + R1 去重 + 重建 `state.db` |
 | `scripts/migrate_current_dungeon.py` | 回填 `current_dungeon` |
 | `scripts/cleanup_character_state.py` | 清理/修復 state 汙染 |
 | `scripts/clean_state.py` | 移除 legacy 垃圾欄位 |

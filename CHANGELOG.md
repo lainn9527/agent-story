@@ -10,6 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - **戰力等級演出指南（全等級）**: `story_design/story_original/system_prompt.txt` 新增 D/C/B/A/S 五級敘事落地表（攻擊描寫、環境影響、受傷描寫、旁觀者反應）與反面檢查，補齊「等級定義」到「實際演出」的落差。 ([#134])
 - **NPC tier 結構化資料流**: async extraction prompt 新增 `tier` 欄位，支援 15 個 sub-tier（`D-/D/D+/.../S+`）；`_save_npc()` 新增 allowlist 正規化，確保 NPC 強度標記可穩定持久化。 ([#134])
+- **NPC lifecycle + 封存回填工具**: 新增 `lifecycle_status`/`archived_reason` 欄位與 `scripts/backfill_npc_lifecycle.py`，支援 `--dry-run`/`--apply`、R1 去重、候選報告與 `state.db` 重建。 ([#141])
 - **State RAG 索引（`state.db`）**: 新增 `state_db.py`，把 inventory/ability/relationship/mission/system/npc 建成可檢索索引；支援 lazy rebuild、must-include entity 保底、CJK bigram 搜尋與分類輸出 `[相關角色狀態]`。 ([#136])
 - **State 索引維護 API**: 新增 `POST /api/state/rebuild`，可針對指定分支從 canonical `character_state.json` + `npcs.json` 強制重建 `state.db` 並回傳 summary。 ([#136])
 - **Extraction ops 契約（event/state）**: `_extract_tags_async()` 新增 `event_ops`（id-driven update/create）與 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove）優先路徑，並保留 legacy `events` / `state` fallback 相容。
@@ -22,6 +23,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **分支語義對齊（snapshot rebuild）**: fork/edit/regen/blank/merge 等分支操作不再複製 parent DB，而是用該分支時點的 `state_snapshot`/`npcs_snapshot` 重建 `state.db`，避免索引與分支時態漂移。 ([#136])
 - **State RAG 檢索限流**: `search_state()` 新增 `category_limits`/`max_items` 後處理限流；預設注入改為「最多 30 條、NPC 類最多 10 條」，但 `must_include_keys` 保底條目不受類別上限限制。
 - **Prompt 去偏置**: `system_prompt.txt` 與 `prompts.py` 的固定人名示例改為中性示例，降低空白分支固定生成同名 NPC 的偏置風險。
+- **`/api/npcs` 封存可見性**: `GET /api/npcs` 預設 active-only，`include_archived=1|true|yes` 可取全量；`POST /api/npcs` 回傳改為 active+archived，避免自動封存後 caller 看不到結果。 ([#141])
 
 ### Fixed
 - **tier 覆蓋穩定性**: extraction prompt 補充規則「既有 NPC 若本回合無法判定 tier，省略欄位不要輸出 null」，搭配 `_save_npc()` 的 invalid-tier 忽略邏輯，避免合法 tier 被不確定輸出污染。 ([#134])
@@ -29,6 +31,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **State RAG 檢索噪音控制**: must-include entity 抽取忽略單字元 key，降低短詞誤命中造成的無關注入。 ([#136])
 - **未選選項回灌污染**: `recent` 在送入 LLM 前會移除所有非 `user` 訊息（含 legacy `assistant`）尾端的「可選行動」區塊；compaction 摘要前也會做同樣清洗，避免提案選項被當成既成事實反覆回灌。 ([#139])
 - **事件標題漂移斷鏈**: 透過 `event_ops.update(id,status)` 避免 LLM 輕微改寫 title 就變成新事件，提升 active event close/推進穩定性。
+- **封存 NPC 注入噪音**: `state_db` 對 `NPC|ARCHIVED` 預設過濾，但 `must_include_keys` 仍可強制召回，實現「平時不注入、點名可回想」的行為。 ([#141])
 
 ## [0.20.16] - 2026-02-28
 
@@ -51,6 +54,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#135]: https://github.com/lainn9527/agent-story/pull/135
 [#136]: https://github.com/lainn9527/agent-story/pull/136
 [#139]: https://github.com/lainn9527/agent-story/pull/139
+[#141]: https://github.com/lainn9527/agent-story/pull/141
 
 ## [0.20.15] - 2026-02-27
 
