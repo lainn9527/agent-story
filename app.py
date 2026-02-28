@@ -53,6 +53,7 @@ import usage_db
 from event_db import (
     insert_event, search_relevant_events, get_events, get_event_by_id,
     update_event_status, search_events as search_events_db,
+    get_active_events,
     copy_events_for_fork, merge_events_into, delete_events_for_branch,
 )
 from image_gen import generate_image_async, get_image_status, get_image_path
@@ -242,6 +243,8 @@ STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 20000
 STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFLIGHT", 4))
 _STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
 STATE_RAG_TOKEN_BUDGET = max(200, _parse_env_int("STATE_RAG_TOKEN_BUDGET", 2000))
+STATE_RAG_MAX_ITEMS = max(1, _parse_env_int("STATE_RAG_MAX_ITEMS", 30))
+STATE_RAG_NPC_LIMIT = max(1, _parse_env_int("STATE_RAG_NPC_LIMIT", 10))
 
 # Track in-flight async tag extraction jobs keyed by (story, branch, msg_index).
 _PENDING_EXTRACT_LOCK = threading.Lock()
@@ -1632,6 +1635,265 @@ def _get_schema_known_keys(schema: dict) -> set[str]:
     return known
 
 
+_EVENT_STATUS_ORDER = {"planted": 0, "triggered": 1, "resolved": 2, "abandoned": 2}
+_EVENT_STATUS_ALIASES = {
+    "planted": {
+        "planted", "new", "open", "pending", "seeded", "埋下", "伏筆", "鋪墊",
+    },
+    "triggered": {
+        "triggered", "ongoing", "active", "inprogress", "in_progress", "進行中", "觸發", "已觸發",
+    },
+    "resolved": {
+        "resolved", "completed", "complete", "done", "closed", "finish", "finished", "解決", "完成", "已完成",
+    },
+    "abandoned": {
+        "abandoned", "cancelled", "canceled", "dropped", "void", "作廢", "廢棄", "放棄", "取消",
+    },
+}
+
+
+def _normalize_event_status(raw_status: object) -> str | None:
+    if not isinstance(raw_status, str):
+        return None
+    s = raw_status.strip().lower()
+    if not s:
+        return None
+    s = s.replace("-", "_").replace(" ", "")
+    for canonical, aliases in _EVENT_STATUS_ALIASES.items():
+        if s == canonical or s in aliases:
+            return canonical
+    return None
+
+
+def _build_active_events_hint(story_id: str, branch_id: str, limit: int = 40) -> str:
+    rows = get_active_events(story_id, branch_id, limit=limit)
+    if not rows:
+        return "（無）"
+    lines = []
+    for row in rows:
+        eid = row.get("id")
+        title = str(row.get("title", "")).strip()
+        status = _normalize_event_status(row.get("status")) or str(row.get("status", "")).strip()
+        if not title or eid is None:
+            continue
+        lines.append(f"#{eid} [{status}] {title}")
+    return "\n".join(lines) if lines else "（無）"
+
+
+def _apply_event_ops(
+    story_id: str,
+    branch_id: str,
+    event_ops: dict,
+    msg_index: int,
+    existing_titles: set[str],
+    existing_title_map: dict[str, dict],
+) -> int:
+    """Apply id-driven event ops. Returns number of writes."""
+    if not isinstance(event_ops, dict):
+        return 0
+
+    writes = 0
+    id_map: dict[int, dict] = {}
+    for title, meta in existing_title_map.items():
+        if not isinstance(meta, dict):
+            continue
+        eid = meta.get("id")
+        if isinstance(eid, int):
+            id_map[eid] = {"title": title, "status": meta.get("status", "")}
+
+    for op in event_ops.get("update", []) if isinstance(event_ops.get("update"), list) else []:
+        if not isinstance(op, dict):
+            continue
+        raw_id = op.get("id")
+        if isinstance(raw_id, str) and raw_id.isdigit():
+            raw_id = int(raw_id)
+        if not isinstance(raw_id, int):
+            continue
+        new_status = _normalize_event_status(op.get("status"))
+        if not new_status:
+            continue
+        current = id_map.get(raw_id)
+        if not current:
+            continue
+        old_status = _normalize_event_status(current.get("status")) or str(current.get("status", "")).strip()
+        if _EVENT_STATUS_ORDER.get(new_status, -1) > _EVENT_STATUS_ORDER.get(old_status, -1):
+            update_event_status(story_id, raw_id, new_status)
+            title = current["title"]
+            existing_title_map[title]["status"] = new_status
+            id_map[raw_id]["status"] = new_status
+            writes += 1
+
+    for op in event_ops.get("create", []) if isinstance(event_ops.get("create"), list) else []:
+        if not isinstance(op, dict):
+            continue
+        title = str(op.get("title", "")).strip()
+        if not title:
+            continue
+        new_status = _normalize_event_status(op.get("status")) or "planted"
+        if title in existing_titles:
+            existing = existing_title_map.get(title, {})
+            event_id = existing.get("id")
+            old_status = _normalize_event_status(existing.get("status")) or str(existing.get("status", "")).strip()
+            if (
+                isinstance(event_id, int)
+                and _EVENT_STATUS_ORDER.get(new_status, -1) > _EVENT_STATUS_ORDER.get(old_status, -1)
+            ):
+                update_event_status(story_id, event_id, new_status)
+                existing_title_map[title]["status"] = new_status
+                id_map[event_id] = {"title": title, "status": new_status}
+                writes += 1
+            continue
+
+        payload = {
+            "event_type": op.get("event_type", "遭遇"),
+            "title": title,
+            "description": op.get("description", ""),
+            "message_index": msg_index,
+            "status": new_status,
+            "tags": op.get("tags", ""),
+        }
+        new_id = insert_event(story_id, payload, branch_id)
+        existing_titles.add(title)
+        existing_title_map[title] = {"id": new_id, "status": new_status}
+        id_map[new_id] = {"title": title, "status": new_status}
+        writes += 1
+
+    return writes
+
+
+def _append_unique_str(target: list[str], value: object):
+    if not isinstance(value, str):
+        return
+    v = value.strip()
+    if not v:
+        return
+    if v not in target:
+        target.append(v)
+
+
+def _state_ops_to_update(state_ops: dict, schema: dict, current_state: dict | None = None) -> dict:
+    """Translate state_ops contract into existing canonical state update shape."""
+    if not isinstance(state_ops, dict):
+        return {}
+    current_state = current_state or {}
+    update: dict = {}
+
+    list_defs = {l["key"]: l for l in schema.get("lists", []) if isinstance(l, dict) and l.get("key")}
+    map_keys = {k for k, l in list_defs.items() if l.get("type") == "map"}
+    map_keys.update({f["key"] for f in schema.get("fields", []) if f.get("type") == "map"})
+    list_keys = {k for k, l in list_defs.items() if l.get("type", "list") != "map"}
+    direct_overwrite = set(schema.get("direct_overwrite_keys", []))
+    known_keys = _get_schema_known_keys(schema)
+
+    set_ops = state_ops.get("set")
+    if isinstance(set_ops, dict):
+        for key, val in set_ops.items():
+            if key in map_keys:
+                # Full map replacement is not supported by the canonical update
+                # pipeline. Callers should use map_upsert/map_remove instead.
+                log.warning("state_ops: reject set.%s (map key); use map_upsert/map_remove", key)
+                continue
+            if key in list_keys:
+                # list replacement is unsupported by current canonical pipeline.
+                continue
+            if val is None:
+                # null in set means no-op; deletions should go via map_remove/list_remove.
+                continue
+            if key == "reward_points":
+                # Keep reward_points changes deterministic via delta only.
+                log.warning("state_ops: reject set.reward_points; use delta.reward_points")
+                continue
+            if key in direct_overwrite or key in known_keys:
+                update[key] = val
+
+    delta_ops = state_ops.get("delta")
+    if isinstance(delta_ops, dict):
+        for key, val in delta_ops.items():
+            if not _is_numeric_value(val):
+                continue
+            if key == "reward_points":
+                update["reward_points_delta"] = update.get("reward_points_delta", 0) + val
+                continue
+            if key in known_keys:
+                delta_key = f"{key}_delta"
+                update[delta_key] = update.get(delta_key, 0) + val
+
+    map_upsert = state_ops.get("map_upsert")
+    if isinstance(map_upsert, dict):
+        for map_key, kv in map_upsert.items():
+            if map_key not in map_keys or not isinstance(kv, dict):
+                continue
+            bucket = update.setdefault(map_key, {})
+            if not isinstance(bucket, dict):
+                bucket = {}
+                update[map_key] = bucket
+            for raw_k, raw_v in kv.items():
+                if raw_k is None:
+                    continue
+                k = str(raw_k).strip()
+                if not k:
+                    continue
+                bucket[k] = raw_v
+
+    map_remove = state_ops.get("map_remove")
+    if isinstance(map_remove, dict):
+        for map_key, keys in map_remove.items():
+            if map_key not in map_keys:
+                continue
+            if isinstance(keys, str):
+                keys = [keys]
+            if not isinstance(keys, list):
+                continue
+            bucket = update.setdefault(map_key, {})
+            if not isinstance(bucket, dict):
+                bucket = {}
+                update[map_key] = bucket
+            for raw_key in keys:
+                if not isinstance(raw_key, str):
+                    continue
+                key = raw_key.strip()
+                if key:
+                    bucket[key] = None
+
+    list_add = state_ops.get("list_add")
+    if isinstance(list_add, dict):
+        for list_key, items in list_add.items():
+            if list_key not in list_keys:
+                continue
+            if isinstance(items, str):
+                items = [items]
+            if not isinstance(items, list):
+                continue
+            list_def = list_defs[list_key]
+            add_key = list_def.get("state_add_key") or f"{list_key}_add"
+            bucket = update.setdefault(add_key, [])
+            if not isinstance(bucket, list):
+                bucket = []
+                update[add_key] = bucket
+            for item in items:
+                _append_unique_str(bucket, item)
+
+    list_remove = state_ops.get("list_remove")
+    if isinstance(list_remove, dict):
+        for list_key, items in list_remove.items():
+            if list_key not in list_keys:
+                continue
+            if isinstance(items, str):
+                items = [items]
+            if not isinstance(items, list):
+                continue
+            list_def = list_defs[list_key]
+            remove_key = list_def.get("state_remove_key") or f"{list_key}_remove"
+            bucket = update.setdefault(remove_key, [])
+            if not isinstance(bucket, list):
+                bucket = []
+                update[remove_key] = bucket
+            for item in items:
+                _append_unique_str(bucket, item)
+
+    return update
+
+
 def _validate_state_update(update: dict, schema: dict, current_state: dict) -> tuple[dict, list[dict]]:
     """Deterministic validation gate for state updates.
 
@@ -2005,7 +2267,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
 
     def _do_extract():
         from llm_bridge import call_oneshot
-        from event_db import get_event_titles, get_event_title_map, update_event_status
+        from event_db import get_event_titles, get_event_title_map
 
         try:
             # Collect context for dedup — include both base and branch lore
@@ -2022,6 +2284,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             user_protected = {e.get("topic", "") for e in lore if e.get("edited_by") == "user"}
             existing_titles = get_event_titles(story_id, branch_id)
             existing_title_map = get_event_title_map(story_id, branch_id)
+            active_events_text = _build_active_events_hint(story_id, branch_id, limit=40)
 
             # Build schema summary for state extraction
             schema = _load_character_schema(story_id)
@@ -2059,8 +2322,6 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                         list_contents_lines.append(f"{l.get('label', lkey)}：{json.dumps(items, ensure_ascii=False)}")
             list_contents_str = "\n".join(list_contents_lines) if list_contents_lines else ""
 
-            titles_str = ", ".join(sorted(existing_titles)) if existing_titles else "（無）"
-
             prompt = (
                 "你是一個 RPG 結構化資料擷取工具。分析以下 GM 回覆，提取結構化資訊。\n\n"
                 f"## GM 回覆\n{gm_text}\n\n"
@@ -2084,12 +2345,15 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 道具：角色可使用的物品與裝備\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
-                f"已有事件標題：{titles_str}\n"
-                "- 新事件：正常輸出\n"
-                "- 已有事件狀態變化（如伏筆被觸發、事件被解決）：**重新輸出該事件並更新 status**\n"
-                '格式：[{{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}}]\n'
+                "優先輸出 `event_ops`（用 id 更新，避免 title 漂移）：\n"
+                f"{active_events_text}\n"
+                "- update：已有事件狀態變化（如伏筆被觸發、事件被解決）時，輸出 id + status\n"
+                "- create：只有真的新事件才建立（title 不要跟現有事件只差幾個字）\n"
+                'event_ops 格式：{"update": [{"id": 123, "status": "triggered"}], "create": [{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}]}\n'
+                "- 相容：若你無法使用 event id，才改用 legacy `events` 陣列格式。\n"
+                'legacy events 格式：[{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}]\n'
                 "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
-                "可用狀態：planted/triggered/resolved\n\n"
+                "可用狀態：planted/triggered/resolved/abandoned（可用同義詞如 ongoing/completed，系統會正規化）\n\n"
                 "## 3. NPC 資料（npcs）\n"
                 "提取首次登場或有重大變化的 NPC。\n"
                 '- tier：戰力等級（D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+）。'
@@ -2128,7 +2392,14 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- **技能升級時必須同時移除舊版本**：用 `abilities_remove` 移除被取代的技能，再用 `abilities_add` 加入新版本。例如「咒靈操術 (C級)」升級為「咒靈操術 (A級)」時，要同時 remove C級版本。\n"
                 "- **同一技能的不同描述只保留最新**：如「靈視」「靈視 (解析迷霧)」「靈視·微觀解析」只需保留最高階的一個。\n"
                 "- **已被體系（systems）涵蓋的技能不需重複列在 abilities**：如 systems 已有「咒靈操術: A級」，abilities 不需要再列「咒靈操術 (A級)」。\n"
-                "格式：只填有變化的欄位。\n\n"
+                "優先輸出 `state_ops`（結構化操作，避免覆蓋錯誤）：\n"
+                '{"set": {"current_phase": "副本中"}, "delta": {"reward_points": -500}, "map_upsert": {"inventory": {"封印之鏡": "裂痕"}}, "map_remove": {"inventory": ["一次性符"]}, "list_add": {"abilities": ["靈視·微觀解析"]}, "list_remove": {"abilities": ["靈視"]}}\n'
+                "- set：直接覆蓋欄位（null 表示不變，不是刪除）\n"
+                "- delta：數值增減（reward_points 建議用這個）\n"
+                "- map_upsert/map_remove：map 型欄位增修與刪除\n"
+                "- list_add/list_remove：list 型欄位增減\n"
+                "- 相容：若你無法輸出 state_ops，才輸出 legacy `state` 物件。\n"
+                "格式：state/state_ops 只填有變化的欄位。\n\n"
                 "## 5. 時間流逝（time）\n"
                 "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
                 "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
@@ -2180,7 +2451,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             prompt += (
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "events": [...], "npcs": [...], "state": {...}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
+                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "npcs": [...], "state_ops": {...}, "state": {...}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
@@ -2274,29 +2545,41 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             if saved_counts["lore"]:
                 invalidate_prefix_cache(story_id)
 
-            # Events — dedup by title, update status if changed
-            _STATUS_ORDER = {"planted": 0, "triggered": 1, "resolved": 2, "abandoned": 2}
-            for event in ([] if pistol else data.get("events", [])):
-                title = event.get("title", "").strip()
-                if not title:
-                    continue
-                if title not in existing_titles:
-                    event["message_index"] = msg_index
-                    new_id = insert_event(story_id, event, branch_id)
-                    existing_titles.add(title)
-                    existing_title_map[title] = {"id": new_id, "status": event.get("status", "planted")}
-                    saved_counts["events"] += 1
+            # Events — prefer id-driven event_ops, fallback to legacy events[]
+            if not pistol:
+                event_ops = data.get("event_ops")
+                if event_ops is None:
+                    # Backward compatibility for earlier prompt versions.
+                    event_ops = data.get("events_ops")
+                if isinstance(event_ops, dict):
+                    saved_counts["events"] += _apply_event_ops(
+                        story_id, branch_id, event_ops, msg_index, existing_titles, existing_title_map
+                    )
                 else:
-                    # Update status if it advanced (planted→triggered→resolved)
-                    new_status = event.get("status", "").strip()
-                    existing = existing_title_map.get(title, {})
-                    old_status = existing.get("status", "")
-                    event_id = existing.get("id")
-                    if (event_id and new_status and new_status != old_status
-                            and _STATUS_ORDER.get(new_status, -1) > _STATUS_ORDER.get(old_status, -1)):
-                        update_event_status(story_id, event_id, new_status)
-                        existing_title_map[title]["status"] = new_status
-                        saved_counts["events"] += 1
+                    for event in data.get("events", []):
+                        title = event.get("title", "").strip()
+                        if not title:
+                            continue
+                        new_status = _normalize_event_status(event.get("status")) or "planted"
+                        if title not in existing_titles:
+                            event["message_index"] = msg_index
+                            event["status"] = new_status
+                            new_id = insert_event(story_id, event, branch_id)
+                            existing_titles.add(title)
+                            existing_title_map[title] = {"id": new_id, "status": new_status}
+                            saved_counts["events"] += 1
+                        else:
+                            # Update status only if it advanced.
+                            existing = existing_title_map.get(title, {})
+                            old_status = _normalize_event_status(existing.get("status")) or str(existing.get("status", "")).strip()
+                            event_id = existing.get("id")
+                            if (
+                                isinstance(event_id, int)
+                                and _EVENT_STATUS_ORDER.get(new_status, -1) > _EVENT_STATUS_ORDER.get(old_status, -1)
+                            ):
+                                update_event_status(story_id, event_id, new_status)
+                                existing_title_map[title]["status"] = new_status
+                                saved_counts["events"] += 1
 
             # NPCs — _save_npc has built-in merge by name
             for npc in data.get("npcs", []):
@@ -2304,11 +2587,22 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     _save_npc(story_id, npc, branch_id)
                     saved_counts["npcs"] += 1
 
-            # State — apply update (skip if regex already handled STATE tag)
-            state_update = data.get("state", {})
-            if state_update and isinstance(state_update, dict) and not skip_state:
-                _apply_state_update(story_id, branch_id, state_update)
-                saved_counts["state"] = True
+            # State — prefer state_ops, fallback to legacy state (skip if regex handled STATE tag)
+            if not skip_state:
+                state_applied = False
+                state_ops = data.get("state_ops")
+                if isinstance(state_ops, dict):
+                    current_state = _load_character_state(story_id, branch_id)
+                    ops_update = _state_ops_to_update(state_ops, schema, current_state)
+                    if ops_update:
+                        _apply_state_update(story_id, branch_id, ops_update)
+                        state_applied = True
+                if not state_applied:
+                    state_update = data.get("state", {})
+                    if state_update and isinstance(state_update, dict):
+                        _apply_state_update(story_id, branch_id, state_update)
+                        state_applied = True
+                saved_counts["state"] = state_applied
 
             # Time — advance world_day (skip if regex already found TIME tags)
             time_data = data.get("time", {})
@@ -3458,6 +3752,8 @@ def _build_augmented_message(
             token_budget=STATE_RAG_TOKEN_BUDGET,
             must_include_keys=must_include,
             context=lore_context,
+            category_limits={"npc": STATE_RAG_NPC_LIMIT},
+            max_items=STATE_RAG_MAX_ITEMS,
         )
         if state_block:
             parts.append(state_block)

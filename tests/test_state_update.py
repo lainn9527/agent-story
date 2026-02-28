@@ -889,3 +889,63 @@ class TestFuzzyLegacyAdd:
         state = _load_state(tmp_path, story_id)
         assert "G 病毒·原始株" in state["inventory"]
         assert "G病毒·原始株" not in state["inventory"]
+
+
+# ===================================================================
+# state_ops translation
+# ===================================================================
+
+
+class TestStateOpsTranslation:
+    def test_map_remove_translates_to_null_map(self):
+        update = app_module._state_ops_to_update(
+            {"map_remove": {"inventory": ["一次性符"]}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert update["inventory"]["一次性符"] is None
+
+    def test_set_null_is_noop(self):
+        update = app_module._state_ops_to_update(
+            {"set": {"current_status": None, "current_phase": "副本中"}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert "current_status" not in update
+        assert update["current_phase"] == "副本中"
+
+    def test_set_map_key_rejected(self):
+        update = app_module._state_ops_to_update(
+            {"set": {"inventory": {"新道具": "描述"}}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert "inventory" not in update
+
+    def test_set_reward_points_rejected(self):
+        update = app_module._state_ops_to_update(
+            {"set": {"reward_points": 9999}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert "reward_points" not in update
+
+    def test_list_add_and_remove_use_schema_suffix(self):
+        update = app_module._state_ops_to_update(
+            {
+                "list_add": {"completed_missions": ["支線A"]},
+                "list_remove": {"completed_missions": ["咒怨 — 完美通關"]},
+            },
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert update["completed_missions_add"] == ["支線A"]
+        assert update["completed_missions_remove"] == ["咒怨 — 完美通關"]
+
+    def test_delta_reward_points_translates_to_reward_points_delta(self):
+        update = app_module._state_ops_to_update(
+            {"delta": {"reward_points": -300}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert update["reward_points_delta"] == -300

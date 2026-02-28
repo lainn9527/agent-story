@@ -192,6 +192,24 @@ class TestAsyncExtractionParsing:
         assert state.get("current_status") != "不應該被套用"
 
     @mock.patch("llm_bridge.call_oneshot")
+    def test_state_ops_preferred_over_legacy_state(self, mock_llm, story_id, setup_story):
+        llm_response = json.dumps({
+            "state_ops": {
+                "set": {"current_status": "依 state_ops 套用"},
+                "delta": {"reward_points": 120},
+            },
+            "state": {"current_status": "legacy 不應覆蓋"},
+        })
+        mock_llm.return_value = llm_response
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=2)
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["current_status"] == "依 state_ops 套用"
+        assert state["reward_points"] == 5120
+
+    @mock.patch("llm_bridge.call_oneshot")
     def test_short_text_skipped(self, mock_llm, story_id, setup_story):
         """GM text shorter than 200 chars should skip extraction entirely."""
         app_module._extract_tags_async(story_id, "main", "短文字", msg_index=1)
@@ -399,6 +417,60 @@ class TestAsyncEventDedup:
         events = event_db.get_events(story_id, branch_id="main")
         matching = [e for e in events if e["title"] == "已解決事件"]
         assert matching[0]["status"] == "resolved"  # Not reverted to planted
+
+
+class TestAsyncEventOps:
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_event_ops_update_by_id(self, mock_llm, story_id, setup_story):
+        event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "舊標題", "description": "d", "status": "planted"
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "event_ops": {
+                "update": [{"id": event_id, "status": "completed"}],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=8)
+
+        updated = event_db.get_event_by_id(story_id, event_id)
+        assert updated["status"] == "resolved"
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_events_ops_plural_backward_compat(self, mock_llm, story_id, setup_story):
+        event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "兼容事件", "description": "d", "status": "planted"
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "events_ops": {
+                "update": [{"id": event_id, "status": "ongoing"}],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=9)
+
+        updated = event_db.get_event_by_id(story_id, event_id)
+        assert updated["status"] == "triggered"
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_event_ops_create_dedup_only_advances_status(self, mock_llm, story_id, setup_story):
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "重複事件", "description": "old", "status": "planted"
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "event_ops": {
+                "create": [
+                    {"event_type": "伏筆", "title": "重複事件", "description": "new", "status": "triggered", "tags": ""},
+                ],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=10)
+
+        events = event_db.get_events(story_id, branch_id="main", limit=20)
+        matching = [e for e in events if e["title"] == "重複事件"]
+        assert len(matching) == 1
+        assert matching[0]["status"] == "triggered"
 
 
 # ===================================================================

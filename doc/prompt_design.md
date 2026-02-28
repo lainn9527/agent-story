@@ -53,6 +53,8 @@
 3. `[相關事件追蹤]`（非 blank branch）
 4. `[NPC 近期動態]`
 5. `[相關角色狀態]`（state.db 檢索結果）
+   - 預設檢索限流：總筆數最多 30、NPC 類別最多 10
+   - `must_include_keys` 命中的條目先保留，再填入一般結果
 6. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
 7. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
 8. `---`
@@ -125,9 +127,10 @@
 ### 4.1 Prompt 內建 guardrails
 
 - lore 提取有「通用設定」門檻，避免把一次性劇情寫進知識庫
-- event 有 title dedup + status 升級規則（planted -> triggered -> resolved）
+- event 優先走 `event_ops`（id-driven），避免 title 漂移造成斷鏈
+- event create 仍保留 title dedup + status 升級規則（planted -> triggered -> resolved/abandoned）
 - NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
-- state 提取遵守 schema（map/list/_delta 規則）
+- state 優先走 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove），fallback 才用 legacy `state`
 - time 有上限（單次最多 30 天）
 - dungeon 進度提取時會給 node id 對照
 

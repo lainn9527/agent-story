@@ -99,6 +99,8 @@ Browser (static/app.js, templates/index.html)
 1. 寫入玩家訊息到分支 delta。
 2. 建構 system prompt（核心角色狀態 + lore + NPC 摘要 + recap + 副本上下文）。
 3. 對玩家訊息做 context augmentation（lore/events/npc 活動/state RAG/戰力提醒/骰子提示）。
+   - state RAG 走檢索層限流（預設總筆數 30、NPC 類別上限 10）
+   - `must_include_keys` 命中項目保底注入，不受類別上限限制
 4. 記錄 request trace，呼叫 LLM（stream 或 non-stream），再記錄 response trace。
 5. `_process_gm_response()`：
    - 移除 echo 回來的 context 區塊
@@ -124,6 +126,12 @@ Browser (static/app.js, templates/index.html)
 
 - 由 `_extract_tags_async()` 另外呼叫 `call_oneshot()` 做語意抽取。
 - 補齊 lore/events/npc/state/time/branch_title/dungeon progress。
+- 支援新契約（優先）：
+  - `event_ops`: `update[{id,status}]` + `create[...]`（id-driven）
+  - `state_ops`: `set/delta/map_upsert/map_remove/list_add/list_remove`
+- 舊契約仍可用（相容）：
+  - `events`（title-driven）
+  - `state`（legacy update object）
 - `pistol_mode` 開啟時會跳過 lore + event 持久化，避免 NSFW 場景污染長期資料。
 
 ## 7) 啟動與遷移
