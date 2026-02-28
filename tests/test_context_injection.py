@@ -200,6 +200,66 @@ class TestBuildAugmentedMessage:
         assert captured["category_limits"]["npc"] == app_module.STATE_RAG_NPC_LIMIT
         assert captured["max_items"] == app_module.STATE_RAG_MAX_ITEMS
 
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_archived_npc_not_injected_without_explicit_mention(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story, monkeypatch
+    ):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "npcs.json").write_text(json.dumps([
+            {"name": "阿豪", "role": "隊友", "lifecycle_status": "active"},
+            {"name": "安德斯", "role": "敵人", "lifecycle_status": "archived", "current_status": "已損毀"},
+        ], ensure_ascii=False), encoding="utf-8")
+
+        def _fake_search(*_args, **kwargs):
+            must_include = kwargs.get("must_include_keys", [])
+            if "安德斯" in must_include:
+                return "[相關角色狀態]\n#### NPC 檔案\n- 安德斯：狀態:已損毀"
+            return ""
+
+        monkeypatch.setattr(app_module, "search_state_entries", _fake_search)
+        text, _ = app_module._build_augmented_message(
+            story_id,
+            "main",
+            "你好",
+            {"current_phase": "副本中"},
+            [{"name": "阿豪", "role": "隊友", "lifecycle_status": "active"}],
+        )
+        assert "安德斯" not in text
+
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_archived_npc_can_be_recalled_when_mentioned(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story, monkeypatch
+    ):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "npcs.json").write_text(json.dumps([
+            {"name": "阿豪", "role": "隊友", "lifecycle_status": "active"},
+            {"name": "安德斯", "role": "敵人", "lifecycle_status": "archived", "current_status": "已損毀"},
+        ], ensure_ascii=False), encoding="utf-8")
+
+        def _fake_search(*_args, **kwargs):
+            must_include = kwargs.get("must_include_keys", [])
+            if "安德斯" in must_include:
+                return "[相關角色狀態]\n#### NPC 檔案\n- 安德斯：狀態:已損毀"
+            return ""
+
+        monkeypatch.setattr(app_module, "search_state_entries", _fake_search)
+        text, _ = app_module._build_augmented_message(
+            story_id,
+            "main",
+            "我想找安德斯",
+            {"current_phase": "副本中"},
+            [{"name": "阿豪", "role": "隊友", "lifecycle_status": "active"}],
+        )
+        assert "安德斯" in text
+
 
 # ===================================================================
 # _build_story_system_prompt

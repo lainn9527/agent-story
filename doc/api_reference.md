@@ -97,8 +97,8 @@
 
 | Method | Path | 說明 | 主要參數 |
 |---|---|---|---|
-| GET | `/api/npcs` | 列 NPC | `branch_id` |
-| POST | `/api/npcs` | 新增/更新 NPC | body: NPC fields + `branch_id` |
+| GET | `/api/npcs` | 列 NPC（預設 active-only） | `branch_id`, `include_archived` (`1/true/yes`) |
+| POST | `/api/npcs` | 新增/更新 NPC（回傳 active+archived 全量，便於觀察自動封存） | body: NPC fields + `branch_id` |
 | DELETE | `/api/npcs/<npc_id>` | 刪 NPC | `branch_id` |
 | GET | `/api/events` | 列事件 | `branch_id`, `limit` |
 | GET | `/api/events/search` | 搜事件 | `q`, `branch_id`, `limit` |

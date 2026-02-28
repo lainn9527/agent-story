@@ -1107,6 +1107,32 @@ class TestNPCsAPI:
         names = [n["name"] for n in resp2.get_json()["npcs"]]
         assert "阿豪" in names
 
+    def test_get_npcs_excludes_archived_by_default(self, client, setup_story):
+        client.post("/api/npcs", json={"name": "阿豪", "role": "隊友"})
+        client.post("/api/npcs", json={"name": "安德斯", "current_status": "已損毀，威脅解除"})
+
+        resp = client.get("/api/npcs")
+        names = [n["name"] for n in resp.get_json()["npcs"]]
+        assert "阿豪" in names
+        assert "安德斯" not in names
+
+    def test_get_npcs_include_archived_query(self, client, setup_story):
+        client.post("/api/npcs", json={"name": "安德斯", "current_status": "已損毀，威脅解除"})
+
+        resp = client.get("/api/npcs?include_archived=1")
+        names = [n["name"] for n in resp.get_json()["npcs"]]
+        assert "安德斯" in names
+        archived = next(n for n in resp.get_json()["npcs"] if n["name"] == "安德斯")
+        assert archived["lifecycle_status"] == "archived"
+
+    def test_create_npc_response_includes_auto_archived(self, client, setup_story):
+        resp = client.post("/api/npcs", json={"name": "安德斯", "current_status": "已損毀，威脅解除"})
+        assert resp.status_code == 200
+        names = [n["name"] for n in resp.get_json()["npcs"]]
+        assert "安德斯" in names
+        archived = next(n for n in resp.get_json()["npcs"] if n["name"] == "安德斯")
+        assert archived["lifecycle_status"] == "archived"
+
     def test_delete_npc(self, client, setup_story):
         client.post("/api/npcs", json={"name": "臨時NPC", "role": "路人"})
         npcs = client.get("/api/npcs").get_json()["npcs"]

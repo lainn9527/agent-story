@@ -1,6 +1,7 @@
 """Tests for state_db.py."""
 
 import json
+import sqlite3
 
 import pytest
 
@@ -74,6 +75,21 @@ class TestRebuild:
         assert "深厚信任" in text
         assert "{'summary'" not in text
 
+    def test_rebuild_tags_archived_npc_rows(self, story_id, setup_branch):
+        branch_dir = setup_branch
+        npcs = json.loads((branch_dir / "npcs.json").read_text(encoding="utf-8"))
+        npcs[1]["lifecycle_status"] = "archived"
+        (branch_dir / "npcs.json").write_text(json.dumps(npcs, ensure_ascii=False), encoding="utf-8")
+
+        state_db.rebuild_from_json(story_id, "main")
+        conn = sqlite3.connect(branch_dir / "state.db")
+        row = conn.execute(
+            "SELECT tags FROM state_entries WHERE category='npc' AND entry_key='審判暴君'"
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert "ARCHIVED" in (row[0] or "")
+
 
 class TestSearch:
     def test_search_must_include_keeps_forced_key(self, story_id, setup_branch):
@@ -140,3 +156,30 @@ class TestSearch:
             max_items=1,
         )
         assert "阿豪" in text
+
+    def test_archived_npc_filtered_by_default(self, story_id, setup_branch):
+        branch_dir = setup_branch
+        npcs = json.loads((branch_dir / "npcs.json").read_text(encoding="utf-8"))
+        npcs[1]["lifecycle_status"] = "archived"
+        (branch_dir / "npcs.json").write_text(json.dumps(npcs, ensure_ascii=False), encoding="utf-8")
+
+        state_db.rebuild_from_json(story_id, "main")
+        text = state_db.search_state(story_id, "main", "審判暴君")
+        assert "#### NPC 檔案" not in text
+        assert "戰力:S-級" not in text
+
+    def test_archived_npc_kept_when_forced(self, story_id, setup_branch):
+        branch_dir = setup_branch
+        npcs = json.loads((branch_dir / "npcs.json").read_text(encoding="utf-8"))
+        npcs[1]["lifecycle_status"] = "archived"
+        (branch_dir / "npcs.json").write_text(json.dumps(npcs, ensure_ascii=False), encoding="utf-8")
+
+        state_db.rebuild_from_json(story_id, "main")
+        text = state_db.search_state(
+            story_id,
+            "main",
+            "完全無關",
+            must_include_keys=["審判暴君"],
+        )
+        assert "審判暴君" in text
+        assert "戰力:S-級" in text

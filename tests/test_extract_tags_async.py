@@ -627,3 +627,43 @@ class TestNpcTier:
         npcs_path = setup_story / "branches" / "main" / "npcs.json"
         npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
         assert npcs[0]["tier"] == "B+"
+
+    def test_save_npc_archives_on_terminal_current_status(self, story_id, setup_story):
+        app_module._save_npc(
+            story_id,
+            {"name": "安德斯", "role": "敵人", "current_status": "已損毀，威脅解除"},
+            "main",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "archived"
+        assert str(npcs[0].get("archived_reason", "")).startswith("current_status:")
+
+    def test_save_npc_unarchives_on_repair_keyword(self, story_id, setup_story):
+        app_module._save_npc(
+            story_id,
+            {"name": "安德斯", "role": "敵人", "current_status": "已損毀，威脅解除"},
+            "main",
+        )
+        app_module._save_npc(
+            story_id,
+            {"name": "安德斯", "current_status": "修復完成"},
+            "main",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert len(npcs) == 1
+        assert npcs[0]["lifecycle_status"] == "active"
+        assert npcs[0]["archived_reason"] is None
+
+    def test_save_npc_r1_name_merge(self, story_id, setup_story):
+        app_module._save_npc(story_id, {"name": "小琳", "role": "高中少女"}, "main")
+        app_module._save_npc(story_id, {"name": "小 琳", "relationship_to_player": "信任"}, "main")
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert len(npcs) == 1
+        assert npcs[0]["name"] == "小琳"
+        assert npcs[0]["relationship_to_player"] == "信任"

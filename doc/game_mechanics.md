@@ -150,6 +150,18 @@
   - `critical_facts` 的關係矩陣（`·X級`）
   - `[戰力等級提醒]`（僅已知 tier 且 ally/hostile）
 
+### 7.4 NPC lifecycle（active / archived）
+
+- NPC 新增欄位：
+  - `lifecycle_status`：`active` / `archived`（缺省視為 `active`）
+  - `archived_reason`：封存來源說明（可為 `null`）
+- `_save_npc()` 只用 `current_status` 判定封存/解封存：
+  - archive 關鍵詞：`已損毀`、`威脅解除`、`已退場`、`已失效`、`已封印`、`已消散`、`已離隊`
+  - unarchive 關鍵詞：`修復`、`復活`、`再現身`、`重新啟用`、`解除封印`
+  - 優先序：顯式 `lifecycle_status` > unarchive > archive > 保持現狀
+- `_load_npcs()` 預設只回 active；需要全量時用 `include_archived=True`。
+- state.db 對 archived NPC 會打 `NPC|ARCHIVED` tag；`search_state` 預設過濾，只有 forced key（玩家明確提名）才保留。
+
 ---
 
 ## 8. 分支操作機制

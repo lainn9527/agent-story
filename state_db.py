@@ -8,6 +8,12 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
+from npc_lifecycle import (
+    NPC_LIFECYCLE_ACTIVE,
+    NPC_LIFECYCLE_ARCHIVED,
+    parse_npc_lifecycle_status,
+)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
@@ -21,11 +27,10 @@ _CATEGORY_LABELS = {
 }
 
 # NOTE:
-# These normalization helpers intentionally mirror app.py logic
+# Tier + relationship normalization helpers intentionally mirror app.py logic
 # (_NPC_TIER_ALLOWLIST/_NPC_TIER_TRANSLATION + _rel_to_str) to avoid
 # importing app.py (which would create circular coupling and heavy init side effects).
-# If tier format rules or relationship normalization change in app.py,
-# update this module in the same PR to keep rebuild path and dual-write path consistent.
+# NPC lifecycle alias parsing is shared via npc_lifecycle.py.
 _NPC_TIER_ALLOWLIST = {
     "D-", "D", "D+",
     "C-", "C", "C+",
@@ -42,8 +47,6 @@ _NPC_TIER_TRANSLATION = str.maketrans({
     "ー": "-",
     "＋": "+",
 })
-
-
 def _db_path(story_id: str, branch_id: str) -> str:
     return os.path.join(STORIES_DIR, story_id, "branches", branch_id, "state.db")
 
@@ -104,6 +107,17 @@ def _rel_to_str(val) -> str:
     if val is None:
         return ""
     return str(val).strip()
+
+
+def _normalize_npc_lifecycle_status(raw_status: object) -> str:
+    return parse_npc_lifecycle_status(raw_status) or NPC_LIFECYCLE_ACTIVE
+
+
+def _row_has_archived_tag(tags: object) -> bool:
+    if not isinstance(tags, str):
+        return False
+    parts = {p.strip().upper() for p in tags.split("|") if p.strip()}
+    return "ARCHIVED" in parts
 
 
 def state_db_exists(story_id: str, branch_id: str) -> bool:
@@ -373,7 +387,10 @@ def rebuild_from_json(
             name = (npc.get("name") or "").strip()
             if not name:
                 continue
-            npc_rows.append((name, build_npc_content(npc), "NPC"))
+            tags = "NPC"
+            if _normalize_npc_lifecycle_status(npc.get("lifecycle_status")) == NPC_LIFECYCLE_ARCHIVED:
+                tags = "NPC|ARCHIVED"
+            npc_rows.append((name, build_npc_content(npc), tags))
 
     replace_categories_batch(
         story_id,
@@ -489,6 +506,8 @@ def search_state(
         category = row["category"] or ""
         if key in forced_keys:
             forced.append(row)
+            continue
+        if category == "npc" and _row_has_archived_tag(row["tags"]):
             continue
         score = _score_row(row, keywords)
         score = _apply_context_boost(score, category, context)
