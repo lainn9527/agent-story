@@ -14,6 +14,7 @@ import pytest
 import app as app_module
 import event_db
 import lore_db
+import state_db
 
 
 # ===================================================================
@@ -38,6 +39,7 @@ def patch_app_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(event_db, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
+    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
     lore_db._embedding_cache.clear()
     return stories_dir
 

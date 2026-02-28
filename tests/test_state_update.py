@@ -10,6 +10,7 @@ import json
 import pytest
 
 import app as app_module
+import state_db
 
 
 # The character schema matching the real project (inventory is now map type)
@@ -69,6 +70,7 @@ def patch_app_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
     return stories_dir
 
 
@@ -96,6 +98,23 @@ def _load_state(tmp_path, story_id, branch_id="main"):
     path = tmp_path / "data" / "stories" / story_id / "branches" / branch_id / "character_state.json"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+class TestStateDbSync:
+    def test_apply_state_update_syncs_state_db(self, tmp_path, story_id, setup_state):
+        setup_state()
+        app_module._apply_state_update_inner(
+            story_id,
+            "main",
+            {
+                "inventory": {"新道具": "已綁定"},
+                "relationships": {"阿豪": "戰友"},
+            },
+            SCHEMA,
+        )
+        text = state_db.search_state(story_id, "main", "新道具 阿豪")
+        assert "新道具" in text
+        assert "阿豪" in text
 
 
 # ===================================================================

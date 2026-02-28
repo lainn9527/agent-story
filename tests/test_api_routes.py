@@ -13,6 +13,7 @@ import pytest
 import app as app_module
 import event_db
 import lore_db
+import state_db
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,7 @@ def patch_app_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(event_db, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
+    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
     lore_db._embedding_cache.clear()
     return stories_dir
 
@@ -231,6 +233,9 @@ class TestBranchesAPI:
         data = resp.get_json()
         assert data["ok"] is True
         assert "branch" in data
+        branch_id = data["branch"]["id"]
+        state_db_path = setup_story / "branches" / branch_id / "state.db"
+        assert state_db_path.exists()
 
     def test_create_blank_branch(self, client, setup_story, story_id):
         resp = client.post("/api/branches/blank", json={"name": "空白分支"})
@@ -240,6 +245,8 @@ class TestBranchesAPI:
         branch = data["branch"]
         assert branch.get("blank") is True
         assert branch["branch_point_index"] == -1
+        state_db_path = setup_story / "branches" / branch["id"] / "state.db"
+        assert state_db_path.exists()
 
     def test_create_branch_copies_events_before_branch_point(self, client, setup_story, story_id):
         event_db.insert_event(story_id, {
@@ -786,7 +793,7 @@ class TestSavesAPI:
         assert send_resp.get_json()["ok"] is True
 
         # Send should still use branch live state (98765), not save snapshot (5000)
-        assert "98765" in captured["system_prompt"]
+        assert "98765" in captured["system_prompt"].replace(",", "")
 
         # Preview should be cleared after sending; status returns live state again
         status_after_send = client.get("/api/status?branch_id=main").get_json()
@@ -1051,11 +1058,23 @@ class TestNPCsAPI:
         npcs = client.get("/api/npcs").get_json()["npcs"]
         assert len(npcs) == 1
         npc_id = npcs[0]["id"]
+        assert "臨時NPC" in state_db.search_state("test_story", "main", "臨時NPC")
         resp = client.delete(f"/api/npcs/{npc_id}")
         assert resp.status_code == 200
         # Verify deleted
         npcs2 = client.get("/api/npcs").get_json()["npcs"]
         assert len(npcs2) == 0
+        assert "臨時NPC" not in state_db.search_state("test_story", "main", "臨時NPC")
+
+
+class TestStateAPI:
+    def test_rebuild_state_endpoint(self, client, setup_story):
+        resp = client.post("/api/state/rebuild", json={"branch_id": "main"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["branch_id"] == "main"
+        assert "summary" in data
 
 
 # ===================================================================

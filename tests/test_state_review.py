@@ -9,6 +9,7 @@ import json
 import pytest
 
 import app as app_module
+import state_db
 
 
 @pytest.fixture(autouse=True)
@@ -338,6 +339,7 @@ def patch_app_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
     return stories_dir
 
 

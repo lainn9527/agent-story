@@ -25,10 +25,10 @@
 
 `_build_story_system_prompt()` 會將下列資料注入模板：
 
-- `character_state`: 當前角色狀態 JSON
+- `character_state`: 核心角色狀態精簡文本（schema fields + systems + core extras）
 - `narrative_recap`: 壓縮摘要（`conversation_recap.json`）
 - `world_lore`: 精簡 lore 摘要（非全文）
-- `npc_profiles`: 當前分支 NPC 檔案摘要（含 `【X 級】` tier 標記）
+- `npc_profiles`: 當前分支 NPC 統計摘要（詳細檔案改由 state RAG 按需注入）
 - `team_rules`: branch config 的組隊模式規則（`free_agent` / `fixed_team`）
 - `critical_facts`: 關鍵事實區塊（phase、world day、關鍵道具、NPC 關係與 tier）
 - `dungeon_context`: 副本進度/節點/成長限制上下文
@@ -52,10 +52,11 @@
 2. `[相關分支設定]`（branch lore bigram 搜尋）
 3. `[相關事件追蹤]`（非 blank branch）
 4. `[NPC 近期動態]`
-5. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
-6. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
-7. `---`
-8. 原始玩家輸入
+5. `[相關角色狀態]`（state.db 檢索結果）
+6. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
+7. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
+8. `---`
+9. 原始玩家輸入
 
 ### 2.5 戰力等級一致性（Tier Consistency）
 
@@ -63,6 +64,13 @@
 - `prompts.py` fallback 模板同步保留精簡版等級框架，避免 fallback 路徑退化。
 - NPC tier 採 15 個 sub-tier：`D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+`。
 - `_save_npc()` 會做 tier allowlist 正規化；不合法值直接忽略、不覆蓋既有合法值。
+
+### 2.6 State RAG（角色狀態按需注入）
+
+- state index 來源：`state_db.py`（branch 級 `state.db`）。
+- 預設 token 預算：`STATE_RAG_TOKEN_BUDGET=2000`（最小 200）。
+- 類別覆蓋：inventory / ability / relationship / mission / system / npc。
+- `must_include_keys` 會從玩家輸入提取已知實體名做保底納入（忽略長度 < 2 的 key，避免噪音）。
 
 ---
 
@@ -95,6 +103,12 @@
 - `npcs_snapshot`
 - `world_day_snapshot`
 - `dungeon_progress_snapshot`
+
+### 3.4 State Index 同步點
+
+- canonical state 寫入最終匯集點是 `_apply_state_update_inner()`；套用後會同步 state.db 非 NPC 類別。
+- NPC 寫入透過 `_save_npc()` 同步 state.db；手動刪除 NPC（`DELETE /api/npcs/<id>`）也會同步刪除索引。
+- fork/edit/regen/blank/merge 分支操作會用 snapshot 對應的 state/npcs 重建 state.db，避免「分支時間點」與「索引內容」不一致。
 
 ---
 
@@ -203,3 +217,6 @@
 4. 若調整抽取 prompt，至少跑：
    - `tests/test_extract_tags_async.py`
    - `tests/test_tag_extraction.py`
+5. 若調整 tier 或 relationship 正規化規則，需同步更新：
+   - `app.py::_normalize_npc_tier()` / `_rel_to_str()`
+   - `state_db.py` 內對應 helper（目前為避免循環 import 採 duplicated logic）
