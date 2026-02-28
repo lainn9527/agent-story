@@ -156,6 +156,28 @@
 - `_trace_llm()` 會記錄 request/response payload（best-effort）
 - `_log_llm_usage()` 會寫 token usage 到 `usage.db`
 
+### 7.1 Trace 檔案位置與命名
+
+- 根目錄：`data/llm_traces/<story_id>/`
+- 分區：`<YYYY-MM-DD>/<branch_id>/<msg_tag>/`
+- 檔名：`<HHMMSS.mmm>_<stage>_<id>.json`
+- `msg_tag` 來自 `message_index`（例如 `msg_000407`）；若無 index 則為 `msg_na`
+
+### 7.2 常見 stage
+
+- GM 主流程：`gm_request` / `gm_response_raw`
+- 後處理抽取：`extract_tags_request` / `extract_tags_response_raw`
+- state key normalize：`state_normalize_request` / `state_normalize_response_raw`
+- lore promote review：`lore_promote_review_request` / `lore_promote_review_response_raw`
+- lore console：`lore_chat_request` / `lore_chat_response_raw`
+- lore organizer：`lore_organizer_request` / `lore_organizer_response_raw`
+
+### 7.3 Debug 建議
+
+- 先用 `story_id + branch_id + message_index` 找對應 `msg_tag` 資料夾。
+- 同一個 `msg_tag` 下通常會有同回合 request/response，可直接比對 prompt 與模型輸出。
+- trace 可能包含完整 prompt、recent messages、原始回覆，排查時請避免外流敏感資料。
+
 ---
 
 ## 8. 修改 Prompt 的實務建議
@@ -172,4 +194,3 @@
 4. 若調整抽取 prompt，至少跑：
    - `tests/test_extract_tags_async.py`
    - `tests/test_tag_extraction.py`
-

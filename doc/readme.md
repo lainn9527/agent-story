@@ -71,6 +71,7 @@ pytest -m "not slow"
 
 - `story_design/<story_id>/`: 可版本控制的世界設計資料（prompt/schema/lore）
 - `data/stories/<story_id>/`: 遊戲執行期資料（branches、DB、images、saves）
+- `data/llm_traces/<story_id>/`: LLM request/response trace（依日期與 branch/message 分層）
 - `timeline_tree.json`: 分支樹與 active branch
 - `branches/<branch_id>/messages.json`: 該分支的增量訊息（delta）
 
