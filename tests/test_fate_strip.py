@@ -1,8 +1,13 @@
-"""Tests for _strip_fate_from_messages and _FATE_LABEL_RE."""
+"""Tests for recent-context cleanup helpers."""
 
 import pytest
 
-from app import _FATE_LABEL_RE, _strip_fate_from_messages
+from app import (
+    _CHOICE_BLOCK_RE,
+    _FATE_LABEL_RE,
+    _sanitize_recent_messages,
+    _strip_fate_from_messages,
+)
 
 
 # ── _FATE_LABEL_RE matching ──────────────────────────────────────────
@@ -77,3 +82,21 @@ def test_strip_noop_when_no_fate():
     result = _strip_fate_from_messages(messages)
     assert result[0]["content"] == "你揮出了一劍。"
     assert result[1]["content"] == "繼續攻擊"
+
+
+# ── choice-block stripping for model context ─────────────────────────
+
+
+def test_choice_block_regex_matches_trailing_options():
+    text = "你踏進走廊。\n\n**可選行動：**\n1. 前進\n2. 後退"
+    assert _CHOICE_BLOCK_RE.search(text)
+
+
+def test_sanitize_recent_removes_gm_choice_block_but_keeps_user_text():
+    messages = [
+        {"role": "gm", "content": "你踏進走廊。\n\n**可選行動：**\n1. 前進\n2. 後退"},
+        {"role": "user", "content": "可選行動：我想自由行動"},
+    ]
+    result = _sanitize_recent_messages(messages, strip_fate=False)
+    assert result[0]["content"] == "你踏進走廊。"
+    assert result[1]["content"] == "可選行動：我想自由行動"

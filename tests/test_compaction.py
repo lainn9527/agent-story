@@ -162,6 +162,17 @@ class TestFormatMessages:
         text = compaction._format_messages(msgs)
         assert "【玩家】" in text
 
+    def test_strips_gm_choice_block_before_compaction(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "content": "你站在門口。\n\n**可選行動：**\n1. 進門\n2. 離開",
+            }
+        ]
+        text = compaction._format_messages(msgs)
+        assert "可選行動" not in text
+        assert "你站在門口。" in text
+
 
 # ===================================================================
 # load_recap / save_recap / get_recap_text

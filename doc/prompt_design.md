@@ -38,6 +38,7 @@
 - `fate_mode = false`：
   - 會把「命運走向」段落從 system prompt 移除
   - 最近訊息會先做 fate label 清理（避免模型模仿）
+- 最近訊息（`recent`）一律會先移除 GM 回覆尾端的「可選行動」區塊，避免選項文字反覆回灌造成上下文污染。
 - `pistol_mode = true`：
   - 追加「親密場景指示」段落
   - 追加 NSFW 偏好（chips/custom）
@@ -169,6 +170,7 @@
 
 - 檔案：`auto_summary.py`
 - 每 5 回合或 phase 轉換時，背景生成 JSON 摘要
+- 對話壓縮（`compaction.py`）在送摘要前也會移除 GM 的「可選行動」區塊，避免選項被固化進長期 recap。
 
 ---
 
