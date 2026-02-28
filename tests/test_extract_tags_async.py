@@ -389,3 +389,38 @@ class TestAsyncBranchTitle:
 
         tree = json.loads(tree_path.read_text(encoding="utf-8"))
         assert tree["branches"]["main"]["title"] == "原始標題"  # Not changed
+
+
+# ===================================================================
+# NPC tier extraction/normalization
+# ===================================================================
+
+
+class TestNpcTier:
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_extract_prompt_includes_tier_schema(self, mock_llm, story_id, setup_story):
+        """Extraction prompt should ask for tier field with allowlist format."""
+        mock_llm.return_value = json.dumps({"npcs": []})
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
+
+        prompt = mock_llm.call_args[0][0]
+        assert '"tier": "D-~S+ 或 null"' in prompt
+        assert "D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+" in prompt
+
+    def test_save_npc_normalizes_tier_value(self, story_id, setup_story):
+        """_save_npc should normalize variants like 's-級' to allowlist value."""
+        app_module._save_npc(story_id, {"name": "審判暴君", "role": "敵人", "tier": " s-級 "}, "main")
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["tier"] == "S-"
+
+    def test_invalid_tier_does_not_overwrite_existing(self, story_id, setup_story):
+        """Invalid tier should be ignored and preserve previous valid tier."""
+        app_module._save_npc(story_id, {"name": "阿豪", "role": "隊友", "tier": "B+"}, "main")
+        app_module._save_npc(story_id, {"name": "阿豪", "role": "隊友", "tier": "SSS"}, "main")
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["tier"] == "B+"

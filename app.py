@@ -538,6 +538,36 @@ def _rel_to_str(val) -> str:
     return val or ""
 
 
+_NPC_TIER_ALLOWLIST = {
+    "D-", "D", "D+",
+    "C-", "C", "C+",
+    "B-", "B", "B+",
+    "A-", "A", "A+",
+    "S-", "S", "S+",
+}
+_NPC_TIER_TRANSLATION = str.maketrans({
+    "－": "-",
+    "—": "-",
+    "–": "-",
+    "−": "-",
+    "﹣": "-",
+    "ー": "-",
+    "＋": "+",
+})
+
+
+def _normalize_npc_tier(raw_tier: object) -> str | None:
+    """Normalize tier text to allowlist value (D-..S+)."""
+    if not isinstance(raw_tier, str):
+        return None
+    tier = raw_tier.strip().upper().translate(_NPC_TIER_TRANSLATION)
+    if not tier:
+        return None
+    tier = tier.replace("級", "").replace("级", "")
+    tier = tier.replace(" ", "").replace("\u3000", "")
+    return tier if tier in _NPC_TIER_ALLOWLIST else None
+
+
 def _classify_npc(npc: dict, rels: dict) -> str:
     """Classify an NPC into a relationship category.
 
@@ -626,7 +656,15 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
             name = npc.get("name", "?")
             cat = _classify_npc(npc, rels)
             rel = _rel_to_str(rels.get(name)) or npc.get("relationship_to_player", "")
-            entry = f"{name}（{rel}）" if rel else name
+            tier = _normalize_npc_tier(npc.get("tier"))
+            if rel and tier:
+                entry = f"{name}（{rel}·{tier}級）"
+            elif rel:
+                entry = f"{name}（{rel}）"
+            elif tier:
+                entry = f"{name}（{tier}級）"
+            else:
+                entry = name
             groups.setdefault(cat, []).append(entry)
         labels = {"ally": "隊友", "hostile": "敵對", "captured": "俘虜",
                   "dead": "已故", "neutral": "其他NPC"}
@@ -842,9 +880,18 @@ def _load_npcs(story_id: str, branch_id: str = "main") -> list[dict]:
 def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
     """Save or update an NPC entry. Matches by 'name' field."""
     npcs = _load_npcs(story_id, branch_id)
+    npc_data = dict(npc_data)
     name = npc_data.get("name", "").strip()
     if not name:
         return
+
+    # Normalize optional tier field (invalid tier values are ignored).
+    if "tier" in npc_data:
+        normalized_tier = _normalize_npc_tier(npc_data.get("tier"))
+        if normalized_tier:
+            npc_data["tier"] = normalized_tier
+        else:
+            npc_data.pop("tier", None)
 
     # Generate id if not present
     if "id" not in npc_data:
@@ -876,7 +923,9 @@ def _build_npc_text(story_id: str, branch_id: str = "main") -> str:
 
     lines = []
     for npc in npcs:
-        lines.append(f"### {npc.get('name', '?')}（{npc.get('role', '?')}）")
+        tier = _normalize_npc_tier(npc.get("tier"))
+        tier_label = f"【{tier} 級】" if tier else ""
+        lines.append(f"### {npc.get('name', '?')}（{npc.get('role', '?')}）{tier_label}")
         if npc.get("appearance"):
             lines.append(f"- 外觀：{npc['appearance']}")
         p = npc.get("personality", {})
@@ -1715,7 +1764,9 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "可用狀態：planted/triggered/resolved\n\n"
                 "## 3. NPC 資料（npcs）\n"
                 "提取首次登場或有重大變化的 NPC。\n"
-                '格式：[{{"name": "名字", "role": "定位", "appearance": "外觀", '
+                '- tier：戰力等級（D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+）。'
+                "只有在文本明確提及或可直接判定時才填，否則用 null，不要猜測。\n"
+                '格式：[{{"name": "名字", "role": "定位", "tier": "D-~S+ 或 null", "appearance": "外觀", '
                 '"personality": {{"openness": N, "conscientiousness": N, "extraversion": N, '
                 '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
                 "## 4. 角色狀態變化（state）\n"
@@ -3023,6 +3074,31 @@ def _build_augmented_message(
     activities = get_recent_activities(story_id, branch_id, limit=2)
     if activities:
         parts.append(activities)
+
+    # Tier reminder — inject only when known-tier ally/hostile NPCs exist.
+    if character_state:
+        rels = character_state.get("relationships", {})
+        if not isinstance(rels, dict):
+            rels = {}
+        tier_entries = []
+        for npc in _load_npcs(story_id, branch_id):
+            tier = _normalize_npc_tier(npc.get("tier"))
+            if not tier:
+                continue
+            cat = _classify_npc(npc, rels)
+            if cat not in ("hostile", "ally"):
+                continue
+            cat_label = "敵對" if cat == "hostile" else "隊友"
+            tier_entries.append(f"{npc.get('name', '?')}（{cat_label}·{tier}級）")
+        if tier_entries:
+            parts.append(
+                "\n".join([
+                    "[戰力等級提醒]",
+                    f"- 已知戰力單位：{'、'.join(tier_entries)}",
+                    "- 同級可拉鋸，跨一級低級方明顯劣勢，跨兩級接近碾壓。",
+                    "- +/- 只影響同級內強弱；高階能力需呈現代價或限制。",
+                ])
+            )
 
     # Fate roll (skip for /gm commands and when fate mode is off)
     dice_result = None

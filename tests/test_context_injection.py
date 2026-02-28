@@ -174,3 +174,79 @@ class TestBuildStorySystemPrompt:
             story_id, "{}", branch_id="main"
         )
         assert "尚無回顧" in prompt
+
+
+# ===================================================================
+# NPC tier display + reminder injection
+# ===================================================================
+
+
+class TestNpcTierDisplay:
+    def test_build_npc_text_shows_tier_label(self, story_id, setup_story):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "npcs.json").write_text(json.dumps([
+            {"name": "阿豪", "role": "隊友", "tier": "B+"},
+            {"name": "路人", "role": "中立"},
+        ], ensure_ascii=False), encoding="utf-8")
+
+        text = app_module._build_npc_text(story_id, "main")
+        assert "### 阿豪（隊友）【B+ 級】" in text
+        assert "### 路人（中立）" in text
+
+    def test_build_critical_facts_shows_tier_suffix(self, story_id, setup_story):
+        state = {
+            "current_phase": "副本中",
+            "relationships": {"阿豪": "信任", "審判暴君": "敵對"},
+        }
+        npcs = [
+            {"name": "阿豪", "role": "隊友", "tier": "B+"},
+            {"name": "審判暴君", "role": "Boss", "tier": "S-"},
+        ]
+
+        facts = app_module._build_critical_facts(story_id, "main", state, npcs)
+        assert "阿豪（信任·B+級）" in facts
+        assert "審判暴君（敵對·S-級）" in facts
+
+
+class TestTierReminderInjection:
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_injects_tier_reminder_for_known_ally_hostile(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story
+    ):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "npcs.json").write_text(json.dumps([
+            {"name": "阿豪", "role": "隊友", "tier": "B+"},
+            {"name": "審判暴君", "role": "敵人", "tier": "S-"},
+            {"name": "路人", "role": "商人", "tier": "C"},
+        ], ensure_ascii=False), encoding="utf-8")
+
+        state = {
+            "current_phase": "副本中",
+            "relationships": {"阿豪": "信任", "審判暴君": "敵對"},
+        }
+        text, _ = app_module._build_augmented_message(story_id, "main", "我要進攻", state)
+        assert "[戰力等級提醒]" in text
+        assert "阿豪（隊友·B+級）" in text
+        assert "審判暴君（敵對·S-級）" in text
+
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_skips_tier_reminder_without_known_tier(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story
+    ):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "npcs.json").write_text(json.dumps([
+            {"name": "阿豪", "role": "隊友"},
+            {"name": "路人", "role": "商人", "tier": "未知"},
+        ], ensure_ascii=False), encoding="utf-8")
+
+        state = {"current_phase": "副本中", "relationships": {"阿豪": "信任"}}
+        text, _ = app_module._build_augmented_message(story_id, "main", "我要進攻", state)
+        assert "[戰力等級提醒]" not in text
