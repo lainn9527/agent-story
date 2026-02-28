@@ -9,6 +9,7 @@ Storage: branches/<bid>/conversation_recap.json
 import json
 import logging
 import os
+import re
 import threading
 from datetime import datetime, timezone
 
@@ -61,6 +62,12 @@ _META_COMPACT_PROMPT = """\
 ---
 {recap}
 """
+
+# Strip GM choice scaffolding from recap source so it doesn't become long-term memory.
+_CHOICE_BLOCK_RE = re.compile(
+    r"(?:^|\n)\*{0,2}\s*可選行動\s*[:：]\s*\*{0,2}\s*(?:\n.*)?\Z",
+    re.DOTALL,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +172,8 @@ def _format_messages(messages: list[dict]) -> str:
     for msg in messages:
         prefix = "【玩家】" if msg.get("role") == "user" else "【GM】"
         content = msg.get("content", "")
+        if msg.get("role") != "user":
+            content = _CHOICE_BLOCK_RE.sub("", content).rstrip()
         # Truncate very long messages
         if len(content) > 1000:
             content = content[:1000] + "…（略）"

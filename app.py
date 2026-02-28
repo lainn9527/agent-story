@@ -3518,6 +3518,13 @@ _CONTEXT_ECHO_RE = re.compile(
     re.DOTALL,
 )
 
+# Trailing choice section generated for the player UI.
+# Kept in stored transcript but stripped from model-facing "recent" context.
+_CHOICE_BLOCK_RE = re.compile(
+    r"(?:^|\n)\*{0,2}\s*可選行動\s*[:：]\s*\*{0,2}\s*(?:\n.*)?\Z",
+    re.DOTALL,
+)
+
 # Pattern to strip fate direction labels from GM text in conversation history
 # Matches both full-width【】and half-width[] brackets, with optional ### heading
 # and ** bold markers.  Examples:
@@ -3541,6 +3548,36 @@ def _strip_fate_from_messages(messages: list[dict]) -> list[dict]:
         if _FATE_LABEL_RE.search(content):
             m = {**m, "content": _FATE_LABEL_RE.sub("", content).strip()}
         cleaned.append(m)
+    return cleaned
+
+
+def _strip_choice_block(text: str) -> str:
+    """Remove trailing '可選行動' section from a GM message."""
+    if not text:
+        return text
+    return _CHOICE_BLOCK_RE.sub("", text).rstrip()
+
+
+def _strip_choices_from_messages(messages: list[dict]) -> list[dict]:
+    """Return a shallow copy of messages with GM choice blocks removed."""
+    cleaned = []
+    for m in messages:
+        if m.get("role") == "user":
+            cleaned.append(m)
+            continue
+        content = m.get("content", "")
+        stripped = _strip_choice_block(content)
+        if stripped != content:
+            m = {**m, "content": stripped}
+        cleaned.append(m)
+    return cleaned
+
+
+def _sanitize_recent_messages(messages: list[dict], *, strip_fate: bool) -> list[dict]:
+    """Strip non-narrative scaffolding from recent messages before model input."""
+    cleaned = _strip_choices_from_messages(messages)
+    if strip_fate:
+        cleaned = _strip_fate_from_messages(cleaned)
     return cleaned
 
 
@@ -4024,9 +4061,10 @@ def api_send():
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     # 3. Gather recent context
-    recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    if not get_fate_mode(_story_dir(story_id), branch_id):
-        recent = _strip_fate_from_messages(recent)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
 
     # 3b. Search relevant lore/events/activities and prepend to user message
     t0 = time.time()
@@ -4166,9 +4204,10 @@ def api_send_stream():
     )
 
     # 3. Gather recent context
-    recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    if not get_fate_mode(_story_dir(story_id), branch_id):
-        recent = _strip_fate_from_messages(recent)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(
         story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc
@@ -4625,9 +4664,10 @@ def api_branches_edit():
     system_prompt = _build_story_system_prompt(
         story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
-    recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    if not get_fate_mode(_story_dir(story_id), branch_id):
-        recent = _strip_fate_from_messages(recent)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
@@ -4801,9 +4841,10 @@ def api_branches_edit_stream():
     system_prompt = _build_story_system_prompt(
         story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
-    recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    if not get_fate_mode(_story_dir(story_id), branch_id):
-        recent = _strip_fate_from_messages(recent)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_edit, dice_result = _build_augmented_message(
         story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc
@@ -4973,9 +5014,10 @@ def api_branches_regenerate():
     system_prompt = _build_story_system_prompt(
         story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
-    recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    if not get_fate_mode(_story_dir(story_id), branch_id):
-        recent = _strip_fate_from_messages(recent)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     t0 = time.time()
@@ -5129,9 +5171,10 @@ def api_branches_regenerate_stream():
     system_prompt = _build_story_system_prompt(
         story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
-    recent = full_timeline[-RECENT_MESSAGE_COUNT:]
-    if not get_fate_mode(_story_dir(story_id), branch_id):
-        recent = _strip_fate_from_messages(recent)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_regen, dice_result = _build_augmented_message(
         story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc
