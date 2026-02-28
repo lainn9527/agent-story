@@ -67,6 +67,7 @@ from lore_organizer import (
     get_lore_lock, try_classify_topic, build_prefix_registry, invalidate_prefix_cache,
     should_organize, organize_lore_async,
 )
+from llm_trace import write_trace as write_llm_trace
 from gm_cheats import (
     is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats,
     get_dice_always_success, set_dice_always_success,
@@ -89,6 +90,11 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
 STORIES_REGISTRY_PATH = os.path.join(DATA_DIR, "stories.json")
+LLM_TRACE_ENABLED = os.environ.get("LLM_TRACE_ENABLED", "1").lower() not in {"0", "false", "off", "no"}
+try:
+    LLM_TRACE_RETENTION_DAYS = max(1, int(os.environ.get("LLM_TRACE_RETENTION_DAYS", "14")))
+except ValueError:
+    LLM_TRACE_RETENTION_DAYS = 14
 
 # Legacy paths — used only during migration
 CONVERSATION_PATH = os.path.join(BASE_DIR, "Grok_conversation.md")
@@ -118,6 +124,28 @@ def _log_llm_usage(story_id: str, call_type: str, elapsed_s: float, branch_id: s
         )
     except Exception as e:
         log.debug("usage_db: failed to log — %s", e)
+
+
+def _trace_llm(stage: str, story_id: str, branch_id: str = "",
+               message_index: int | None = None, payload: dict | None = None,
+               source: str = "", tags: dict | None = None):
+    """Best-effort structured LLM trace write. Never raises."""
+    if not LLM_TRACE_ENABLED:
+        return
+    try:
+        write_llm_trace(
+            data_dir=DATA_DIR,
+            story_id=story_id,
+            branch_id=branch_id,
+            message_index=message_index,
+            stage=stage,
+            payload=payload or {},
+            source=source,
+            tags=tags or {},
+            retention_days=LLM_TRACE_RETENTION_DAYS,
+        )
+    except Exception as e:
+        log.debug("llm_trace: write failed — %s", e)
 
 
 DEFAULT_CHARACTER_STATE = {
@@ -1546,9 +1574,25 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
         )
 
         try:
+            _trace_llm(
+                stage="state_normalize_request",
+                story_id=story_id,
+                branch_id=branch_id,
+                source="_normalize_unknown_state_keys",
+                payload={"prompt": prompt, "original_update": update},
+                tags={"mode": "oneshot"},
+            )
             t0 = time.time()
             result = call_oneshot(prompt)
             _log_llm_usage(story_id, "oneshot", time.time() - t0, branch_id=branch_id)
+            _trace_llm(
+                stage="state_normalize_response_raw",
+                story_id=story_id,
+                branch_id=branch_id,
+                source="_normalize_unknown_state_keys",
+                payload={"response": result, "usage": get_last_usage()},
+                tags={"mode": "oneshot"},
+            )
             if not result:
                 return
             result = result.strip()
@@ -1760,9 +1804,32 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
+            _trace_llm(
+                stage="extract_tags_request",
+                story_id=story_id,
+                branch_id=branch_id,
+                message_index=msg_index,
+                source="_extract_tags_async",
+                payload={
+                    "gm_text": gm_text,
+                    "prompt": prompt,
+                    "skip_state": skip_state,
+                    "skip_time": skip_time,
+                },
+                tags={"mode": "oneshot"},
+            )
             t0 = time.time()
             result = call_oneshot(prompt)
             _log_llm_usage(story_id, "oneshot", time.time() - t0, branch_id=branch_id)
+            _trace_llm(
+                stage="extract_tags_response_raw",
+                story_id=story_id,
+                branch_id=branch_id,
+                message_index=msg_index,
+                source="_extract_tags_async",
+                payload={"response": result, "usage": get_last_usage()},
+                tags={"mode": "oneshot"},
+            )
             if not result:
                 return
             result = result.strip()
@@ -3210,6 +3277,22 @@ def api_send():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     # 4. Call Claude (stateless)
+    gm_msg_index = len(full_timeline)
+    _trace_llm(
+        stage="gm_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/send",
+        payload={
+            "user_text": user_text,
+            "augmented_text": augmented_text,
+            "system_prompt": system_prompt,
+            "recent": recent,
+            "dice_result": dice_result,
+        },
+        tags={"mode": "sync"},
+    )
     t0 = time.time()
     gm_response, _ = call_claude_gm(
         augmented_text, system_prompt, recent, session_id=None
@@ -3217,10 +3300,18 @@ def api_send():
     gm_elapsed = time.time() - t0
     log.info("  claude_call: %.1fs", gm_elapsed)
     _log_llm_usage(story_id, "gm", gm_elapsed, branch_id=branch_id)
+    _trace_llm(
+        stage="gm_response_raw",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/send",
+        payload={"response": gm_response, "usage": get_last_usage()},
+        tags={"mode": "sync"},
+    )
 
     # 5. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
     t0 = time.time()
-    gm_msg_index = len(full_timeline)
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
     log.info("  parse_tags: %.0fms", (time.time() - t0) * 1000)
 
@@ -3323,6 +3414,21 @@ def api_send_stream():
         _save_json(delta_path, delta_msgs)
 
     gm_msg_index = len(full_timeline)
+    _trace_llm(
+        stage="gm_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/send/stream",
+        payload={
+            "user_text": user_text,
+            "augmented_text": augmented_text,
+            "system_prompt": system_prompt,
+            "recent": recent,
+            "dice_result": dice_result,
+        },
+        tags={"mode": "stream"},
+    )
 
     def generate():
         t_start = time.time()
@@ -3341,6 +3447,15 @@ def api_send_stream():
                     gm_response = payload["response"]
                     _log_llm_usage(story_id, "gm_stream", time.time() - t_start,
                                    branch_id=branch_id, usage=payload.get("usage"))
+                    _trace_llm(
+                        stage="gm_response_raw",
+                        story_id=story_id,
+                        branch_id=branch_id,
+                        message_index=gm_msg_index,
+                        source="/api/send/stream",
+                        payload={"response": gm_response, "usage": payload.get("usage")},
+                        tags={"mode": "stream"},
+                    )
 
                     # Extract tags
                     gm_response, image_info, snapshots = _process_gm_response(
@@ -3732,6 +3847,21 @@ def api_branches_edit():
         _save_json(_story_messages_path(story_id, branch_id), delta)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
+    _trace_llm(
+        stage="gm_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/branches/edit",
+        payload={
+            "user_text": edited_message,
+            "augmented_text": augmented_edit,
+            "system_prompt": system_prompt,
+            "recent": recent,
+            "dice_result": dice_result,
+        },
+        tags={"mode": "sync"},
+    )
     t0 = time.time()
     try:
         gm_response, _ = call_claude_gm(
@@ -3744,6 +3874,15 @@ def api_branches_edit():
     edit_elapsed = time.time() - t0
     log.info("  claude_call: %.1fs", edit_elapsed)
     _log_llm_usage(story_id, "gm", edit_elapsed, branch_id=branch_id)
+    _trace_llm(
+        stage="gm_response_raw",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/branches/edit",
+        payload={"response": gm_response, "usage": get_last_usage()},
+        tags={"mode": "sync"},
+    )
 
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
 
@@ -3873,6 +4012,22 @@ def api_branches_edit_stream():
         user_msg["dice"] = dice_result
         _save_json(_story_messages_path(story_id, branch_id), delta)
 
+    _trace_llm(
+        stage="gm_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/branches/edit/stream",
+        payload={
+            "user_text": edited_message,
+            "augmented_text": augmented_edit,
+            "system_prompt": system_prompt,
+            "recent": recent,
+            "dice_result": dice_result,
+        },
+        tags={"mode": "stream"},
+    )
+
     def generate():
         t_start = time.time()
         if dice_result:
@@ -3891,6 +4046,15 @@ def api_branches_edit_stream():
                     gm_response = payload["response"]
                     _log_llm_usage(story_id, "gm_stream", time.time() - t_start,
                                    branch_id=branch_id, usage=payload.get("usage"))
+                    _trace_llm(
+                        stage="gm_response_raw",
+                        story_id=story_id,
+                        branch_id=branch_id,
+                        message_index=gm_msg_index,
+                        source="/api/branches/edit/stream",
+                        payload={"response": gm_response, "usage": payload.get("usage")},
+                        tags={"mode": "stream"},
+                    )
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -4014,6 +4178,23 @@ def api_branches_regenerate():
     augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
+    gm_msg_index = branch_point_index + 1
+    _trace_llm(
+        stage="gm_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/branches/regenerate",
+        payload={
+            "user_text": user_msg_content,
+            "augmented_text": augmented_regen,
+            "system_prompt": system_prompt,
+            "recent": recent,
+            "dice_result": dice_result,
+        },
+        tags={"mode": "sync"},
+    )
+
     t0 = time.time()
     try:
         gm_response, _ = call_claude_gm(
@@ -4026,8 +4207,16 @@ def api_branches_regenerate():
     regen_elapsed = time.time() - t0
     log.info("  claude_call: %.1fs", regen_elapsed)
     _log_llm_usage(story_id, "gm", regen_elapsed, branch_id=branch_id)
+    _trace_llm(
+        stage="gm_response_raw",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/branches/regenerate",
+        payload={"response": gm_response, "usage": get_last_usage()},
+        tags={"mode": "sync"},
+    )
 
-    gm_msg_index = branch_point_index + 1
     gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
 
     gm_msg = {
@@ -4134,6 +4323,21 @@ def api_branches_regenerate_stream():
     augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
 
     gm_msg_index = branch_point_index + 1
+    _trace_llm(
+        stage="gm_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        message_index=gm_msg_index,
+        source="/api/branches/regenerate/stream",
+        payload={
+            "user_text": user_msg_content,
+            "augmented_text": augmented_regen,
+            "system_prompt": system_prompt,
+            "recent": recent,
+            "dice_result": dice_result,
+        },
+        tags={"mode": "stream"},
+    )
 
     def generate():
         t_start = time.time()
@@ -4153,6 +4357,15 @@ def api_branches_regenerate_stream():
                     gm_response = payload["response"]
                     _log_llm_usage(story_id, "gm_stream", time.time() - t_start,
                                    branch_id=branch_id, usage=payload.get("usage"))
+                    _trace_llm(
+                        stage="gm_response_raw",
+                        story_id=story_id,
+                        branch_id=branch_id,
+                        message_index=gm_msg_index,
+                        source="/api/branches/regenerate/stream",
+                        payload={"response": gm_response, "usage": payload.get("usage")},
+                        tags={"mode": "stream"},
+                    )
 
                     gm_response, image_info, snapshots = _process_gm_response(
                         gm_response, story_id, branch_id, gm_msg_index
@@ -4932,9 +5145,25 @@ def api_lore_promote_review():
         "只輸出 JSON。"
     )
 
+    _trace_llm(
+        stage="lore_promote_review_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        source="/api/lore/promote/review",
+        payload={"prompt": prompt, "entry_count": len(branch_lore)},
+        tags={"mode": "oneshot"},
+    )
     t0 = time.time()
     result = call_oneshot(prompt)
     _log_llm_usage(story_id, "oneshot", time.time() - t0)
+    _trace_llm(
+        stage="lore_promote_review_response_raw",
+        story_id=story_id,
+        branch_id=branch_id,
+        source="/api/lore/promote/review",
+        payload={"response": result, "usage": get_last_usage()},
+        tags={"mode": "oneshot"},
+    )
 
     if not result:
         return jsonify({"ok": False, "error": "LLM call failed"}), 500
@@ -5103,6 +5332,19 @@ def api_lore_chat_stream():
     # Extract prior messages and last user message (safe access)
     prior = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages[:-1]]
     last_user_msg = messages[-1].get("content", "")
+    _trace_llm(
+        stage="lore_chat_request",
+        story_id=story_id,
+        branch_id="",
+        source="/api/lore/chat/stream",
+        payload={
+            "user_text": last_user_msg,
+            "system_prompt": lore_system,
+            "recent": prior,
+            "tools": tools,
+        },
+        tags={"mode": "stream"},
+    )
 
     def generate():
         t_start = time.time()
@@ -5120,6 +5362,14 @@ def api_lore_chat_stream():
                     _log_llm_usage(story_id, "lore_chat", time.time() - t_start,
                                    usage=payload.get("usage"))
                     full_response = payload.get("response", "")
+                    _trace_llm(
+                        stage="lore_chat_response_raw",
+                        story_id=story_id,
+                        branch_id="",
+                        source="/api/lore/chat/stream",
+                        payload={"response": full_response, "usage": payload.get("usage")},
+                        tags={"mode": "stream"},
+                    )
                     # Parse LORE_PROPOSE tags
                     proposals = []
                     for m in _LORE_PROPOSE_RE.finditer(full_response):
