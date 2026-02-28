@@ -42,6 +42,8 @@ _NPC_TIER_TRANSLATION = str.maketrans({
     "ー": "-",
     "＋": "+",
 })
+_NPC_LIFECYCLE_ACTIVE = "active"
+_NPC_LIFECYCLE_ARCHIVED = "archived"
 
 
 def _db_path(story_id: str, branch_id: str) -> str:
@@ -104,6 +106,22 @@ def _rel_to_str(val) -> str:
     if val is None:
         return ""
     return str(val).strip()
+
+
+def _normalize_npc_lifecycle_status(raw_status: object) -> str:
+    if not isinstance(raw_status, str):
+        return _NPC_LIFECYCLE_ACTIVE
+    text = raw_status.strip().lower()
+    if text in {"archived", "archive", "封存", "已封存", "归档", "歸檔"}:
+        return _NPC_LIFECYCLE_ARCHIVED
+    return _NPC_LIFECYCLE_ACTIVE
+
+
+def _row_has_archived_tag(tags: object) -> bool:
+    if not isinstance(tags, str):
+        return False
+    parts = {p.strip().upper() for p in tags.split("|") if p.strip()}
+    return "ARCHIVED" in parts
 
 
 def state_db_exists(story_id: str, branch_id: str) -> bool:
@@ -373,7 +391,10 @@ def rebuild_from_json(
             name = (npc.get("name") or "").strip()
             if not name:
                 continue
-            npc_rows.append((name, build_npc_content(npc), "NPC"))
+            tags = "NPC"
+            if _normalize_npc_lifecycle_status(npc.get("lifecycle_status")) == _NPC_LIFECYCLE_ARCHIVED:
+                tags = "NPC|ARCHIVED"
+            npc_rows.append((name, build_npc_content(npc), tags))
 
     replace_categories_batch(
         story_id,
@@ -489,6 +510,8 @@ def search_state(
         category = row["category"] or ""
         if key in forced_keys:
             forced.append(row)
+            continue
+        if category == "npc" and _row_has_archived_tag(row["tags"]):
             continue
         score = _score_row(row, keywords)
         score = _apply_context_boost(score, category, context)

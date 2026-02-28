@@ -9,6 +9,7 @@ import re
 import shutil
 import threading
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 
@@ -662,6 +663,23 @@ _NPC_TIER_TRANSLATION = str.maketrans({
     "ー": "-",
     "＋": "+",
 })
+_NPC_ARCHIVE_KEYWORDS = (
+    "已損毀",
+    "威脅解除",
+    "已退場",
+    "已失效",
+    "已封印",
+    "已消散",
+    "已離隊",
+)
+_NPC_UNARCHIVE_KEYWORDS = (
+    "修復",
+    "復活",
+    "再現身",
+    "重新啟用",
+    "解除封印",
+)
+_NPC_NAME_R1_PUNCT_RE = re.compile(r"[ \t\r\n\u3000\.\,，。:：;；!！?？'\"“”‘’`~·•・\-—–−_()（）\[\]【】{}<>《》〈〉/\\|+]+")
 
 
 def _normalize_npc_tier(raw_tier: object) -> str | None:
@@ -674,6 +692,70 @@ def _normalize_npc_tier(raw_tier: object) -> str | None:
     tier = tier.replace("級", "").replace("级", "")
     tier = tier.replace(" ", "").replace("\u3000", "")
     return tier if tier in _NPC_TIER_ALLOWLIST else None
+
+
+def _normalize_npc_name_r1(name: object) -> str:
+    """R1 normalization: NFKC + remove spaces/punctuation + casefold."""
+    if not isinstance(name, str):
+        return ""
+    normalized = unicodedata.normalize("NFKC", name).strip()
+    if not normalized:
+        return ""
+    normalized = _NPC_NAME_R1_PUNCT_RE.sub("", normalized)
+    return normalized.casefold()
+
+
+def _resolve_npc_identity(name: str, existing_npcs: list[dict]) -> str | None:
+    """Resolve incoming name against existing NPC identity (exact, then R1-equal)."""
+    candidate = (name or "").strip()
+    if not candidate:
+        return None
+
+    for npc in existing_npcs:
+        if (npc.get("name") or "").strip() == candidate:
+            return npc.get("name")
+
+    normalized_candidate = _normalize_npc_name_r1(candidate)
+    if not normalized_candidate:
+        return None
+    for npc in existing_npcs:
+        existing_name = (npc.get("name") or "").strip()
+        if not existing_name:
+            continue
+        if _normalize_npc_name_r1(existing_name) == normalized_candidate:
+            return existing_name
+    return None
+
+
+def _normalize_npc_lifecycle_status(raw_status: object) -> str | None:
+    if not isinstance(raw_status, str):
+        return None
+    text = raw_status.strip().lower()
+    if not text:
+        return None
+    if text in {"active", "啟用", "活动", "活動"}:
+        return "active"
+    if text in {"archived", "archive", "封存", "已封存", "归档", "歸檔"}:
+        return "archived"
+    return None
+
+
+def _derive_npc_lifecycle_from_current_status(
+    current_status: object,
+    existing_status: object,
+) -> tuple[str, str | None]:
+    """Derive lifecycle from current_status only; fallback to existing lifecycle."""
+    existing = _normalize_npc_lifecycle_status(existing_status) or "active"
+    status_text = str(current_status or "").strip()
+    if not status_text:
+        return existing, None
+    for kw in _NPC_UNARCHIVE_KEYWORDS:
+        if kw in status_text:
+            return "active", kw
+    for kw in _NPC_ARCHIVE_KEYWORDS:
+        if kw in status_text:
+            return "archived", kw
+    return existing, None
 
 
 def _classify_npc(npc: dict, rels: dict) -> str:
@@ -871,13 +953,16 @@ def _sync_state_db_npc_entry(story_id: str, branch_id: str, npc: dict):
     name = (npc.get("name") or "").strip()
     if not name:
         return
+    tags = "NPC"
+    if _normalize_npc_lifecycle_status(npc.get("lifecycle_status")) == "archived":
+        tags = "NPC|ARCHIVED"
     upsert_state_entry(
         story_id,
         branch_id,
         category="npc",
         entry_key=name,
         content=_build_npc_state_entry_content(npc),
-        tags="NPC",
+        tags=tags,
     )
 
 
@@ -1198,18 +1283,33 @@ def _story_npcs_path(story_id: str, branch_id: str = "main") -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "npcs.json")
 
 
-def _load_npcs(story_id: str, branch_id: str = "main") -> list[dict]:
+def _load_npcs(story_id: str, branch_id: str = "main", include_archived: bool = False) -> list[dict]:
     path = _story_npcs_path(story_id, branch_id)
-    return _load_json(path, [])
+    npcs = _load_json(path, [])
+    if include_archived:
+        return npcs
+    active_npcs = []
+    for npc in npcs:
+        if not isinstance(npc, dict):
+            continue
+        if _normalize_npc_lifecycle_status(npc.get("lifecycle_status")) == "archived":
+            continue
+        active_npcs.append(npc)
+    return active_npcs
 
 
 def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
     """Save or update an NPC entry. Matches by 'name' field."""
-    npcs = _load_npcs(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id, include_archived=True)
     npc_data = dict(npc_data)  # Shallow copy: normalization below must not mutate caller data.
     name = npc_data.get("name", "").strip()
     if not name:
         return
+
+    matched_name = _resolve_npc_identity(name, npcs)
+    if matched_name and matched_name != name:
+        name = matched_name
+        npc_data["name"] = matched_name
 
     # Normalize optional tier field (invalid tier values are ignored).
     if "tier" in npc_data:
@@ -1219,18 +1319,60 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
         else:
             npc_data.pop("tier", None)
 
-    # Generate id if not present
-    if "id" not in npc_data:
-        npc_data["id"] = "npc_" + re.sub(r'\W+', '', name)[:20]
-
+    existing_index = None
+    existing_npc = None
     for i, existing in enumerate(npcs):
         if existing.get("name") == name:
-            # Merge: preserve fields not in update
-            merged = {**existing, **npc_data}
-            npcs[i] = merged
-            _save_json(_story_npcs_path(story_id, branch_id), npcs)
-            _sync_state_db_npc_entry(story_id, branch_id, merged)
-            return
+            existing_index = i
+            existing_npc = existing
+            break
+
+    explicit_lifecycle = _normalize_npc_lifecycle_status(npc_data.get("lifecycle_status"))
+    existing_lifecycle = _normalize_npc_lifecycle_status(
+        existing_npc.get("lifecycle_status") if existing_npc else None
+    )
+    if explicit_lifecycle:
+        npc_data["lifecycle_status"] = explicit_lifecycle
+        if explicit_lifecycle == "active":
+            npc_data["archived_reason"] = None
+        else:
+            explicit_reason = str(npc_data.get("archived_reason") or "").strip()
+            if explicit_reason:
+                npc_data["archived_reason"] = explicit_reason
+            elif existing_npc and existing_npc.get("archived_reason"):
+                npc_data["archived_reason"] = existing_npc.get("archived_reason")
+            else:
+                npc_data["archived_reason"] = "explicit"
+    else:
+        derived_lifecycle, matched_kw = _derive_npc_lifecycle_from_current_status(
+            npc_data.get("current_status"),
+            existing_lifecycle,
+        )
+        npc_data["lifecycle_status"] = derived_lifecycle
+        if derived_lifecycle == "archived":
+            if matched_kw:
+                npc_data["archived_reason"] = f"current_status:{matched_kw}"
+            elif existing_npc and existing_npc.get("archived_reason"):
+                npc_data["archived_reason"] = existing_npc.get("archived_reason")
+            else:
+                npc_data["archived_reason"] = "current_status"
+        else:
+            npc_data["archived_reason"] = None
+
+    # Generate id if not present
+    if "id" not in npc_data:
+        if existing_npc and existing_npc.get("id"):
+            npc_data["id"] = existing_npc.get("id")
+        else:
+            npc_data["id"] = "npc_" + re.sub(r'\W+', '', name)[:20]
+
+    if existing_index is not None:
+        # Merge: preserve fields not in update
+        merged = {**existing_npc, **npc_data}
+        npcs[existing_index] = merged
+        _save_json(_story_npcs_path(story_id, branch_id), npcs)
+        _sync_state_db_npc_entry(story_id, branch_id, merged)
+        return
 
     npcs.append(npc_data)
     _save_json(_story_npcs_path(story_id, branch_id), npcs)
@@ -1239,7 +1381,7 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
 
 def _copy_npcs_to_branch(story_id: str, from_branch_id: str, to_branch_id: str):
     """Copy NPC data from parent branch to new branch."""
-    npcs = _load_npcs(story_id, from_branch_id)
+    npcs = _load_npcs(story_id, from_branch_id, include_archived=True)
     _save_json(_story_npcs_path(story_id, to_branch_id), npcs)
 
 
@@ -3646,7 +3788,7 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     # Build snapshots for branch forking accuracy
     snapshots = {
         "state_snapshot": _load_character_state(story_id, branch_id),
-        "npcs_snapshot": _load_npcs(story_id, branch_id),
+        "npcs_snapshot": _load_npcs(story_id, branch_id, include_archived=True),
         "world_day_snapshot": get_world_day(story_id, branch_id),
         "dungeon_progress_snapshot": get_dungeon_progress_snapshot(story_id, branch_id),
     }
@@ -3720,7 +3862,7 @@ def _sync_gm_message_snapshot_after_async(story_id: str, branch_id: str, msg_ind
                 if msg.get("index") != msg_index or msg.get("role") != "gm":
                     continue
                 msg["state_snapshot"] = _load_character_state(story_id, branch_id)
-                msg["npcs_snapshot"] = _load_npcs(story_id, branch_id)
+                msg["npcs_snapshot"] = _load_npcs(story_id, branch_id, include_archived=True)
                 msg["world_day_snapshot"] = get_world_day(story_id, branch_id)
                 msg["dungeon_progress_snapshot"] = get_dungeon_progress_snapshot(story_id, branch_id)
                 msg["snapshot_async_synced_at"] = datetime.now(timezone.utc).isoformat()
@@ -3781,7 +3923,8 @@ def _build_augmented_message(
     if character_state:
         if npcs is None:
             npcs = _load_npcs(story_id, branch_id)
-        must_include = _extract_state_must_include_keys(user_text, character_state, npcs)
+        all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
+        must_include = _extract_state_must_include_keys(user_text, character_state, all_npcs)
         state_block = search_state_entries(
             story_id,
             branch_id,
@@ -4347,7 +4490,7 @@ def api_state_rebuild():
         tree = _load_tree(story_id)
         branch_id = tree.get("active_branch_id", "main")
     state = _load_character_state(story_id, branch_id)
-    npcs = _load_npcs(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id, include_archived=True)
     count = rebuild_state_db_from_json(story_id, branch_id, state=state, npcs=npcs)
     summary = get_state_summary(story_id, branch_id)
     return jsonify({"ok": True, "branch_id": branch_id, "count": count, "summary": summary})
@@ -6315,7 +6458,8 @@ def api_npcs():
     """Return all NPCs for the active story + branch."""
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
-    npcs = _load_npcs(story_id, branch_id)
+    include_archived = request.args.get("include_archived", "").strip().lower() in {"1", "true", "yes"}
+    npcs = _load_npcs(story_id, branch_id, include_archived=include_archived)
     return jsonify({"ok": True, "npcs": npcs})
 
 
@@ -6337,13 +6481,14 @@ def api_npcs_delete(npc_id):
     """Delete an NPC by id."""
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
-    npcs = _load_npcs(story_id, branch_id)
+    include_archived = request.args.get("include_archived", "").strip().lower() in {"1", "true", "yes"}
+    npcs = _load_npcs(story_id, branch_id, include_archived=True)
     removed_names = [n.get("name", "").strip() for n in npcs if n.get("id") == npc_id and n.get("name")]
     npcs = [n for n in npcs if n.get("id") != npc_id]
     _save_json(_story_npcs_path(story_id, branch_id), npcs)
     for name in removed_names:
         delete_state_entry(story_id, branch_id, category="npc", entry_key=name)
-    return jsonify({"ok": True, "npcs": npcs})
+    return jsonify({"ok": True, "npcs": _load_npcs(story_id, branch_id, include_archived=include_archived)})
 
 
 # ---------------------------------------------------------------------------
@@ -6458,7 +6603,7 @@ def api_saves_create():
 
     # Snapshot current state
     character_state = _load_character_state(story_id, branch_id)
-    npcs = _load_npcs(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id, include_archived=True)
     world_day = get_world_day(story_id, branch_id)
     recap = load_recap(story_id, branch_id)
 
