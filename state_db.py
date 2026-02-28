@@ -20,6 +20,12 @@ _CATEGORY_LABELS = {
     "system": "體系",
 }
 
+# NOTE:
+# These normalization helpers intentionally mirror app.py logic
+# (_NPC_TIER_ALLOWLIST/_NPC_TIER_TRANSLATION + _rel_to_str) to avoid
+# importing app.py (which would create circular coupling and heavy init side effects).
+# If tier format rules or relationship normalization change in app.py,
+# update this module in the same PR to keep rebuild path and dual-write path consistent.
 _NPC_TIER_ALLOWLIST = {
     "D-", "D", "D+",
     "C-", "C", "C+",
