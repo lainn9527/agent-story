@@ -3268,7 +3268,7 @@ def _strip_choices_from_messages(messages: list[dict]) -> list[dict]:
     """Return a shallow copy of messages with GM choice blocks removed."""
     cleaned = []
     for m in messages:
-        if m.get("role") != "gm":
+        if m.get("role") == "user":
             cleaned.append(m)
             continue
         content = m.get("content", "")

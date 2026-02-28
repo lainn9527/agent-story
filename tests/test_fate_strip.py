@@ -100,3 +100,13 @@ def test_sanitize_recent_removes_gm_choice_block_but_keeps_user_text():
     result = _sanitize_recent_messages(messages, strip_fate=False)
     assert result[0]["content"] == "你踏進走廊。"
     assert result[1]["content"] == "可選行動：我想自由行動"
+
+
+def test_sanitize_recent_removes_assistant_choice_block_for_legacy_history():
+    messages = [
+        {"role": "assistant", "content": "你站起身。\n\n**可選行動：**\n1. 觀察\n2. 前進"},
+        {"role": "user", "content": "我先觀察"},
+    ]
+    result = _sanitize_recent_messages(messages, strip_fate=False)
+    assert result[0]["content"] == "你站起身。"
+    assert result[1]["content"] == "我先觀察"
