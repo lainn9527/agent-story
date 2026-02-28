@@ -1,5 +1,26 @@
-data/
 __pycache__/
 llm_config.json
 server.log*
 server_stderr.log
+
+# === Data directory: whitelist story design files ===
+# Ignore everything in data/ by default
+data/*
+
+# Un-ignore stories directory structure
+!data/stories/
+data/stories/*
+!data/stories/*/
+
+# Ignore everything inside each story dir
+data/stories/*/*
+
+# Whitelist story design files (world-building / base lore)
+!data/stories/*/system_prompt.txt
+!data/stories/*/story_summary.txt
+!data/stories/*/character_schema.json
+!data/stories/*/default_character_state.json
+!data/stories/*/world_lore.json
+!data/stories/*/dungeons_template.json
+!data/stories/*/parsed_conversation.json
+!data/stories/*/nsfw_preferences.json
