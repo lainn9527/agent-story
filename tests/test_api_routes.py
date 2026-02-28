@@ -292,6 +292,70 @@ class TestBranchesAPI:
         branch_id = resp.get_json()["branch"]["id"]
         assert event_db.get_events(story_id, branch_id=branch_id, limit=20) == []
 
+    def test_create_branch_copies_gm_plan_with_event_relink(self, client, setup_story, story_id):
+        parent_event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "神秘符文", "description": "d", "status": "planted", "message_index": 1
+        }, "main")
+        main_plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        main_plan_path.write_text(json.dumps({
+            "arc": "主線弧線",
+            "next_beats": ["下一步"],
+            "must_payoff": [
+                {"event_title": "神秘符文", "event_id": parent_event_id, "ttl_turns": 3, "created_at_index": 1},
+            ],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches", json={"name": "帶計劃分支", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+
+        child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
+        assert child_plan_path.exists()
+        child_plan = json.loads(child_plan_path.read_text(encoding="utf-8"))
+        assert child_plan["arc"] == "主線弧線"
+        assert len(child_plan["must_payoff"]) == 1
+        child_event_id = child_plan["must_payoff"][0]["event_id"]
+        child_events = event_db.get_events(story_id, branch_id=child_id, limit=20)
+        child_event_map = {e["title"]: e["id"] for e in child_events}
+        assert child_event_id == child_event_map["神秘符文"]
+        assert child_event_id != parent_event_id
+
+    def test_create_branch_skips_future_gm_plan(self, client, setup_story, story_id):
+        event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "神秘符文", "description": "d", "status": "planted", "message_index": 3
+        }, "main")
+        main_plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        main_plan_path.write_text(json.dumps({
+            "arc": "未來弧線",
+            "next_beats": ["未來節點"],
+            "must_payoff": [
+                {"event_title": "神秘符文", "event_id": event_id, "ttl_turns": 3, "created_at_index": 3},
+            ],
+            "updated_at_index": 3,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches", json={"name": "過濾未來計劃", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+        child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
+        assert not child_plan_path.exists()
+
+    def test_create_blank_branch_does_not_copy_gm_plan(self, client, setup_story):
+        main_plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        main_plan_path.write_text(json.dumps({
+            "arc": "主線弧線",
+            "next_beats": ["下一步"],
+            "must_payoff": [],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/blank", json={"name": "空白計劃測試"})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+        child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
+        assert not child_plan_path.exists()
+
     def test_switch_branch(self, client, setup_story):
         # Create a branch first
         resp = client.post("/api/branches", json={"name": "切換用", "branch_point_index": 1})
@@ -520,6 +584,43 @@ class TestBranchesAPI:
         assert updated_tree["branches"]["leaf"].get("deleted") is True
         assert updated_tree["branches"]["sibling"].get("deleted") is True
 
+    def test_promote_copies_child_gm_plan_to_parent(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = {
+            "active_branch_id": "child",
+            "branches": {
+                "main": {"id": "main", "parent_branch_id": None, "branch_point_index": None},
+                "parent": {"id": "parent", "parent_branch_id": "main", "branch_point_index": 0},
+                "child": {"id": "child", "parent_branch_id": "parent", "branch_point_index": 1},
+            },
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+        (setup_story / "branches" / "parent").mkdir(parents=True, exist_ok=True)
+        (setup_story / "branches" / "child").mkdir(parents=True, exist_ok=True)
+
+        parent_plan_path = setup_story / "branches" / "parent" / "gm_plan.json"
+        child_plan_path = setup_story / "branches" / "child" / "gm_plan.json"
+        parent_plan_path.write_text(json.dumps({
+            "arc": "舊父分支計劃",
+            "next_beats": ["舊節點"],
+            "must_payoff": [],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+        child_plan_path.write_text(json.dumps({
+            "arc": "子分支新計劃",
+            "next_beats": ["新節點"],
+            "must_payoff": [],
+            "updated_at_index": 3,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/promote", json={"branch_id": "child"})
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        parent_plan = json.loads(parent_plan_path.read_text(encoding="utf-8"))
+        assert parent_plan["arc"] == "子分支新計劃"
+        assert parent_plan["next_beats"] == ["新節點"]
+
     def test_delete_main_blocked(self, client, setup_story):
         resp = client.delete("/api/branches/main")
         # Deleting main should fail
@@ -591,6 +692,66 @@ class TestBranchesAPI:
         assert main_map["同標題事件"]["status"] == "triggered"
         assert "子分支新事件" in main_map
         assert main_map["子分支新事件"]["branch_id"] == "main"
+
+    def test_merge_branch_overwrites_parent_gm_plan_and_relinks(self, client, setup_story, story_id):
+        main_event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "神秘符文", "description": "main", "status": "planted", "message_index": 1
+        }, "main")
+        main_plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        main_plan_path.write_text(json.dumps({
+            "arc": "主線計劃",
+            "next_beats": ["主線節點"],
+            "must_payoff": [
+                {"event_title": "神秘符文", "event_id": main_event_id, "ttl_turns": 3, "created_at_index": 1},
+            ],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches", json={"name": "合併計劃分支", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+
+        child_events = event_db.get_events(story_id, branch_id=child_id, limit=20)
+        child_event_id = next(e["id"] for e in child_events if e["title"] == "神秘符文")
+        child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
+        child_plan_path.write_text(json.dumps({
+            "arc": "子分支計劃",
+            "next_beats": ["子分支節點"],
+            "must_payoff": [
+                {"event_title": "神秘符文", "event_id": child_event_id, "ttl_turns": 4, "created_at_index": 2},
+            ],
+            "updated_at_index": 4,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        merge_resp = client.post("/api/branches/merge", json={"branch_id": child_id})
+        assert merge_resp.status_code == 200
+        assert merge_resp.get_json()["ok"] is True
+
+        merged_plan = json.loads(main_plan_path.read_text(encoding="utf-8"))
+        assert merged_plan["arc"] == "子分支計劃"
+        assert merged_plan["must_payoff"][0]["event_id"] == main_event_id
+        assert merged_plan["must_payoff"][0]["created_at_index"] == 2
+
+    def test_merge_branch_without_plan_clears_parent_plan(self, client, setup_story):
+        main_plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        main_plan_path.write_text(json.dumps({
+            "arc": "主線計劃",
+            "next_beats": ["主線節點"],
+            "must_payoff": [],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches", json={"name": "無計劃子分支", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+        child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
+        if child_plan_path.exists():
+            child_plan_path.unlink()
+
+        merge_resp = client.post("/api/branches/merge", json={"branch_id": child_id})
+        assert merge_resp.status_code == 200
+        assert merge_resp.get_json()["ok"] is True
+        assert not main_plan_path.exists()
 
     def test_edit_no_change_rejected(self, client, setup_story):
         """Editing a message with identical content should return 400."""

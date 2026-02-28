@@ -52,15 +52,20 @@
 1. `[相關世界設定]`（base lore 混合搜尋）
 2. `[相關分支設定]`（branch lore bigram 搜尋）
 3. `[相關事件追蹤]`（非 blank branch）
-4. `[NPC 近期動態]`
-5. `[相關角色狀態]`（state.db 檢索結果）
+4. `[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]`（`gm_plan.json`，非 blank branch）
+   - 顯示 `arc` + 最多 3 個 `next_beats` + 最多 2 個 `must_payoff`
+   - `remaining_turns` 於注入時計算：`ttl_turns - (current_index - payoff.created_at_index)`
+   - 只保留 `remaining_turns > 0` 的 payoff
+   - 注入段落硬上限 `GM_PLAN_CHAR_LIMIT`（預設 500 chars）
+5. `[NPC 近期動態]`
+6. `[相關角色狀態]`（state.db 檢索結果）
    - 預設檢索限流：總筆數最多 30、NPC 類別最多 10
    - `must_include_keys` 命中的條目先保留，再填入一般結果
    - archived NPC 預設不注入；玩家明確提名時可透過 `must_include_keys` 召回
-6. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
-7. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
-8. `---`
-9. 原始玩家輸入
+7. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
+8. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
+9. `---`
+10. 原始玩家輸入
 
 ### 2.5 戰力等級一致性（Tier Consistency）
 
@@ -125,7 +130,7 @@
 特點：
 
 - 使用 `call_oneshot()` 解析剛產生的 GM 內容
-- 輸出 JSON（lore/events/npcs/state/time/branch_title/dungeon）
+- 輸出 JSON（lore/events/plan/npcs/state/time/branch_title/dungeon）
 - 只在 GM 文本長度 >= 200 時啟動
 
 ### 4.1 Prompt 內建 guardrails
@@ -133,6 +138,7 @@
 - lore 提取有「通用設定」門檻，避免把一次性劇情寫進知識庫
 - event 優先走 `event_ops`（id-driven），避免 title 漂移造成斷鏈
 - event create 仍保留 title dedup + status 升級規則（planted -> triggered -> resolved/abandoned）
+- plan 會注入「上一輪 gm_plan 摘要」讓模型可延續或重寫；`must_payoff` 會依 `event_title` relink 到當前分支 active events
 - NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
 - state 優先走 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove），fallback 才用 legacy `state`
 - time 有上限（單次最多 30 天）
@@ -140,7 +146,7 @@
 
 ### 4.2 特殊模式
 
-- `pistol_mode = true` 時，會跳過 lore + events 持久化（避免污染長期資料）
+- `pistol_mode = true` 時，會跳過 lore + events + plan 持久化（避免污染長期資料）
 
 ---
 

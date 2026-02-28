@@ -594,6 +594,115 @@ class TestAsyncBranchTitle:
 
 
 # ===================================================================
+# GM plan extraction
+# ===================================================================
+
+
+class TestAsyncGmPlanExtraction:
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_prompt_includes_previous_plan_context(self, mock_llm, story_id, setup_story):
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        plan_path.write_text(json.dumps({
+            "arc": "舊弧線",
+            "next_beats": ["舊節點"],
+            "must_payoff": [
+                {"event_title": "舊伏筆", "event_id": 1, "ttl_turns": 3, "created_at_index": 5},
+            ],
+            "updated_at_index": 8,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.return_value = json.dumps({"plan": {"arc": "新弧線", "next_beats": [], "must_payoff": []}})
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=10)
+
+        prompt = mock_llm.call_args[0][0]
+        assert "上一輪 GM 計劃（供參考，可全部改寫）" in prompt
+        assert "舊弧線" in prompt
+        assert "舊節點" in prompt
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_plan_saved_with_event_relink(self, mock_llm, story_id, setup_story):
+        event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "神秘符文", "description": "d", "status": "planted"
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "plan": {
+                "arc": "符文回收線",
+                "next_beats": ["逼近真相"],
+                "must_payoff": [
+                    {"event_title": "神秘符文", "ttl_turns": 3},
+                ],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=12)
+
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        assert plan["arc"] == "符文回收線"
+        assert plan["updated_at_index"] == 12
+        assert len(plan["must_payoff"]) == 1
+        assert plan["must_payoff"][0]["event_id"] == event_id
+        assert plan["must_payoff"][0]["created_at_index"] == 12
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_same_payoff_keeps_original_created_at_index(self, mock_llm, story_id, setup_story):
+        event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "神秘符文", "description": "d", "status": "planted"
+        }, "main")
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        plan_path.write_text(json.dumps({
+            "arc": "舊弧線",
+            "next_beats": ["舊節點"],
+            "must_payoff": [
+                {"event_title": "神秘符文", "event_id": event_id, "ttl_turns": 3, "created_at_index": 5},
+            ],
+            "updated_at_index": 9,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.return_value = json.dumps({
+            "plan": {
+                "arc": "新弧線",
+                "next_beats": ["新節點"],
+                "must_payoff": [
+                    {"event_title": "神秘符文", "event_id": event_id, "ttl_turns": 4, "created_at_index": 999},
+                ],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=13)
+
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        assert plan["updated_at_index"] == 13
+        assert plan["must_payoff"][0]["created_at_index"] == 5
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_pistol_mode_skips_plan_write(self, mock_llm, story_id, setup_story, monkeypatch):
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        original = {
+            "arc": "保留弧線",
+            "next_beats": ["保留節點"],
+            "must_payoff": [],
+            "updated_at_index": 7,
+        }
+        plan_path.write_text(json.dumps(original, ensure_ascii=False), encoding="utf-8")
+
+        monkeypatch.setattr(app_module, "get_pistol_mode", lambda *_a, **_kw: True)
+        mock_llm.return_value = json.dumps({
+            "plan": {
+                "arc": "不應寫入",
+                "next_beats": ["不應寫入"],
+                "must_payoff": [],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=15)
+
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        assert plan == original
+
+
+# ===================================================================
 # NPC tier extraction/normalization
 # ===================================================================
 

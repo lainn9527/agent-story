@@ -72,6 +72,7 @@ Browser (static/app.js, templates/index.html)
   - `npcs.json`
   - `state.db`
   - `branch_lore.json`
+  - `gm_plan.json`
   - `conversation_recap.json`
   - `world_day.json`
   - `dungeon_progress.json`
@@ -98,7 +99,7 @@ Browser (static/app.js, templates/index.html)
 
 1. 寫入玩家訊息到分支 delta。
 2. 建構 system prompt（核心角色狀態 + lore + NPC 摘要 + recap + 副本上下文）。
-3. 對玩家訊息做 context augmentation（lore/events/npc 活動/state RAG/戰力提醒/骰子提示）。
+3. 對玩家訊息做 context augmentation（lore/events/GM 隱藏敘事計劃/npc 活動/state RAG/戰力提醒/骰子提示）。
    - state RAG 走檢索層限流（預設總筆數 30、NPC 類別上限 10）
    - `must_include_keys` 命中項目保底注入，不受類別上限限制
 4. 記錄 request trace，呼叫 LLM（stream 或 non-stream），再記錄 response trace。
@@ -125,14 +126,14 @@ Browser (static/app.js, templates/index.html)
 ### 非同步抽取（背景）
 
 - 由 `_extract_tags_async()` 另外呼叫 `call_oneshot()` 做語意抽取。
-- 補齊 lore/events/npc/state/time/branch_title/dungeon progress。
+- 補齊 lore/events/plan/npc/state/time/branch_title/dungeon progress。
 - 支援新契約（優先）：
   - `event_ops`: `update[{id,status}]` + `create[...]`（id-driven）
   - `state_ops`: `set/delta/map_upsert/map_remove/list_add/list_remove`
 - 舊契約仍可用（相容）：
   - `events`（title-driven）
   - `state`（legacy update object）
-- `pistol_mode` 開啟時會跳過 lore + event 持久化，避免 NSFW 場景污染長期資料。
+- `pistol_mode` 開啟時會跳過 lore + event + plan 持久化，避免 NSFW 場景污染長期資料。
 
 ## 7) 啟動與遷移
 
@@ -147,7 +148,7 @@ Browser (static/app.js, templates/index.html)
 - incomplete branch 清理
 - state index lazy rebuild（首次 state search 若無 `state.db` 則自動由 JSON 重建）
 
-此外，branch fork/edit/regen/blank/merge 會以目標分支快照（`state_snapshot` / `npcs_snapshot`）重建 `state.db`，確保索引語義與分支時點一致（不是直接繼承 parent 的最新索引）。
+此外，branch fork/edit/regen/blank/merge/promote 會以目標分支快照（`state_snapshot` / `npcs_snapshot`）重建 `state.db`，確保索引語義與分支時點一致（不是直接繼承 parent 的最新索引）。`gm_plan.json` 也會在 fork/edit/regen/merge/promote 依分支時點做 copy/relink，避免跨分支沿用錯誤 event id。
 
 ## 8) 併發與鎖
 

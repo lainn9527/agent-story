@@ -260,6 +260,84 @@ class TestBuildAugmentedMessage:
         )
         assert "安德斯" in text
 
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_gm_plan_injected_with_remaining_turns(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story
+    ):
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        plan_path.write_text(json.dumps({
+            "arc": "覺醒主線",
+            "next_beats": ["與隊友衝突", "觸發高階異種"],
+            "must_payoff": [
+                {"event_title": "神秘符文", "event_id": 1, "ttl_turns": 3, "created_at_index": 9},
+            ],
+            "updated_at_index": 10,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        text, _ = app_module._build_augmented_message(
+            story_id, "main", "我繼續前進", {"current_phase": "副本中"}, current_index=11
+        )
+        assert "[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]" in text
+        assert "剩餘 1 回合" in text
+
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_gm_plan_header_omitted_when_no_plan(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story
+    ):
+        text, _ = app_module._build_augmented_message(
+            story_id, "main", "測試", {"current_phase": "副本中"}, current_index=5
+        )
+        assert "[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]" not in text
+
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_expired_only_plan_not_injected(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story
+    ):
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        plan_path.write_text(json.dumps({
+            "arc": "",
+            "next_beats": [],
+            "must_payoff": [
+                {"event_title": "過期伏筆", "event_id": 1, "ttl_turns": 2, "created_at_index": 1},
+            ],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        text, _ = app_module._build_augmented_message(
+            story_id, "main", "測試", {"current_phase": "副本中"}, current_index=5
+        )
+        assert "[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]" not in text
+
+    def test_gm_plan_block_respects_char_limit(self, story_id, setup_story):
+        plan_path = setup_story / "branches" / "main" / "gm_plan.json"
+        plan_path.write_text(json.dumps({
+            "arc": "這是一條很長很長的弧線描述這是一條很長很長的弧線描述",
+            "next_beats": ["第一個很長很長的節點描述", "第二個很長很長的節點描述", "第三個很長很長的節點描述"],
+            "must_payoff": [
+                {"event_title": "伏筆A", "event_id": 1, "ttl_turns": 4, "created_at_index": 10},
+                {"event_title": "伏筆B", "event_id": 2, "ttl_turns": 4, "created_at_index": 10},
+            ],
+            "updated_at_index": 10,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        block = app_module._build_gm_plan_injection_block(
+            story_id, "main", current_index=12, char_limit=120
+        )
+        assert block.startswith("[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]")
+        assert len(block) <= 120
+
 
 # ===================================================================
 # _build_story_system_prompt
