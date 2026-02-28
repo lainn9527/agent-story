@@ -14,9 +14,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - **GM 上下文注入 tier 證據**: `npc_profiles` 會顯示 `【X 級】`，`critical_facts` 會顯示 `·X級`；有已知 `tier` 且分類為 ally/hostile 的 NPC 時，`_build_augmented_message()` 會注入 `[戰力等級提醒]`。 ([#134])
 - **同請求 NPC 讀取優化**: `/api/send`、`/api/send/stream`、`/api/branches/edit*`、`/api/branches/regenerate*` 路徑改為單次載入 `npcs`，並傳入 `_build_story_system_prompt()` / `_build_augmented_message()`，避免同回合重複讀檔。 ([#134])
+- **Events 分支一致性**: fork（create/edit/regenerate 與 stream 版本）會複製 parent 在 `branch_point_index` 之前的事件（含 `message_index IS NULL` legacy 條目）；merge 時 child 事件會 upsert 回 parent，同標題以 child `status` 覆蓋。 ([#135])
 
 ### Fixed
 - **tier 覆蓋穩定性**: extraction prompt 補充規則「既有 NPC 若本回合無法判定 tier，省略欄位不要輸出 null」，搭配 `_save_npc()` 的 invalid-tier 忽略邏輯，避免合法 tier 被不確定輸出污染。 ([#134])
+- **Events orphan 清理**: 分支清理（failed branch cleanup、hard delete、`was_main` soft-delete、startup incomplete cleanup）會同步刪除 `events.db` 對應 `branch_id`，避免 dead data 殘留。 ([#135])
 
 ## [0.20.16] - 2026-02-28
 
@@ -36,6 +38,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#128]: https://github.com/lainn9527/agent-story/pull/128
 [#132]: https://github.com/lainn9527/agent-story/pull/132
 [#134]: https://github.com/lainn9527/agent-story/pull/134
+[#135]: https://github.com/lainn9527/agent-story/pull/135
 
 ## [0.20.15] - 2026-02-27
 

@@ -50,7 +50,11 @@ log = logging.getLogger("rpg")
 
 from llm_bridge import call_claude_gm, call_claude_gm_stream, get_last_usage, get_provider
 import usage_db
-from event_db import insert_event, search_relevant_events, get_events, get_event_by_id, update_event_status, search_events as search_events_db
+from event_db import (
+    insert_event, search_relevant_events, get_events, get_event_by_id,
+    update_event_status, search_events as search_events_db,
+    copy_events_for_fork, merge_events_into, delete_events_for_branch,
+)
 from image_gen import generate_image_async, get_image_status, get_image_path
 from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry, get_entry_count, get_category_summary, get_embedding_stats, find_duplicates
 from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
@@ -3687,6 +3691,7 @@ def api_branches_create():
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
@@ -3900,6 +3905,7 @@ def api_branches_edit():
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -4073,6 +4079,7 @@ def api_branches_edit_stream():
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -4253,6 +4260,7 @@ def api_branches_regenerate():
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_json(_story_messages_path(story_id, branch_id), [])
@@ -4406,6 +4414,7 @@ def api_branches_regenerate_stream():
     set_world_day(story_id, branch_id, forked_world_day)
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
@@ -4700,6 +4709,7 @@ def api_branches_merge():
     copy_cheats(_story_dir(story_id), branch_id, parent_id)
     # Merge branch lore from child into parent (upsert, not overwrite)
     _merge_branch_lore_into(story_id, branch_id, parent_id)
+    merge_events_into(story_id, branch_id, parent_id)
     copy_dungeon_progress(story_id, branch_id, parent_id)
 
     # 5. Reparent child's children to parent
@@ -4732,6 +4742,7 @@ def _cleanup_branch(story_id, branch_id):
     if tree.get("active_branch_id") == branch_id:
         tree["active_branch_id"] = parent
     _save_tree(story_id, tree)
+    delete_events_for_branch(story_id, branch_id)
     bdir = _branch_dir(story_id, branch_id)
     if os.path.isdir(bdir):
         shutil.rmtree(bdir)
@@ -4793,6 +4804,9 @@ def api_branches_delete(branch_id):
     # Reparent all children (including deleted/merged) to grandparent
     for child in all_children:
         child["parent_branch_id"] = deleted_parent
+
+    # Clear events for both soft-delete (was_main) and hard-delete paths.
+    delete_events_for_branch(story_id, branch_id)
 
     # Delete the branch itself (preserve existing was_main soft-delete logic)
     if branch.get("was_main"):
@@ -6080,6 +6094,13 @@ def _cleanup_incomplete_branches():
             del branches[bid]
             if tree.get("active_branch_id") == bid:
                 tree["active_branch_id"] = parent
+            try:
+                delete_events_for_branch(story_dir_name, bid)
+            except Exception as e:
+                log.warning(
+                    "Startup cleanup: failed to delete events for branch %s in story %s (%s)",
+                    bid, story_dir_name, e,
+                )
             bdir = os.path.join(STORIES_DIR, story_dir_name, "branches", bid)
             if os.path.isdir(bdir):
                 shutil.rmtree(bdir)
