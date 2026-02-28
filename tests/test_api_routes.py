@@ -584,6 +584,43 @@ class TestBranchesAPI:
         assert updated_tree["branches"]["leaf"].get("deleted") is True
         assert updated_tree["branches"]["sibling"].get("deleted") is True
 
+    def test_promote_copies_child_gm_plan_to_parent(self, client, setup_story):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = {
+            "active_branch_id": "child",
+            "branches": {
+                "main": {"id": "main", "parent_branch_id": None, "branch_point_index": None},
+                "parent": {"id": "parent", "parent_branch_id": "main", "branch_point_index": 0},
+                "child": {"id": "child", "parent_branch_id": "parent", "branch_point_index": 1},
+            },
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+        (setup_story / "branches" / "parent").mkdir(parents=True, exist_ok=True)
+        (setup_story / "branches" / "child").mkdir(parents=True, exist_ok=True)
+
+        parent_plan_path = setup_story / "branches" / "parent" / "gm_plan.json"
+        child_plan_path = setup_story / "branches" / "child" / "gm_plan.json"
+        parent_plan_path.write_text(json.dumps({
+            "arc": "舊父分支計劃",
+            "next_beats": ["舊節點"],
+            "must_payoff": [],
+            "updated_at_index": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+        child_plan_path.write_text(json.dumps({
+            "arc": "子分支新計劃",
+            "next_beats": ["新節點"],
+            "must_payoff": [],
+            "updated_at_index": 3,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches/promote", json={"branch_id": "child"})
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        parent_plan = json.loads(parent_plan_path.read_text(encoding="utf-8"))
+        assert parent_plan["arc"] == "子分支新計劃"
+        assert parent_plan["next_beats"] == ["新節點"]
+
     def test_delete_main_blocked(self, client, setup_story):
         resp = client.delete("/api/branches/main")
         # Deleting main should fail

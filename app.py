@@ -1633,6 +1633,13 @@ def _relink_plan_payoffs_by_title(payoffs: object, active_event_rows: list[dict]
 
 def _normalize_gm_plan_payload(raw_plan: dict, previous_plan: dict, msg_index: int,
                                active_event_rows: list[dict]) -> dict | None:
+    """Normalize extracted plan payload.
+
+    Return semantics:
+    - dict: valid plan content to persist
+    - {}:   valid but empty plan => clear existing gm_plan.json
+    - None: invalid payload => ignore, keep existing plan
+    """
     if not isinstance(raw_plan, dict):
         return None
 
@@ -5845,6 +5852,11 @@ def api_branches_promote():
     for bid in sorted(branches_to_remove):
         branches[bid]["deleted"] = True
         branches[bid]["deleted_at"] = now
+
+    # Keep parent branch's GM plan aligned with promoted child route.
+    parent_id = branches[branch_id].get("parent_branch_id")
+    if isinstance(parent_id, str) and parent_id in branches:
+        _copy_gm_plan(story_id, branch_id, parent_id, branch_point_index=None)
 
     tree["active_branch_id"] = branch_id
     tree["promoted_mainline_leaf_id"] = branch_id
