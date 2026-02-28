@@ -526,6 +526,25 @@ class TestBranchesAPI:
         assert resp2.get_json()["ok"] is True
         assert event_db.get_events(story_id, branch_id=bid, limit=20) == []
 
+    def test_delete_was_main_soft_delete_also_removes_branch_events(self, client, setup_story, story_id):
+        resp = client.post("/api/branches", json={"name": "soft刪除事件用", "branch_point_index": 1})
+        bid = resp.get_json()["branch"]["id"]
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["branches"][bid]["was_main"] = True
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "soft待刪事件", "description": "d", "message_index": 2
+        }, bid)
+
+        resp2 = client.delete(f"/api/branches/{bid}")
+        assert resp2.status_code == 200
+        assert resp2.get_json()["ok"] is True
+        tree_after = json.loads(tree_path.read_text(encoding="utf-8"))
+        assert tree_after["branches"][bid].get("deleted") is True
+        assert event_db.get_events(story_id, branch_id=bid, limit=20) == []
+
     def test_merge_branch_merges_events_and_status(self, client, setup_story, story_id):
         event_db.insert_event(story_id, {
             "event_type": "伏筆", "title": "同標題事件", "description": "parent", "status": "planted",

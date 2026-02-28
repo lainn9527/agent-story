@@ -4805,13 +4805,15 @@ def api_branches_delete(branch_id):
     for child in all_children:
         child["parent_branch_id"] = deleted_parent
 
+    # Clear events for both soft-delete (was_main) and hard-delete paths.
+    delete_events_for_branch(story_id, branch_id)
+
     # Delete the branch itself (preserve existing was_main soft-delete logic)
     if branch.get("was_main"):
         now = datetime.now(timezone.utc).isoformat()
         branch["deleted"] = True
         branch["deleted_at"] = now
     else:
-        delete_events_for_branch(story_id, branch_id)
         bdir = _branch_dir(story_id, branch_id)
         if os.path.isdir(bdir):
             shutil.rmtree(bdir)

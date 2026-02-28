@@ -138,7 +138,7 @@
 - 注入只取 active 事件（`planted/triggered`）
 - async extraction 會做標題去重與狀態升級
 - fork 分支時會繼承 parent 在 `branch_point_index` 之前的事件，並保留 `message_index IS NULL` 的 legacy 條目
-- 刪除分支（hard delete）與啟動時 incomplete branch cleanup 會同步清除該分支事件，避免 orphan records
+- 刪除分支（hard delete / `was_main` soft-delete）與啟動時 incomplete branch cleanup 會同步清除該分支事件，避免 orphan records
 
 ### 7.3 NPC tier（戰力細分）
 
