@@ -1,5 +1,7 @@
-data/
 __pycache__/
 llm_config.json
 server.log*
 server_stderr.log
+
+# Runtime data (source of truth for design files is story_design/, not data/stories/)
+data/

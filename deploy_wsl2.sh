@@ -5,7 +5,7 @@
 # Requirements:
 #   - Python packages installed: ~/.local/lib/python3.12/site-packages
 #   - Claude CLI installed: ~/.npm-global/bin/claude
-#   - systemd service: sudo systemctl enable rpg-server (see doc/WSL2_SETUP.md)
+#   - systemd service: sudo systemctl enable rpg-server (see doc/wsl2_setup.md)
 #   - Run from the repo root directory
 
 set -e
