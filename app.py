@@ -538,6 +538,36 @@ def _rel_to_str(val) -> str:
     return val or ""
 
 
+_NPC_TIER_ALLOWLIST = {
+    "D-", "D", "D+",
+    "C-", "C", "C+",
+    "B-", "B", "B+",
+    "A-", "A", "A+",
+    "S-", "S", "S+",
+}
+_NPC_TIER_TRANSLATION = str.maketrans({
+    "－": "-",
+    "—": "-",
+    "–": "-",
+    "−": "-",
+    "﹣": "-",
+    "ー": "-",
+    "＋": "+",
+})
+
+
+def _normalize_npc_tier(raw_tier: object) -> str | None:
+    """Normalize tier text to allowlist value (D-..S+)."""
+    if not isinstance(raw_tier, str):
+        return None
+    tier = raw_tier.strip().upper().translate(_NPC_TIER_TRANSLATION)
+    if not tier:
+        return None
+    tier = tier.replace("級", "").replace("级", "")
+    tier = tier.replace(" ", "").replace("\u3000", "")
+    return tier if tier in _NPC_TIER_ALLOWLIST else None
+
+
 def _classify_npc(npc: dict, rels: dict) -> str:
     """Classify an NPC into a relationship category.
 
@@ -626,7 +656,15 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
             name = npc.get("name", "?")
             cat = _classify_npc(npc, rels)
             rel = _rel_to_str(rels.get(name)) or npc.get("relationship_to_player", "")
-            entry = f"{name}（{rel}）" if rel else name
+            tier = _normalize_npc_tier(npc.get("tier"))
+            if rel and tier:
+                entry = f"{name}（{rel}·{tier}級）"
+            elif rel:
+                entry = f"{name}（{rel}）"
+            elif tier:
+                entry = f"{name}（{tier}級）"
+            else:
+                entry = name
             groups.setdefault(cat, []).append(entry)
         labels = {"ally": "隊友", "hostile": "敵對", "captured": "俘虜",
                   "dead": "已故", "neutral": "其他NPC"}
@@ -643,7 +681,13 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     return "\n".join(lines)
 
 
-def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = "main", narrative_recap: str = "") -> str:
+def _build_story_system_prompt(
+    story_id: str,
+    state_text: str,
+    branch_id: str = "main",
+    narrative_recap: str = "",
+    npcs: list[dict] | None = None,
+) -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
     # Blank branches are fresh starts — no narrative context from parent
     tree = _load_tree(story_id)
@@ -657,8 +701,9 @@ def _build_story_system_prompt(story_id: str, state_text: str, branch_id: str = 
     prompt_path = _story_system_prompt_path(story_id)
     lore_text = _build_lore_text(story_id, branch_id)
     # Load NPCs once — used by both npc_text and critical_facts
-    npcs = _load_npcs(story_id, branch_id)
-    npc_text = _build_npc_text(story_id, branch_id)
+    if npcs is None:
+        npcs = _load_npcs(story_id, branch_id)
+    npc_text = _build_npc_text(story_id, branch_id, npcs=npcs)
     # Parse state dict from JSON string to avoid redundant _load_character_state
     try:
         state_dict = json.loads(state_text)
@@ -842,9 +887,18 @@ def _load_npcs(story_id: str, branch_id: str = "main") -> list[dict]:
 def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
     """Save or update an NPC entry. Matches by 'name' field."""
     npcs = _load_npcs(story_id, branch_id)
+    npc_data = dict(npc_data)  # Shallow copy: normalization below must not mutate caller data.
     name = npc_data.get("name", "").strip()
     if not name:
         return
+
+    # Normalize optional tier field (invalid tier values are ignored).
+    if "tier" in npc_data:
+        normalized_tier = _normalize_npc_tier(npc_data.get("tier"))
+        if normalized_tier:
+            npc_data["tier"] = normalized_tier
+        else:
+            npc_data.pop("tier", None)
 
     # Generate id if not present
     if "id" not in npc_data:
@@ -868,15 +922,18 @@ def _copy_npcs_to_branch(story_id: str, from_branch_id: str, to_branch_id: str):
     _save_json(_story_npcs_path(story_id, to_branch_id), npcs)
 
 
-def _build_npc_text(story_id: str, branch_id: str = "main") -> str:
+def _build_npc_text(story_id: str, branch_id: str = "main", npcs: list[dict] | None = None) -> str:
     """Build NPC profiles text for system prompt injection."""
-    npcs = _load_npcs(story_id, branch_id)
+    if npcs is None:
+        npcs = _load_npcs(story_id, branch_id)
     if not npcs:
         return "（尚無已記錄的 NPC）"
 
     lines = []
     for npc in npcs:
-        lines.append(f"### {npc.get('name', '?')}（{npc.get('role', '?')}）")
+        tier = _normalize_npc_tier(npc.get("tier"))
+        tier_label = f"【{tier} 級】" if tier else ""
+        lines.append(f"### {npc.get('name', '?')}（{npc.get('role', '?')}）{tier_label}")
         if npc.get("appearance"):
             lines.append(f"- 外觀：{npc['appearance']}")
         p = npc.get("personality", {})
@@ -1715,7 +1772,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "可用狀態：planted/triggered/resolved\n\n"
                 "## 3. NPC 資料（npcs）\n"
                 "提取首次登場或有重大變化的 NPC。\n"
-                '格式：[{{"name": "名字", "role": "定位", "appearance": "外觀", '
+                '- tier：戰力等級（D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+）。'
+                "只有在文本明確提及或可直接判定時才填，否則用 null，不要猜測。\n"
+                "- 若是已存在的 NPC 且本回合無法判定 tier，請省略 tier 欄位（不要輸出 null 覆蓋）。\n"
+                '格式：[{{"name": "名字", "role": "定位", "tier": "D-~S+ 或 null", "appearance": "外觀", '
                 '"personality": {{"openness": N, "conscientiousness": N, "extraversion": N, '
                 '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
                 "## 4. 角色狀態變化（state）\n"
@@ -2988,6 +3048,7 @@ def _find_world_day_at_index(story_id: str, branch_id: str, target_index: int) -
 def _build_augmented_message(
     story_id: str, branch_id: str, user_text: str,
     character_state: dict | None = None,
+    npcs: list[dict] | None = None,
     turn_count: int = 0,
 ) -> tuple[str, dict | None]:
     """Add lore + events + NPC activities + dice context to user message.
@@ -3023,6 +3084,33 @@ def _build_augmented_message(
     activities = get_recent_activities(story_id, branch_id, limit=2)
     if activities:
         parts.append(activities)
+
+    # Tier reminder — inject only when known-tier ally/hostile NPCs exist.
+    if character_state:
+        rels = character_state.get("relationships", {})
+        if not isinstance(rels, dict):
+            rels = {}
+        if npcs is None:
+            npcs = _load_npcs(story_id, branch_id)
+        tier_entries = []
+        for npc in npcs:
+            tier = _normalize_npc_tier(npc.get("tier"))
+            if not tier:
+                continue
+            cat = _classify_npc(npc, rels)
+            if cat not in ("hostile", "ally"):
+                continue
+            cat_label = "敵對" if cat == "hostile" else "隊友"
+            tier_entries.append(f"{npc.get('name', '?')}（{cat_label}·{tier}級）")
+        if tier_entries:
+            parts.append(
+                "\n".join([
+                    "[戰力等級提醒]",
+                    f"- 已知戰力單位：{'、'.join(tier_entries)}",
+                    "- 同級可拉鋸，跨一級低級方明顯劣勢，跨兩級接近碾壓。",
+                    "- +/- 只影響同級內強弱；高階能力需呈現代價或限制。",
+                ])
+            )
 
     # Fate roll (skip for /gm commands and when fate mode is off)
     dice_result = None
@@ -3257,9 +3345,12 @@ def api_send():
     # 2. Build system prompt (with narrative recap)
     t0 = time.time()
     state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+    )
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
     # 3. Gather recent context
@@ -3270,7 +3361,9 @@ def api_send():
     # 3b. Search relevant lore/events/activities and prepend to user message
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
-    augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state, turn_count=tc)
+    augmented_text, dice_result = _build_augmented_message(
+        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc
+    )
     if dice_result:
         player_msg["dice"] = dice_result
         _save_json(delta_path, delta_msgs)
@@ -3399,16 +3492,21 @@ def api_send_stream():
 
     # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+    )
 
     # 3. Gather recent context
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
         recent = _strip_fate_from_messages(recent)
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
-    augmented_text, dice_result = _build_augmented_message(story_id, branch_id, user_text, state, turn_count=tc)
+    augmented_text, dice_result = _build_augmented_message(
+        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc
+    )
     if dice_result:
         player_msg["dice"] = dice_result
         _save_json(delta_path, delta_msgs)
@@ -3831,9 +3929,12 @@ def api_branches_edit():
     t0 = time.time()
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+    )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
         recent = _strip_fate_from_messages(recent)
@@ -3841,7 +3942,9 @@ def api_branches_edit():
 
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
-    augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state, turn_count=tc)
+    augmented_edit, dice_result = _build_augmented_message(
+        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc
+    )
     if dice_result:
         user_msg["dice"] = dice_result
         _save_json(_story_messages_path(story_id, branch_id), delta)
@@ -4000,14 +4103,19 @@ def api_branches_edit_stream():
     # Build prompt context
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+    )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
         recent = _strip_fate_from_messages(recent)
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
-    augmented_edit, dice_result = _build_augmented_message(story_id, branch_id, edited_message, state, turn_count=tc)
+    augmented_edit, dice_result = _build_augmented_message(
+        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc
+    )
     if dice_result:
         user_msg["dice"] = dice_result
         _save_json(_story_messages_path(story_id, branch_id), delta)
@@ -4165,9 +4273,12 @@ def api_branches_regenerate():
     t0 = time.time()
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+    )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
         recent = _strip_fate_from_messages(recent)
@@ -4175,7 +4286,9 @@ def api_branches_regenerate():
 
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
-    augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
+    augmented_regen, dice_result = _build_augmented_message(
+        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc
+    )
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     gm_msg_index = branch_point_index + 1
@@ -4313,14 +4426,19 @@ def api_branches_regenerate_stream():
     # Build prompt context
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
     state_text = json.dumps(state, ensure_ascii=False, indent=2)
     recap_text = get_recap_text(story_id, branch_id)
-    system_prompt = _build_story_system_prompt(story_id, state_text, branch_id=branch_id, narrative_recap=recap_text)
+    system_prompt = _build_story_system_prompt(
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+    )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
         recent = _strip_fate_from_messages(recent)
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
-    augmented_regen, dice_result = _build_augmented_message(story_id, branch_id, user_msg_content, state, turn_count=tc)
+    augmented_regen, dice_result = _build_augmented_message(
+        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc
+    )
 
     gm_msg_index = branch_point_index + 1
     _trace_llm(

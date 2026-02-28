@@ -37,7 +37,7 @@
 核心路由：`POST /api/send`（或 stream 版本）
 
 1. 寫入玩家訊息
-2. 做 context augmentation（lore/events/NPC/fate）
+2. 做 context augmentation（lore/events/NPC 動態/tier 提醒/fate）
 3. 呼叫 LLM 取得 GM 回覆
 4. 解析 tag + 更新狀態
 5. 儲存 GM 訊息 + snapshot
@@ -138,6 +138,16 @@
 - 注入只取 active 事件（`planted/triggered`）
 - async extraction 會做標題去重與狀態升級
 
+### 7.3 NPC tier（戰力細分）
+
+- NPC 可帶 `tier` 欄位，允許 15 個值：`D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+`。
+- async extraction prompt 會提取 `tier`；若既有 NPC 本回合無法判定，應省略欄位而非覆蓋成 `null`。
+- 存檔前會經過 allowlist 正規化，不合法 tier 會被忽略（不阻塞 NPC 更新）。
+- tier 會出現在：
+  - `npc_profiles` 標題（`【X 級】`）
+  - `critical_facts` 的關係矩陣（`·X級`）
+  - `[戰力等級提醒]`（僅已知 tier 且 ally/hostile）
+
 ---
 
 ## 8. 分支操作機制
@@ -233,4 +243,3 @@
   - 達到 max turns / max dungeons
   - 連續錯誤達上限
   - 出現 `auto_play.stop`
-
