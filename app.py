@@ -1788,15 +1788,10 @@ def _state_ops_to_update(state_ops: dict, schema: dict, current_state: dict | No
     set_ops = state_ops.get("set")
     if isinstance(set_ops, dict):
         for key, val in set_ops.items():
-            if key in map_keys and isinstance(val, dict):
-                bucket = update.setdefault(key, {})
-                if isinstance(bucket, dict):
-                    for mk, mv in val.items():
-                        if mk is None:
-                            continue
-                        mk_str = str(mk).strip()
-                        if mk_str:
-                            bucket[mk_str] = mv
+            if key in map_keys:
+                # Full map replacement is not supported by the canonical update
+                # pipeline. Callers should use map_upsert/map_remove instead.
+                log.warning("state_ops: reject set.%s (map key); use map_upsert/map_remove", key)
                 continue
             if key in list_keys:
                 # list replacement is unsupported by current canonical pipeline.
@@ -1805,8 +1800,8 @@ def _state_ops_to_update(state_ops: dict, schema: dict, current_state: dict | No
                 # null in set means no-op; deletions should go via map_remove/list_remove.
                 continue
             if key == "reward_points":
-                if _is_numeric_value(val):
-                    update[key] = int(val)
+                # Keep reward_points changes deterministic via delta only.
+                log.warning("state_ops: reject set.reward_points; use delta.reward_points")
                 continue
             if key in direct_overwrite or key in known_keys:
                 update[key] = val
@@ -2597,7 +2592,6 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 state_applied = False
                 state_ops = data.get("state_ops")
                 if isinstance(state_ops, dict):
-                    schema = _load_character_schema(story_id)
                     current_state = _load_character_state(story_id, branch_id)
                     ops_update = _state_ops_to_update(state_ops, schema, current_state)
                     if ops_update:

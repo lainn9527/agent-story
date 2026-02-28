@@ -452,6 +452,26 @@ class TestAsyncEventOps:
         updated = event_db.get_event_by_id(story_id, event_id)
         assert updated["status"] == "triggered"
 
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_event_ops_create_dedup_only_advances_status(self, mock_llm, story_id, setup_story):
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "重複事件", "description": "old", "status": "planted"
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "event_ops": {
+                "create": [
+                    {"event_type": "伏筆", "title": "重複事件", "description": "new", "status": "triggered", "tags": ""},
+                ],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=10)
+
+        events = event_db.get_events(story_id, branch_id="main", limit=20)
+        matching = [e for e in events if e["title"] == "重複事件"]
+        assert len(matching) == 1
+        assert matching[0]["status"] == "triggered"
+
 
 # ===================================================================
 # Lore extraction

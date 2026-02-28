@@ -914,6 +914,22 @@ class TestStateOpsTranslation:
         assert "current_status" not in update
         assert update["current_phase"] == "副本中"
 
+    def test_set_map_key_rejected(self):
+        update = app_module._state_ops_to_update(
+            {"set": {"inventory": {"新道具": "描述"}}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert "inventory" not in update
+
+    def test_set_reward_points_rejected(self):
+        update = app_module._state_ops_to_update(
+            {"set": {"reward_points": 9999}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert "reward_points" not in update
+
     def test_list_add_and_remove_use_schema_suffix(self):
         update = app_module._state_ops_to_update(
             {
@@ -925,3 +941,11 @@ class TestStateOpsTranslation:
         )
         assert update["completed_missions_add"] == ["支線A"]
         assert update["completed_missions_remove"] == ["咒怨 — 完美通關"]
+
+    def test_delta_reward_points_translates_to_reward_points_delta(self):
+        update = app_module._state_ops_to_update(
+            {"delta": {"reward_points": -300}},
+            SCHEMA,
+            INITIAL_STATE,
+        )
+        assert update["reward_points_delta"] == -300

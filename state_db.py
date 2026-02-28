@@ -503,6 +503,9 @@ def search_state(
         ident = (row["category"], row["entry_key"])
         if ident in seen:
             continue
+        # Forced rows are a hard-include safety net and intentionally do not
+        # consume category quotas/max_items, so explicit user mentions are not
+        # dropped by ranking caps.
         forced_selected.append(row)
         seen.add(ident)
 
