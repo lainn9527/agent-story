@@ -175,6 +175,31 @@ class TestBuildAugmentedMessage:
         assert "[相關角色狀態]" in text
         assert "封印之鏡" in text
 
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_state_search_called_with_limits(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story, monkeypatch
+    ):
+        captured = {}
+
+        def _fake_search(*args, **kwargs):
+            captured.update(kwargs)
+            return ""
+
+        monkeypatch.setattr(app_module, "search_state_entries", _fake_search)
+        app_module._build_augmented_message(
+            story_id,
+            "main",
+            "我要找隊友",
+            {"current_phase": "副本中", "relationships": {"阿豪": "信任"}},
+            [{"name": "阿豪", "role": "隊友"}],
+        )
+        assert captured["category_limits"]["npc"] == app_module.STATE_RAG_NPC_LIMIT
+        assert captured["max_items"] == app_module.STATE_RAG_MAX_ITEMS
+
 
 # ===================================================================
 # _build_story_system_prompt

@@ -348,6 +348,25 @@ def get_event_title_map(story_id: str, branch_id: str) -> dict[str, dict]:
     return result
 
 
+def get_active_events(story_id: str, branch_id: str, limit: int = 40) -> list[dict]:
+    """Return active events (planted/triggered) for extraction prompt context."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        """
+        SELECT id, title, status, event_type
+        FROM events
+        WHERE branch_id = ? AND status IN ('planted', 'triggered')
+        ORDER BY CASE status WHEN 'triggered' THEN 0 ELSE 1 END, id DESC
+        LIMIT ?
+        """,
+        (branch_id, limit),
+    ).fetchall()
+    results = [dict(r) for r in rows]
+    conn.close()
+    return results
+
+
 def get_active_foreshadowing(story_id: str, branch_id: str) -> list[dict]:
     """Get planted events not yet triggered for a branch."""
     conn = _get_conn(story_id)

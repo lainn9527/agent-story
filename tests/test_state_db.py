@@ -108,3 +108,35 @@ class TestSearch:
             context={"phase": "副本中", "status": "戰鬥中", "dungeon": "咒術迴戰"},
         )
         assert "審判暴君" in text
+
+    def test_category_limits_caps_non_forced_results(self, story_id, setup_branch):
+        state_db.rebuild_from_json(story_id, "main")
+        for i in range(12):
+            state_db.upsert_entry(
+                story_id,
+                "main",
+                category="npc",
+                entry_key=f"測npc{i:02d}",
+                content="測試目標",
+                tags="NPC",
+            )
+        text = state_db.search_state(
+            story_id,
+            "main",
+            "測npc",
+            category_limits={"npc": 5},
+            max_items=50,
+        )
+        assert text.count("測npc") == 5
+
+    def test_must_include_not_blocked_by_limits(self, story_id, setup_branch):
+        state_db.rebuild_from_json(story_id, "main")
+        text = state_db.search_state(
+            story_id,
+            "main",
+            "完全無關",
+            must_include_keys=["阿豪"],
+            category_limits={"npc": 1},
+            max_items=1,
+        )
+        assert "阿豪" in text

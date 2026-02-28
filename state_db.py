@@ -460,6 +460,8 @@ def search_state(
     token_budget: int | None = None,
     must_include_keys: list[str] | None = None,
     context: dict | None = None,
+    category_limits: dict[str, int] | None = None,
+    max_items: int | None = None,
 ) -> str:
     """Search and format relevant state entries.
 
@@ -495,19 +497,51 @@ def search_state(
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    selected = []
+    forced_selected = []
     seen = set()
     for row in forced:
         ident = (row["category"], row["entry_key"])
-        if ident not in seen:
-            selected.append(row)
-            seen.add(ident)
+        if ident in seen:
+            continue
+        # Forced rows are a hard-include safety net and intentionally do not
+        # consume category quotas/max_items, so explicit user mentions are not
+        # dropped by ranking caps.
+        forced_selected.append(row)
+        seen.add(ident)
+
+    quota_limits = {}
+    if isinstance(category_limits, dict):
+        for category, raw_limit in category_limits.items():
+            cat = str(category or "").strip()
+            if not cat:
+                continue
+            try:
+                limit_val = int(raw_limit)
+            except (TypeError, ValueError):
+                continue
+            if limit_val > 0:
+                quota_limits[cat] = limit_val
+
+    scored_selected = []
+    used_counts: dict[str, int] = {}
+    picked = 0
     for _, row in scored:
         ident = (row["category"], row["entry_key"])
-        if ident not in seen:
-            selected.append(row)
-            seen.add(ident)
+        if ident in seen:
+            continue
+        category = row["category"] or ""
+        if quota_limits:
+            cap = quota_limits.get(category)
+            if cap is not None and used_counts.get(category, 0) >= cap:
+                continue
+        if max_items is not None and max_items > 0 and picked >= max_items:
+            break
+        scored_selected.append(row)
+        seen.add(ident)
+        used_counts[category] = used_counts.get(category, 0) + 1
+        picked += 1
 
+    selected = forced_selected + scored_selected
     if not selected:
         return ""
 

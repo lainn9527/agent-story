@@ -12,6 +12,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **NPC tier 結構化資料流**: async extraction prompt 新增 `tier` 欄位，支援 15 個 sub-tier（`D-/D/D+/.../S+`）；`_save_npc()` 新增 allowlist 正規化，確保 NPC 強度標記可穩定持久化。 ([#134])
 - **State RAG 索引（`state.db`）**: 新增 `state_db.py`，把 inventory/ability/relationship/mission/system/npc 建成可檢索索引；支援 lazy rebuild、must-include entity 保底、CJK bigram 搜尋與分類輸出 `[相關角色狀態]`。 ([#136])
 - **State 索引維護 API**: 新增 `POST /api/state/rebuild`，可針對指定分支從 canonical `character_state.json` + `npcs.json` 強制重建 `state.db` 並回傳 summary。 ([#136])
+- **Extraction ops 契約（event/state）**: `_extract_tags_async()` 新增 `event_ops`（id-driven update/create）與 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove）優先路徑，並保留 legacy `events` / `state` fallback 相容。
 
 ### Changed
 - **GM 上下文注入 tier 證據**: `npc_profiles` 會顯示 `【X 級】`，`critical_facts` 會顯示 `·X級`；有已知 `tier` 且分類為 ally/hostile 的 NPC 時，`_build_augmented_message()` 會注入 `[戰力等級提醒]`。 ([#134])
@@ -19,12 +20,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Events 分支一致性**: fork（create/edit/regenerate 與 stream 版本）會複製 parent 在 `branch_point_index` 之前的事件（含 `message_index IS NULL` legacy 條目）；merge 時 child 事件會 upsert 回 parent，同標題以 child `status` 覆蓋。 ([#135])
 - **System prompt 改為 Core State + On-demand State RAG**: `{character_state}` 改為核心欄位精簡文本（含 systems），`{npc_profiles}` 改為統計摘要；詳細道具/技能/NPC 檔案改由 `_build_augmented_message()` 按需注入。 ([#136])
 - **分支語義對齊（snapshot rebuild）**: fork/edit/regen/blank/merge 等分支操作不再複製 parent DB，而是用該分支時點的 `state_snapshot`/`npcs_snapshot` 重建 `state.db`，避免索引與分支時態漂移。 ([#136])
+- **State RAG 檢索限流**: `search_state()` 新增 `category_limits`/`max_items` 後處理限流；預設注入改為「最多 30 條、NPC 類最多 10 條」，但 `must_include_keys` 保底條目不受類別上限限制。
+- **Prompt 去偏置**: `system_prompt.txt` 與 `prompts.py` 的固定人名示例改為中性示例，降低空白分支固定生成同名 NPC 的偏置風險。
 
 ### Fixed
 - **tier 覆蓋穩定性**: extraction prompt 補充規則「既有 NPC 若本回合無法判定 tier，省略欄位不要輸出 null」，搭配 `_save_npc()` 的 invalid-tier 忽略邏輯，避免合法 tier 被不確定輸出污染。 ([#134])
 - **Events orphan 清理**: 分支清理（failed branch cleanup、hard delete、`was_main` soft-delete、startup incomplete cleanup）會同步刪除 `events.db` 對應 `branch_id`，避免 dead data 殘留。 ([#135])
 - **State RAG 檢索噪音控制**: must-include entity 抽取忽略單字元 key，降低短詞誤命中造成的無關注入。 ([#136])
 - **未選選項回灌污染**: `recent` 在送入 LLM 前會移除所有非 `user` 訊息（含 legacy `assistant`）尾端的「可選行動」區塊；compaction 摘要前也會做同樣清洗，避免提案選項被當成既成事實反覆回灌。 ([#139])
+- **事件標題漂移斷鏈**: 透過 `event_ops.update(id,status)` 避免 LLM 輕微改寫 title 就變成新事件，提升 active event close/推進穩定性。
 
 ## [0.20.16] - 2026-02-28
 
