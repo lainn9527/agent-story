@@ -278,3 +278,96 @@ class TestGetActiveForeshadowing:
         # 2 planted events: "神秘組織的暗示" and "遇見修真前輩"
         events = event_db.get_active_foreshadowing(story_id, "main")
         assert len(events) == 2
+
+
+# ===================================================================
+# branch helpers
+# ===================================================================
+
+
+class TestCopyEventsForFork:
+    def test_filters_by_branch_point_and_keeps_legacy_null_index(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "早期事件", "description": "d", "message_index": 1},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "未來事件", "description": "d", "message_index": 5},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "舊版事件", "description": "d", "message_index": None},
+            "main",
+        )
+        event_db.copy_events_for_fork(story_id, "main", "branch_a", 2)
+        copied = event_db.get_events(story_id, branch_id="branch_a", limit=20)
+        titles = {e["title"] for e in copied}
+        assert titles == {"早期事件", "舊版事件"}
+
+    def test_branch_point_none_copies_all(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "事件一", "description": "d", "message_index": 1},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "遭遇", "title": "事件二", "description": "d", "message_index": 3},
+            "main",
+        )
+        event_db.copy_events_for_fork(story_id, "main", "branch_all", None)
+        copied = event_db.get_events(story_id, branch_id="branch_all", limit=20)
+        titles = {e["title"] for e in copied}
+        assert titles == {"事件一", "事件二"}
+
+
+class TestMergeEventsInto:
+    def test_inserts_new_titles_into_destination(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "發現", "title": "子分支新事件", "description": "d", "status": "triggered"},
+            "child",
+        )
+        event_db.merge_events_into(story_id, "child", "main")
+        merged = event_db.get_events(story_id, branch_id="main", limit=20)
+        titles = {e["title"] for e in merged}
+        assert "子分支新事件" in titles
+
+    def test_overwrites_destination_status_by_title(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "同標題事件", "description": "d", "status": "planted"},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "同標題事件", "description": "d", "status": "resolved"},
+            "child",
+        )
+        event_db.merge_events_into(story_id, "child", "main")
+        merged = event_db.get_events(story_id, branch_id="main", limit=20)
+        match = [e for e in merged if e["title"] == "同標題事件"]
+        assert len(match) == 1
+        assert match[0]["status"] == "resolved"
+
+
+class TestDeleteEventsForBranch:
+    def test_delete_only_target_branch(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "主線事件", "description": "d"},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "分支事件", "description": "d"},
+            "branch_x",
+        )
+        event_db.delete_events_for_branch(story_id, "branch_x")
+        assert event_db.get_events(story_id, branch_id="branch_x") == []
+        main_events = event_db.get_events(story_id, branch_id="main")
+        assert len(main_events) == 1
+        assert main_events[0]["title"] == "主線事件"

@@ -241,6 +241,35 @@ class TestBranchesAPI:
         assert branch.get("blank") is True
         assert branch["branch_point_index"] == -1
 
+    def test_create_branch_copies_events_before_branch_point(self, client, setup_story, story_id):
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "分叉前事件", "description": "d", "message_index": 1
+        }, "main")
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "分叉後事件", "description": "d", "message_index": 3
+        }, "main")
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "舊版事件", "description": "d", "message_index": None
+        }, "main")
+
+        resp = client.post("/api/branches", json={"name": "事件繼承", "branch_point_index": 1})
+        assert resp.status_code == 200
+        branch_id = resp.get_json()["branch"]["id"]
+        events = event_db.get_events(story_id, branch_id=branch_id, limit=20)
+        titles = {e["title"] for e in events}
+        assert "分叉前事件" in titles
+        assert "舊版事件" in titles
+        assert "分叉後事件" not in titles
+
+    def test_create_blank_branch_does_not_copy_events(self, client, setup_story, story_id):
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "主線事件", "description": "d", "message_index": 1
+        }, "main")
+        resp = client.post("/api/branches/blank", json={"name": "空白事件測試"})
+        assert resp.status_code == 200
+        branch_id = resp.get_json()["branch"]["id"]
+        assert event_db.get_events(story_id, branch_id=branch_id, limit=20) == []
+
     def test_switch_branch(self, client, setup_story):
         # Create a branch first
         resp = client.post("/api/branches", json={"name": "切換用", "branch_point_index": 1})
@@ -484,6 +513,44 @@ class TestBranchesAPI:
         assert resp2.status_code == 200
         assert resp2.get_json()["ok"] is True
 
+    def test_delete_non_main_removes_branch_events(self, client, setup_story, story_id):
+        resp = client.post("/api/branches", json={"name": "刪除事件用", "branch_point_index": 1})
+        bid = resp.get_json()["branch"]["id"]
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "待刪事件", "description": "d", "message_index": 2
+        }, bid)
+
+        client.post("/api/branches/switch", json={"branch_id": "main"})
+        resp2 = client.delete(f"/api/branches/{bid}")
+        assert resp2.status_code == 200
+        assert resp2.get_json()["ok"] is True
+        assert event_db.get_events(story_id, branch_id=bid, limit=20) == []
+
+    def test_merge_branch_merges_events_and_status(self, client, setup_story, story_id):
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "同標題事件", "description": "parent", "status": "planted",
+        }, "main")
+        resp = client.post("/api/branches", json={"name": "合併測試", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "同標題事件", "description": "child", "status": "triggered",
+        }, child_id)
+        event_db.insert_event(story_id, {
+            "event_type": "發現", "title": "子分支新事件", "description": "new", "status": "planted",
+        }, child_id)
+
+        merge_resp = client.post("/api/branches/merge", json={"branch_id": child_id})
+        assert merge_resp.status_code == 200
+        assert merge_resp.get_json()["ok"] is True
+
+        main_events = event_db.get_events(story_id, branch_id="main", limit=50)
+        main_map = {e["title"]: e for e in main_events}
+        assert main_map["同標題事件"]["status"] == "triggered"
+        assert "子分支新事件" in main_map
+        assert main_map["子分支新事件"]["branch_id"] == "main"
+
     def test_edit_no_change_rejected(self, client, setup_story):
         """Editing a message with identical content should return 400."""
         # The parsed conversation has: index 0 = user "你好", index 2 = user "開始任務"
@@ -538,6 +605,33 @@ class TestBranchesAPI:
         # GET again to verify
         resp3 = client.get("/api/branches/main/config")
         assert resp3.get_json()["config"]["cheat_dice"] is True
+
+    def test_startup_cleanup_incomplete_branch_removes_events(self, client, setup_story, story_id):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["branches"]["branch_incomplete"] = {
+            "id": "branch_incomplete",
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "name": "中斷分支",
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        incomplete_dir = setup_story / "branches" / "branch_incomplete"
+        incomplete_dir.mkdir(parents=True, exist_ok=True)
+        (incomplete_dir / "messages.json").write_text(
+            json.dumps([{"index": 4, "role": "user", "content": "中斷了"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "中斷事件", "description": "d", "message_index": 4
+        }, "branch_incomplete")
+
+        app_module._cleanup_incomplete_branches()
+
+        tree_after = json.loads(tree_path.read_text(encoding="utf-8"))
+        assert "branch_incomplete" not in tree_after["branches"]
+        assert event_db.get_events(story_id, branch_id="branch_incomplete", limit=20) == []
 
 
 # ===================================================================

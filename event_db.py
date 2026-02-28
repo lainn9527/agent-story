@@ -116,6 +116,148 @@ def get_event_by_id(story_id: str, event_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def copy_events_for_fork(story_id: str, source_branch_id: str, target_branch_id: str,
+                         branch_point_index: int | None):
+    """Copy source branch events into a forked branch.
+
+    If branch_point_index is provided, only events at or before that index are
+    copied. Legacy events without message_index are kept conservatively.
+    """
+    if source_branch_id == target_branch_id:
+        return
+
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+
+    if branch_point_index is None:
+        rows = conn.execute(
+            """SELECT event_type, title, description, message_index,
+               status, tags, related_titles, created_at
+               FROM events
+               WHERE branch_id = ?
+               ORDER BY id""",
+            (source_branch_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT event_type, title, description, message_index,
+               status, tags, related_titles, created_at
+               FROM events
+               WHERE branch_id = ?
+                 AND (message_index <= ? OR message_index IS NULL)
+               ORDER BY id""",
+            (source_branch_id, branch_point_index),
+        ).fetchall()
+
+    if not rows:
+        conn.close()
+        return
+
+    conn.executemany(
+        """INSERT INTO events (event_type, title, description, message_index,
+           branch_id, status, tags, related_titles, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                row["event_type"],
+                row["title"],
+                row["description"],
+                row["message_index"],
+                target_branch_id,
+                row["status"],
+                row["tags"],
+                row["related_titles"],
+                row["created_at"],
+            )
+            for row in rows
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def merge_events_into(story_id: str, src_branch_id: str, dst_branch_id: str):
+    """Merge source branch events into destination by title.
+
+    - New titles in src are inserted into dst.
+    - Existing titles in dst have status overwritten by src status.
+    """
+    if src_branch_id == dst_branch_id:
+        return
+
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+
+    src_rows = conn.execute(
+        """SELECT event_type, title, description, message_index,
+           status, tags, related_titles, created_at
+           FROM events
+           WHERE branch_id = ?
+           ORDER BY id""",
+        (src_branch_id,),
+    ).fetchall()
+    if not src_rows:
+        conn.close()
+        return
+
+    dst_rows = conn.execute(
+        "SELECT id, title FROM events WHERE branch_id = ?",
+        (dst_branch_id,),
+    ).fetchall()
+    dst_title_to_id = {row["title"]: row["id"] for row in dst_rows}
+
+    # Keep latest src row per title in case src contains historical duplicates.
+    src_by_title = {}
+    for row in src_rows:
+        src_by_title[row["title"]] = row
+
+    inserts = []
+    updates = []
+    for title, row in src_by_title.items():
+        dst_id = dst_title_to_id.get(title)
+        if dst_id is None:
+            inserts.append(
+                (
+                    row["event_type"],
+                    row["title"],
+                    row["description"],
+                    row["message_index"],
+                    dst_branch_id,
+                    row["status"],
+                    row["tags"],
+                    row["related_titles"],
+                    row["created_at"],
+                )
+            )
+        else:
+            updates.append((row["status"], dst_id))
+
+    if inserts:
+        conn.executemany(
+            """INSERT INTO events (event_type, title, description, message_index,
+               branch_id, status, tags, related_titles, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            inserts,
+        )
+    if updates:
+        conn.executemany(
+            "UPDATE events SET status = ? WHERE id = ?",
+            updates,
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def delete_events_for_branch(story_id: str, branch_id: str):
+    """Delete all events belonging to a branch."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    conn.execute("DELETE FROM events WHERE branch_id = ?", (branch_id,))
+    conn.commit()
+    conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Search (CJK bigram scoring — same pattern as lore_db.py)
 # ---------------------------------------------------------------------------
