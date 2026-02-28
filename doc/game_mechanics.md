@@ -186,6 +186,7 @@
 
 - 將目標分支路徑視為主線
 - 刪除（soft delete）同層非路徑 sibling subtree
+- 若 promoted 分支有 parent，會把 child 的 `gm_plan.json` 同步到 parent（含 event_id relink）
 - 保留 lineage，並記錄 `promoted_mainline_leaf_id`
 
 ### 8.3 Merge

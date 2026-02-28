@@ -148,7 +148,7 @@ Browser (static/app.js, templates/index.html)
 - incomplete branch 清理
 - state index lazy rebuild（首次 state search 若無 `state.db` 則自動由 JSON 重建）
 
-此外，branch fork/edit/regen/blank/merge 會以目標分支快照（`state_snapshot` / `npcs_snapshot`）重建 `state.db`，確保索引語義與分支時點一致（不是直接繼承 parent 的最新索引）。`gm_plan.json` 也會在 fork/edit/regen/merge 依分支時點做 copy/relink，避免跨分支沿用錯誤 event id。
+此外，branch fork/edit/regen/blank/merge/promote 會以目標分支快照（`state_snapshot` / `npcs_snapshot`）重建 `state.db`，確保索引語義與分支時點一致（不是直接繼承 parent 的最新索引）。`gm_plan.json` 也會在 fork/edit/regen/merge/promote 依分支時點做 copy/relink，避免跨分支沿用錯誤 event id。
 
 ## 8) 併發與鎖
 

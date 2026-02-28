@@ -20,7 +20,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **GM 上下文注入 tier 證據**: `npc_profiles` 會顯示 `【X 級】`，`critical_facts` 會顯示 `·X級`；有已知 `tier` 且分類為 ally/hostile 的 NPC 時，`_build_augmented_message()` 會注入 `[戰力等級提醒]`。 ([#134])
 - **同請求 NPC 讀取優化**: `/api/send`、`/api/send/stream`、`/api/branches/edit*`、`/api/branches/regenerate*` 路徑改為單次載入 `npcs`，並傳入 `_build_story_system_prompt()` / `_build_augmented_message()`，避免同回合重複讀檔。 ([#134])
 - **Events 分支一致性**: fork（create/edit/regenerate 與 stream 版本）會複製 parent 在 `branch_point_index` 之前的事件（含 `message_index IS NULL` legacy 條目）；merge 時 child 事件會 upsert 回 parent，同標題以 child `status` 覆蓋。 ([#135])
-- **GM plan 分支一致性**: fork/edit/regenerate 會依 `plan.updated_at_index <= branch_point_index` 決定是否繼承 `gm_plan.json`；merge 會以 child plan 覆寫 parent，並在 parent 端重建 payoff `event_id`。
+- **GM plan 分支一致性**: fork/edit/regenerate 會依 `plan.updated_at_index <= branch_point_index` 決定是否繼承 `gm_plan.json`；merge 與 promote 會同步 child plan 到 parent，並在 parent 端重建 payoff `event_id`。
 - **System prompt 改為 Core State + On-demand State RAG**: `{character_state}` 改為核心欄位精簡文本（含 systems），`{npc_profiles}` 改為統計摘要；詳細道具/技能/NPC 檔案改由 `_build_augmented_message()` 按需注入。 ([#136])
 - **分支語義對齊（snapshot rebuild）**: fork/edit/regen/blank/merge 等分支操作不再複製 parent DB，而是用該分支時點的 `state_snapshot`/`npcs_snapshot` 重建 `state.db`，避免索引與分支時態漂移。 ([#136])
 - **State RAG 檢索限流**: `search_state()` 新增 `category_limits`/`max_items` 後處理限流；預設注入改為「最多 30 條、NPC 類最多 10 條」，但 `must_include_keys` 保底條目不受類別上限限制。
