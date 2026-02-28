@@ -243,6 +243,10 @@ STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFL
 _STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
 STATE_RAG_TOKEN_BUDGET = max(200, _parse_env_int("STATE_RAG_TOKEN_BUDGET", 2000))
 
+# Track in-flight async tag extraction jobs keyed by (story, branch, msg_index).
+_PENDING_EXTRACT_LOCK = threading.Lock()
+_PENDING_EXTRACT: set[tuple[str, str, int]] = set()
+
 # Scene-transient keys that should never be persisted (used by validation gate + inner)
 _SCENE_KEYS = {
     "location", "location_update", "location_details",
@@ -279,6 +283,33 @@ def _save_json(path, data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+
+
+def _mark_extract_pending(story_id: str, branch_id: str, msg_index: int):
+    with _PENDING_EXTRACT_LOCK:
+        _PENDING_EXTRACT.add((story_id, branch_id, msg_index))
+
+
+def _mark_extract_done(story_id: str, branch_id: str, msg_index: int):
+    with _PENDING_EXTRACT_LOCK:
+        _PENDING_EXTRACT.discard((story_id, branch_id, msg_index))
+
+
+def _wait_extract_done(story_id: str, branch_id: str, msg_index: int, timeout_s: float = 8.0):
+    """Best-effort wait for async extraction of a specific message index to finish."""
+    if msg_index is None or msg_index < 0:
+        return
+    deadline = time.time() + max(0.0, timeout_s)
+    while time.time() < deadline:
+        with _PENDING_EXTRACT_LOCK:
+            pending = (story_id, branch_id, msg_index) in _PENDING_EXTRACT
+        if not pending:
+            return
+        time.sleep(0.05)
+    log.warning(
+        "extract_wait timeout: story=%s branch=%s msg=%s",
+        story_id, branch_id, msg_index,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1910,6 +1941,8 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
     if len(gm_text) < 200:
         return
 
+    _mark_extract_pending(story_id, branch_id, msg_index)
+
     def _do_extract():
         from llm_bridge import call_oneshot
         from event_db import get_event_titles, get_event_title_map, update_event_status
@@ -2272,6 +2305,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             log.warning("    extract_tags: JSON parse failed (%s), skipping", e)
         except Exception as e:
             log.exception("    extract_tags: failed, skipping")
+        finally:
+            # Keep message snapshot consistent with post-async canonical state.
+            try:
+                _sync_gm_message_snapshot_after_async(story_id, branch_id, msg_index)
+            finally:
+                _mark_extract_done(story_id, branch_id, msg_index)
 
     t = threading.Thread(target=_do_extract, daemon=True)
     t.start()
@@ -3273,6 +3312,38 @@ def _find_world_day_at_index(story_id: str, branch_id: str, target_index: int) -
     return 0  # default: day 0 (same as world_timer default)
 
 
+def _sync_gm_message_snapshot_after_async(story_id: str, branch_id: str, msg_index: int):
+    """Best-effort snapshot refresh after async extraction finishes.
+
+    The synchronous GM save path snapshots state/npcs immediately; async extraction
+    may apply additional state/npc/time updates later in the same turn. This helper
+    updates that GM message's snapshot fields to the post-async canonical values.
+    """
+    path = _story_messages_path(story_id, branch_id)
+    for attempt in range(5):
+        delta = _load_json(path, [])
+        updated = False
+        for msg in delta:
+            if msg.get("index") != msg_index or msg.get("role") != "gm":
+                continue
+            msg["state_snapshot"] = _load_character_state(story_id, branch_id)
+            msg["npcs_snapshot"] = _load_npcs(story_id, branch_id)
+            msg["world_day_snapshot"] = get_world_day(story_id, branch_id)
+            msg["dungeon_progress_snapshot"] = get_dungeon_progress_snapshot(story_id, branch_id)
+            msg["snapshot_async_synced_at"] = datetime.now(timezone.utc).isoformat()
+            updated = True
+            break
+        if updated:
+            _save_json(path, delta)
+            return
+        # GM message may not be persisted yet if stream/save race occurs.
+        time.sleep(0.1)
+    log.info(
+        "snapshot_sync: gm message not found (story=%s branch=%s msg=%s)",
+        story_id, branch_id, msg_index,
+    )
+
+
 def _build_augmented_message(
     story_id: str, branch_id: str, user_text: str,
     character_state: dict | None = None,
@@ -3936,6 +4007,7 @@ def api_branches_create():
     branch_id = f"branch_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
+    _wait_extract_done(story_id, parent_branch_id, branch_point_index)
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
     _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
@@ -4154,6 +4226,7 @@ def api_branches_edit():
     branch_id = f"branch_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
+    _wait_extract_done(story_id, parent_branch_id, branch_point_index)
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
     _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
@@ -4329,6 +4402,7 @@ def api_branches_edit_stream():
     branch_id = f"branch_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
+    _wait_extract_done(story_id, parent_branch_id, branch_point_index)
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
     _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
@@ -4511,6 +4585,7 @@ def api_branches_regenerate():
     branch_id = f"branch_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
+    _wait_extract_done(story_id, parent_branch_id, branch_point_index)
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
     _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
@@ -4666,6 +4741,7 @@ def api_branches_regenerate_stream():
     branch_id = f"branch_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
 
+    _wait_extract_done(story_id, parent_branch_id, branch_point_index)
     forked_state = _find_state_at_index(story_id, parent_branch_id, branch_point_index)
     _backfill_forked_state(forked_state, story_id, source_branch_id)
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)

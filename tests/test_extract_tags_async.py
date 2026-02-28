@@ -55,6 +55,15 @@ def mock_log_usage(monkeypatch):
     monkeypatch.setattr(app_module, "_log_llm_usage", lambda *a, **kw: None)
 
 
+@pytest.fixture(autouse=True)
+def clear_pending_extract():
+    with app_module._PENDING_EXTRACT_LOCK:
+        app_module._PENDING_EXTRACT.clear()
+    yield
+    with app_module._PENDING_EXTRACT_LOCK:
+        app_module._PENDING_EXTRACT.clear()
+
+
 @pytest.fixture
 def story_id():
     return "test_story"
@@ -196,6 +205,55 @@ class TestAsyncExtractionParsing:
         state_path = setup_story / "branches" / "main" / "character_state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["current_status"] == "回退解析"
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_snapshot_synced_after_async_updates(self, mock_llm, story_id, setup_story):
+        """Async extraction should refresh the GM message snapshot to canonical state."""
+        msg_path = setup_story / "branches" / "main" / "messages.json"
+        stale_snapshot = {
+            "name": "測試者",
+            "current_phase": "主神空間",
+            "reward_points": 5000,
+            "inventory": [],
+            "current_status": "舊狀態",
+        }
+        msg_path.write_text(json.dumps([{
+            "index": 1,
+            "role": "gm",
+            "content": "舊訊息",
+            "state_snapshot": stale_snapshot,
+            "npcs_snapshot": [],
+            "world_day_snapshot": 0,
+            "dungeon_progress_snapshot": {
+                "history": [],
+                "current_dungeon": None,
+                "total_dungeons_completed": 0,
+            },
+        }], ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.return_value = json.dumps({
+            "state": {"current_status": "已同步新狀態"},
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        msgs = json.loads(msg_path.read_text(encoding="utf-8"))
+        synced = msgs[0]
+        assert synced["state_snapshot"] == state
+        assert synced["state_snapshot"]["current_status"] == "已同步新狀態"
+        assert "snapshot_async_synced_at" in synced
+        assert (story_id, "main", 1) not in app_module._PENDING_EXTRACT
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_pending_extract_cleared_when_gm_message_missing(self, mock_llm, story_id, setup_story):
+        """Pending extraction marker should always clear even if snapshot target is missing."""
+        mock_llm.return_value = json.dumps({"state": {"current_status": "略"}})
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=999)
+
+        assert (story_id, "main", 999) not in app_module._PENDING_EXTRACT
 
 
 # ===================================================================
