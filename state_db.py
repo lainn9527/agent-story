@@ -8,6 +8,12 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
+from npc_lifecycle import (
+    NPC_LIFECYCLE_ACTIVE,
+    NPC_LIFECYCLE_ARCHIVED,
+    parse_npc_lifecycle_status,
+)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
@@ -21,11 +27,10 @@ _CATEGORY_LABELS = {
 }
 
 # NOTE:
-# These normalization helpers intentionally mirror app.py logic
+# Tier + relationship normalization helpers intentionally mirror app.py logic
 # (_NPC_TIER_ALLOWLIST/_NPC_TIER_TRANSLATION + _rel_to_str) to avoid
 # importing app.py (which would create circular coupling and heavy init side effects).
-# If tier format rules or relationship normalization change in app.py,
-# update this module in the same PR to keep rebuild path and dual-write path consistent.
+# NPC lifecycle alias parsing is shared via npc_lifecycle.py.
 _NPC_TIER_ALLOWLIST = {
     "D-", "D", "D+",
     "C-", "C", "C+",
@@ -42,10 +47,6 @@ _NPC_TIER_TRANSLATION = str.maketrans({
     "ー": "-",
     "＋": "+",
 })
-_NPC_LIFECYCLE_ACTIVE = "active"
-_NPC_LIFECYCLE_ARCHIVED = "archived"
-
-
 def _db_path(story_id: str, branch_id: str) -> str:
     return os.path.join(STORIES_DIR, story_id, "branches", branch_id, "state.db")
 
@@ -109,12 +110,7 @@ def _rel_to_str(val) -> str:
 
 
 def _normalize_npc_lifecycle_status(raw_status: object) -> str:
-    if not isinstance(raw_status, str):
-        return _NPC_LIFECYCLE_ACTIVE
-    text = raw_status.strip().lower()
-    if text in {"archived", "archive", "封存", "已封存", "归档", "歸檔"}:
-        return _NPC_LIFECYCLE_ARCHIVED
-    return _NPC_LIFECYCLE_ACTIVE
+    return parse_npc_lifecycle_status(raw_status) or NPC_LIFECYCLE_ACTIVE
 
 
 def _row_has_archived_tag(tags: object) -> bool:
@@ -392,7 +388,7 @@ def rebuild_from_json(
             if not name:
                 continue
             tags = "NPC"
-            if _normalize_npc_lifecycle_status(npc.get("lifecycle_status")) == _NPC_LIFECYCLE_ARCHIVED:
+            if _normalize_npc_lifecycle_status(npc.get("lifecycle_status")) == NPC_LIFECYCLE_ARCHIVED:
                 tags = "NPC|ARCHIVED"
             npc_rows.append((name, build_npc_content(npc), tags))
 

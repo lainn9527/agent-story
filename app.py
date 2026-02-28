@@ -96,6 +96,7 @@ from dungeon_system import (
     _load_dungeon_templates, _load_dungeon_template, _load_dungeon_progress,
     _parse_rank,
 )
+from npc_lifecycle import parse_npc_lifecycle_status
 
 # ---------------------------------------------------------------------------
 # Config
@@ -728,16 +729,7 @@ def _resolve_npc_identity(name: str, existing_npcs: list[dict]) -> str | None:
 
 
 def _normalize_npc_lifecycle_status(raw_status: object) -> str | None:
-    if not isinstance(raw_status, str):
-        return None
-    text = raw_status.strip().lower()
-    if not text:
-        return None
-    if text in {"active", "啟用", "活动", "活動"}:
-        return "active"
-    if text in {"archived", "archive", "封存", "已封存", "归档", "歸檔"}:
-        return "archived"
-    return None
+    return parse_npc_lifecycle_status(raw_status)
 
 
 def _derive_npc_lifecycle_from_current_status(
@@ -3921,9 +3913,15 @@ def _build_augmented_message(
 
     # State RAG — on-demand retrieval for inventory/skills/npcs/relations/missions/systems.
     if character_state:
+        all_npcs: list[dict]
         if npcs is None:
-            npcs = _load_npcs(story_id, branch_id)
-        all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
+            all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
+            npcs = [
+                n for n in all_npcs
+                if isinstance(n, dict) and _normalize_npc_lifecycle_status(n.get("lifecycle_status")) != "archived"
+            ]
+        else:
+            all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
         must_include = _extract_state_must_include_keys(user_text, character_state, all_npcs)
         state_block = search_state_entries(
             story_id,
@@ -4274,6 +4272,7 @@ def api_send():
 
     # 7. Trigger NPC evolution if due
     turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
+    # Intentionally active-only: archived NPCs are historical records, not evolution targets.
     if _load_npcs(story_id, branch_id) and should_run_evolution(story_id, branch_id, turn_count):
         npc_text = _build_npc_text(story_id, branch_id)
         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
@@ -4421,6 +4420,7 @@ def api_send_stream():
 
                     # NPC evolution
                     turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
+                    # Intentionally active-only: archived NPCs are historical records, not evolution targets.
                     if _load_npcs(story_id, branch_id) and should_run_evolution(story_id, branch_id, turn_count):
                         npc_text = _build_npc_text(story_id, branch_id)
                         recent_text = "\n".join(m.get("content", "")[:200] for m in full_timeline[-6:])
@@ -6473,7 +6473,8 @@ def api_npcs_create():
     if not name:
         return jsonify({"ok": False, "error": "name required"}), 400
     _save_npc(story_id, body, branch_id)
-    return jsonify({"ok": True, "npcs": _load_npcs(story_id, branch_id)})
+    # Return full set so callers can observe auto-archived updates from this write.
+    return jsonify({"ok": True, "npcs": _load_npcs(story_id, branch_id, include_archived=True)})
 
 
 @app.route("/api/npcs/<npc_id>", methods=["DELETE"])

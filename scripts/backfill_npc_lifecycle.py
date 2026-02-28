@@ -16,6 +16,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 import state_db
+from npc_lifecycle import (
+    NPC_LIFECYCLE_ACTIVE,
+    NPC_LIFECYCLE_ARCHIVED,
+    parse_npc_lifecycle_status,
+)
 
 STORIES_DIR = os.path.join(PROJECT_ROOT, "data", "stories")
 ARCHIVE_KEYWORDS = (
@@ -61,12 +66,7 @@ def _save_json(path: str, data) -> None:
 
 
 def _normalize_lifecycle_status(raw_status: object) -> str:
-    if not isinstance(raw_status, str):
-        return "active"
-    text = raw_status.strip().lower()
-    if text in {"archived", "archive", "封存", "已封存", "归档", "歸檔"}:
-        return "archived"
-    return "active"
+    return parse_npc_lifecycle_status(raw_status) or NPC_LIFECYCLE_ACTIVE
 
 
 def _derive_lifecycle(current_status: object, existing_status: object) -> tuple[str, str | None]:
@@ -76,10 +76,10 @@ def _derive_lifecycle(current_status: object, existing_status: object) -> tuple[
         return existing, None
     for kw in UNARCHIVE_KEYWORDS:
         if kw in text:
-            return "active", kw
+            return NPC_LIFECYCLE_ACTIVE, kw
     for kw in ARCHIVE_KEYWORDS:
         if kw in text:
-            return "archived", kw
+            return NPC_LIFECYCLE_ARCHIVED, kw
     return existing, None
 
 
@@ -98,7 +98,7 @@ def _apply_lifecycle(npc: dict) -> tuple[dict, str]:
     old = _normalize_lifecycle_status(npc.get("lifecycle_status"))
     new, matched_kw = _derive_lifecycle(npc.get("current_status"), old)
     updated["lifecycle_status"] = new
-    if new == "archived":
+    if new == NPC_LIFECYCLE_ARCHIVED:
         if matched_kw:
             updated["archived_reason"] = f"current_status:{matched_kw}"
         else:
