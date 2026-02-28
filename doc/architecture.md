@@ -25,6 +25,10 @@ Browser (static/app.js, templates/index.html)
   - 依 `llm_config.json` 分派 provider
   - 統一 non-stream/stream 介面
   - token usage metadata 擷取
+- `llm_trace.py`
+  - 結構化落盤 LLM request/response trace
+  - 依 story/date/branch/message 分區存檔
+  - 內建 retention prune（按日期資料夾清理）
 - `gemini_bridge.py` / `claude_bridge.py`
   - Gemini API 或 Claude CLI 的實際呼叫
 - `lore_db.py` / `event_db.py` / `usage_db.py`
@@ -72,6 +76,11 @@ Browser (static/app.js, templates/index.html)
 - `saves.json`
 - `images/`
 
+`data/llm_traces/`
+
+- `<story_id>/<YYYY-MM-DD>/<branch_id>/<msg_tag>/<HHMMSS.mmm>_<stage>_<id>.json`
+- 由 `app.py` 與 `lore_organizer.py` 在 LLM request/response 前後寫入（best-effort）
+
 ## 4) Timeline 與 Branch 模型
 
 - `main` 分支的基底對話來自 `story_design/<story_id>/parsed_conversation.json`。
@@ -85,7 +94,7 @@ Browser (static/app.js, templates/index.html)
 1. 寫入玩家訊息到分支 delta。
 2. 建構 system prompt（角色狀態 + lore + NPC + recap + 副本上下文）。
 3. 對玩家訊息做 context augmentation（lore/events/npc 活動/骰子提示）。
-4. 呼叫 LLM（stream 或 non-stream）。
+4. 記錄 request trace，呼叫 LLM（stream 或 non-stream），再記錄 response trace。
 5. `_process_gm_response()`：
    - 移除 echo 回來的 context 區塊
    - 同步抽取 `STATE/LORE/NPC/EVENT/IMG/TIME` tag
@@ -127,4 +136,3 @@ Browser (static/app.js, templates/index.html)
 - 檔案儲存採「寫入 `.tmp` 後 `os.replace`」避免半寫入。
 - `world_timer`、`dungeon_system`、`lore_organizer` 有 branch/story 等級 lock。
 - SQLite 使用 WAL（各 DB 模組內設定）。
-

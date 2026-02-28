@@ -163,6 +163,35 @@ git tag vX.Y.Z
 - 開關：`LLM_TRACE_ENABLED`（預設開）
 - 保留天數：`LLM_TRACE_RETENTION_DAYS`（預設 14）
 - 由 `app.py::_trace_llm()` 寫入（best-effort，不應阻斷主流程）
+- 檔案位置：`data/llm_traces/<story_id>/<YYYY-MM-DD>/<branch_id>/<msg_tag>/`
+- 檔名格式：`<HHMMSS.mmm>_<stage>_<id>.json`
+
+常見 `stage`：
+
+- `gm_request` / `gm_response_raw`
+- `extract_tags_request` / `extract_tags_response_raw`
+- `state_normalize_request` / `state_normalize_response_raw`
+- `lore_promote_review_request` / `lore_promote_review_response_raw`
+- `lore_chat_request` / `lore_chat_response_raw`
+- `lore_organizer_request` / `lore_organizer_response_raw`
+
+快速排查指令（以 `story_original` 為例）：
+
+```bash
+# 看最近 20 個 trace 檔案
+find data/llm_traces/story_original -type f | sort | tail -n 20
+
+# 找特定 stage
+rg -n '"stage": "gm_request"' data/llm_traces/story_original
+
+# 看某個 msg_tag 下的 request/response
+ls -lah data/llm_traces/story_original/<YYYY-MM-DD>/<branch_id>/msg_000407/
+```
+
+注意：
+
+- trace 可能含完整 prompt、recent messages、原始模型輸出，分享前請先去識別化。
+- retention 清理是「寫入時觸發、按日期資料夾刪除」；調整天數後需有新 trace 寫入才會生效。
 
 ## 10) 常見問題排查
 

@@ -10,6 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - **角色狀態 deterministic validation gate（Phase 1）**: 寫入前新增 `_validate_state_update` 規則閘門，統一檢查並清理非法 `current_phase`、非數值點數欄位、錯誤型別 map/list 更新、非 schema `_add/_remove`、scene/instruction 汙染鍵等；`_apply_state_update` 與 `_normalize_state_async` 共同走 `_run_state_gate`，在 `enforce` 模式下只套用清洗後更新。新增完整測試覆蓋 `tests/test_state_review.py`。 ([#128])
 - **LLM reviewer repair path（Phase 2）**: `enforce + STATE_REVIEW_LLM=on` 時，對 violations 啟用 `_review_state_update_llm` 產生 `patch/drop_keys` 修補建議，並二次套用 deterministic gate 驗證後才可寫入。新增 `tests/test_state_reviewer.py` 覆蓋 reviewer 成功/失敗/格式錯誤/二次驗證路徑。 ([#128])
+- **Structured LLM trace logging**: 新增 `llm_trace.py`，在 `gm/oneshot/lore chat/lore organizer` 等路徑記錄 request/response 原始 payload，檔案落在 `data/llm_traces/<story_id>/<YYYY-MM-DD>/<branch_id>/msg_<index>/...json`，支援 `LLM_TRACE_ENABLED` 與 `LLM_TRACE_RETENTION_DAYS`。 ([#132])
 
 ### Changed
 - **State review 預設升級為強制審核**: 預設 `STATE_REVIEW_MODE=enforce`、`STATE_REVIEW_LLM=on`，直接以 gate + reviewer 作為 production 預設行為。 ([#128])
@@ -20,6 +21,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **數值型欄位 bool 漏洞**: 明確排除 `bool` 被視為 `int` 的情況，修復 `reward_points`/`*_delta` 在 gate 與 apply 路徑可能被 `True/False` 誤用而污染狀態。 ([#128])
 
 [#128]: https://github.com/lainn9527/agent-story/pull/128
+[#132]: https://github.com/lainn9527/agent-story/pull/132
 
 ## [0.20.15] - 2026-02-27
 
