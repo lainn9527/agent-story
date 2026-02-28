@@ -6,6 +6,7 @@ tag extraction — NOT the LLM call itself (which is mocked).
 
 import json
 import threading
+import time
 from unittest import mock
 
 import pytest
@@ -15,6 +16,8 @@ import event_db
 import lore_db
 import state_db
 import world_timer
+
+REAL_THREAD = threading.Thread
 
 
 class _SyncThread(threading.Thread):
@@ -53,6 +56,15 @@ def run_threads_synchronously(monkeypatch):
 def mock_log_usage(monkeypatch):
     """Disable LLM usage logging (no real provider in tests)."""
     monkeypatch.setattr(app_module, "_log_llm_usage", lambda *a, **kw: None)
+
+
+@pytest.fixture(autouse=True)
+def clear_pending_extract():
+    with app_module._PENDING_EXTRACT_LOCK:
+        app_module._PENDING_EXTRACT.clear()
+    yield
+    with app_module._PENDING_EXTRACT_LOCK:
+        app_module._PENDING_EXTRACT.clear()
 
 
 @pytest.fixture
@@ -196,6 +208,122 @@ class TestAsyncExtractionParsing:
         state_path = setup_story / "branches" / "main" / "character_state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["current_status"] == "回退解析"
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_snapshot_synced_after_async_updates(self, mock_llm, story_id, setup_story):
+        """Async extraction should refresh the GM message snapshot to canonical state."""
+        msg_path = setup_story / "branches" / "main" / "messages.json"
+        stale_snapshot = {
+            "name": "測試者",
+            "current_phase": "主神空間",
+            "reward_points": 5000,
+            "inventory": [],
+            "current_status": "舊狀態",
+        }
+        msg_path.write_text(json.dumps([{
+            "index": 1,
+            "role": "gm",
+            "content": "舊訊息",
+            "state_snapshot": stale_snapshot,
+            "npcs_snapshot": [],
+            "world_day_snapshot": 0,
+            "dungeon_progress_snapshot": {
+                "history": [],
+                "current_dungeon": None,
+                "total_dungeons_completed": 0,
+            },
+        }], ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.return_value = json.dumps({
+            "state": {"current_status": "已同步新狀態"},
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        msgs = json.loads(msg_path.read_text(encoding="utf-8"))
+        synced = msgs[0]
+        assert synced["state_snapshot"] == state
+        assert synced["state_snapshot"]["current_status"] == "已同步新狀態"
+        assert "snapshot_async_synced_at" in synced
+        assert (story_id, "main", 1) not in app_module._PENDING_EXTRACT
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_pending_extract_cleared_when_gm_message_missing(self, mock_llm, story_id, setup_story):
+        """Pending extraction marker should always clear even if snapshot target is missing."""
+        mock_llm.return_value = json.dumps({"state": {"current_status": "略"}})
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=999)
+
+        assert (story_id, "main", 999) not in app_module._PENDING_EXTRACT
+
+    def test_wait_extract_done_waits_prior_indices(self, story_id):
+        """Wait should include pending extraction jobs at or before target index."""
+        app_module._mark_extract_pending(story_id, "main", 2)
+        t0 = time.time()
+        app_module._wait_extract_done(story_id, "main", 3, timeout_s=0.06)
+        elapsed = time.time() - t0
+
+        app_module._mark_extract_done(story_id, "main", 2)
+        assert elapsed >= 0.05
+
+    def test_wait_extract_done_ignores_future_indices(self, story_id):
+        """Wait should not block on pending extraction jobs newer than target index."""
+        app_module._mark_extract_pending(story_id, "main", 5)
+        t0 = time.time()
+        app_module._wait_extract_done(story_id, "main", 3, timeout_s=0.2)
+        elapsed = time.time() - t0
+        app_module._mark_extract_done(story_id, "main", 5)
+
+        assert elapsed < 0.05
+
+    def test_snapshot_sync_uses_branch_messages_lock(self, story_id, setup_story):
+        """Snapshot sync should respect per-branch messages lock to avoid RMW races."""
+        branch_dir = setup_story / "branches" / "main"
+        msg_path = branch_dir / "messages.json"
+        msg_path.write_text(json.dumps([
+            {
+                "index": 1,
+                "role": "gm",
+                "content": "舊訊息",
+                "state_snapshot": {"current_status": "舊狀態"},
+                "npcs_snapshot": [],
+                "world_day_snapshot": 0,
+                "dungeon_progress_snapshot": {
+                    "history": [],
+                    "current_dungeon": None,
+                    "total_dungeons_completed": 0,
+                },
+            },
+            {"index": 2, "role": "user", "content": "後續輸入"},
+        ], ensure_ascii=False), encoding="utf-8")
+
+        state_path = branch_dir / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["current_status"] = "新狀態"
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        lock = app_module._get_branch_messages_lock(story_id, "main")
+        finished = threading.Event()
+
+        def _run_sync():
+            app_module._sync_gm_message_snapshot_after_async(story_id, "main", 1)
+            finished.set()
+
+        with lock:
+            t = REAL_THREAD(target=_run_sync, daemon=True)
+            t.start()
+            time.sleep(0.05)
+            assert not finished.is_set()
+
+        t.join(timeout=1.0)
+        assert finished.is_set()
+
+        msgs = json.loads(msg_path.read_text(encoding="utf-8"))
+        assert any(m.get("index") == 2 and m.get("role") == "user" for m in msgs)
+        gm = next(m for m in msgs if m.get("index") == 1 and m.get("role") == "gm")
+        assert gm["state_snapshot"]["current_status"] == "新狀態"
 
 
 # ===================================================================

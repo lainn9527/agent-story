@@ -237,6 +237,21 @@ class TestBranchesAPI:
         state_db_path = setup_story / "branches" / branch_id / "state.db"
         assert state_db_path.exists()
 
+    def test_create_branch_waits_for_pending_extract(self, client, setup_story, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            app_module, "_wait_extract_done",
+            lambda story_id, branch_id, msg_index, timeout_s=8.0: calls.append((story_id, branch_id, msg_index)),
+        )
+
+        resp = client.post("/api/branches", json={
+            "name": "等待測試",
+            "branch_point_index": 1,
+        })
+
+        assert resp.status_code == 200
+        assert calls == [("test_story", "main", 1)]
+
     def test_create_blank_branch(self, client, setup_story, story_id):
         resp = client.post("/api/branches/blank", json={"name": "空白分支"})
         assert resp.status_code == 200
@@ -604,6 +619,45 @@ class TestBranchesAPI:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["ok"] is True
+
+    def test_edit_waits_for_pending_extract(self, client, setup_story, monkeypatch):
+        """Edit route should wait for branch-point async extraction before snapshot lookup."""
+        import app as app_module
+        calls = []
+        monkeypatch.setattr(
+            app_module, "_wait_extract_done",
+            lambda story_id, branch_id, msg_index, timeout_s=8.0: calls.append((story_id, branch_id, msg_index)),
+        )
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("GM回覆", None))
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+
+        resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "另一個改動",
+        })
+
+        assert resp.status_code == 200
+        assert calls == [("test_story", "main", 1)]
+
+    def test_regenerate_waits_for_pending_extract(self, client, setup_story, monkeypatch):
+        """Regenerate route should wait for branch-point async extraction before snapshot lookup."""
+        import app as app_module
+        calls = []
+        monkeypatch.setattr(
+            app_module, "_wait_extract_done",
+            lambda story_id, branch_id, msg_index, timeout_s=8.0: calls.append((story_id, branch_id, msg_index)),
+        )
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("GM回覆", None))
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+
+        resp = client.post("/api/branches/regenerate", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 2,
+        })
+
+        assert resp.status_code == 200
+        assert calls == [("test_story", "main", 2)]
 
     def test_edit_stream_no_change_rejected(self, client, setup_story):
         """Streaming edit with identical content should return error SSE event."""
