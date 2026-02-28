@@ -162,6 +162,15 @@
 - `_load_npcs()` 預設只回 active；需要全量時用 `include_archived=True`。
 - state.db 對 archived NPC 會打 `NPC|ARCHIVED` tag；`search_state` 預設過濾，只有 forced key（玩家明確提名）才保留。
 
+### 7.5 GM hidden plan（敘事前瞻）
+
+- 每分支可有 `branches/<bid>/gm_plan.json`（玩家不可見）。
+- 來源：`_extract_tags_async()` 的 `plan` 擷取結果（LLM 根據 GM 回覆重寫）。
+- 注入：`_build_augmented_message()` 會在事件區塊後注入短版 plan block，僅給 GM。
+- `must_payoff` 以 `event_title` 為穩定鍵，並在寫入/拷貝時 relink 成目標分支的 `event_id`。
+- 倒數規則：`remaining_turns = ttl_turns - (current_index - payoff.created_at_index)`，`remaining <= 0` 的 payoff 不注入。
+- `pistol_mode` 時跳過 plan 持久化，避免 NSFW 場景污染敘事規劃。
+
 ---
 
 ## 8. 分支操作機制
@@ -171,7 +180,7 @@
 - 都會建立新分支，不覆蓋原分支
 - 新分支會繼承：
   - 對應 index 的 state/NPC/world_day snapshot
-  - recap、cheat、branch lore、events、dungeon progress
+  - recap、cheat、branch lore、events、dungeon progress、gm plan（若 `plan.updated_at_index <= branch_point_index`）
 
 ### 8.2 Promote
 
@@ -184,6 +193,7 @@
 - 子分支訊息覆寫回父分支（從 branch point 之後）
 - 複製 state/NPC/recap/world_day/cheats/dungeon progress
 - 合併 child events 回 parent：新標題直接新增；同標題時以 child 的 status 覆蓋 parent
+- child 的 `gm_plan.json` 會覆寫 parent，並以 parent 的 active events 重新 relink `must_payoff.event_id`
 - 子分支標記為 `merged`
 
 ### 8.4 Auto-prune

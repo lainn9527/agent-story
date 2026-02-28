@@ -247,6 +247,7 @@ _STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT
 STATE_RAG_TOKEN_BUDGET = max(200, _parse_env_int("STATE_RAG_TOKEN_BUDGET", 2000))
 STATE_RAG_MAX_ITEMS = max(1, _parse_env_int("STATE_RAG_MAX_ITEMS", 30))
 STATE_RAG_NPC_LIMIT = max(1, _parse_env_int("STATE_RAG_NPC_LIMIT", 10))
+GM_PLAN_CHAR_LIMIT = max(120, _parse_env_int("GM_PLAN_CHAR_LIMIT", 500))
 
 # Track in-flight async tag extraction jobs keyed by (story, branch, msg_index).
 _PENDING_EXTRACT_LOCK = threading.Lock()
@@ -1551,6 +1552,293 @@ def _copy_branch_lore_for_fork(story_id: str, source_branch_id: str, target_bran
         )
 
 
+def _gm_plan_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "gm_plan.json")
+
+
+def _load_gm_plan(story_id: str, branch_id: str) -> dict:
+    data = _load_json(_gm_plan_path(story_id, branch_id), {})
+    return data if isinstance(data, dict) else {}
+
+
+def _save_gm_plan(story_id: str, branch_id: str, plan: dict):
+    path = _gm_plan_path(story_id, branch_id)
+    if not isinstance(plan, dict) or not plan:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    _save_json(path, plan)
+
+
+def _safe_int(value: object, default: int | None = None) -> int | None:
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _relink_plan_payoffs_by_title(payoffs: object, active_event_rows: list[dict],
+                                  default_created_index: int) -> list[dict]:
+    if not isinstance(payoffs, list):
+        return []
+
+    id_to_title: dict[int, str] = {}
+    title_to_id: dict[str, int] = {}
+    for row in active_event_rows:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title", "")).strip()
+        eid = _safe_int(row.get("id"))
+        if not title or eid is None:
+            continue
+        id_to_title[eid] = title
+        if title not in title_to_id:
+            title_to_id[title] = eid
+
+    linked: list[dict] = []
+    seen_titles: set[str] = set()
+    for raw in payoffs:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("event_title", "")).strip()
+        if not title or title in seen_titles:
+            continue
+
+        raw_event_id = _safe_int(raw.get("event_id"))
+        resolved_event_id: int | None = None
+        if raw_event_id is not None and id_to_title.get(raw_event_id) == title:
+            resolved_event_id = raw_event_id
+        else:
+            resolved_event_id = title_to_id.get(title)
+        if resolved_event_id is None:
+            continue
+
+        ttl = _safe_int(raw.get("ttl_turns"), 3) or 3
+        ttl = max(1, min(ttl, 6))
+        created_at_index = _safe_int(raw.get("created_at_index"), default_created_index)
+        if created_at_index is None:
+            created_at_index = default_created_index
+
+        linked.append({
+            "event_title": title,
+            "event_id": resolved_event_id,
+            "ttl_turns": ttl,
+            "created_at_index": created_at_index,
+        })
+        seen_titles.add(title)
+    return linked
+
+
+def _normalize_gm_plan_payload(raw_plan: dict, previous_plan: dict, msg_index: int,
+                               active_event_rows: list[dict]) -> dict | None:
+    if not isinstance(raw_plan, dict):
+        return None
+
+    arc = str(raw_plan.get("arc", "")).strip()
+    arc = arc[:120]
+
+    next_beats: list[str] = []
+    for beat in raw_plan.get("next_beats", []) if isinstance(raw_plan.get("next_beats"), list) else []:
+        if not isinstance(beat, str):
+            continue
+        text = beat.strip()
+        if not text or text in next_beats:
+            continue
+        next_beats.append(text[:80])
+        if len(next_beats) >= 3:
+            break
+
+    prev_created_at: dict[str, int] = {}
+    if isinstance(previous_plan, dict):
+        for payoff in previous_plan.get("must_payoff", []) if isinstance(previous_plan.get("must_payoff"), list) else []:
+            if not isinstance(payoff, dict):
+                continue
+            title = str(payoff.get("event_title", "")).strip()
+            created_at = _safe_int(payoff.get("created_at_index"))
+            if title and created_at is not None:
+                prev_created_at[title] = created_at
+
+    raw_payoffs: list[dict] = []
+    for payoff in raw_plan.get("must_payoff", []) if isinstance(raw_plan.get("must_payoff"), list) else []:
+        if not isinstance(payoff, dict):
+            continue
+        title = str(payoff.get("event_title", "")).strip()
+        if not title:
+            continue
+        ttl = _safe_int(payoff.get("ttl_turns"), 3) or 3
+        ttl = max(1, min(ttl, 6))
+        created_at = prev_created_at.get(title)
+        if created_at is None:
+            created_at = _safe_int(payoff.get("created_at_index"), msg_index)
+        if created_at is None:
+            created_at = msg_index
+        raw_payoffs.append({
+            "event_title": title,
+            "event_id": payoff.get("event_id"),
+            "ttl_turns": ttl,
+            "created_at_index": created_at,
+        })
+
+    linked_payoffs = _relink_plan_payoffs_by_title(
+        raw_payoffs, active_event_rows, default_created_index=msg_index
+    )
+
+    if not arc and not next_beats and not linked_payoffs:
+        return {}
+
+    return {
+        "arc": arc,
+        "next_beats": next_beats,
+        "must_payoff": linked_payoffs,
+        "updated_at_index": msg_index,
+    }
+
+
+def _copy_gm_plan(story_id: str, from_bid: str, to_bid: str, branch_point_index: int | None = None):
+    if from_bid == to_bid:
+        return
+
+    plan = _load_gm_plan(story_id, from_bid)
+    if not plan:
+        if branch_point_index is None:
+            _save_gm_plan(story_id, to_bid, {})
+        return
+
+    if branch_point_index is not None:
+        updated_at = _safe_int(plan.get("updated_at_index"))
+        if updated_at is None or updated_at > branch_point_index:
+            return
+
+    copied = copy.deepcopy(plan)
+    copied["arc"] = str(copied.get("arc", "")).strip()[:120]
+    copied["next_beats"] = [
+        str(b).strip()[:80]
+        for b in copied.get("next_beats", [])
+        if isinstance(b, str) and str(b).strip()
+    ][:3]
+    updated_at_index = _safe_int(copied.get("updated_at_index"), 0) or 0
+    active_event_rows = get_active_events(story_id, to_bid, limit=80)
+    copied["must_payoff"] = _relink_plan_payoffs_by_title(
+        copied.get("must_payoff", []),
+        active_event_rows,
+        default_created_index=updated_at_index,
+    )
+
+    if not copied["arc"] and not copied["next_beats"] and not copied["must_payoff"]:
+        _save_gm_plan(story_id, to_bid, {})
+        return
+    _save_gm_plan(story_id, to_bid, copied)
+
+
+def _compute_payoff_remaining(payoff: dict, current_index: int) -> int:
+    ttl = _safe_int(payoff.get("ttl_turns"), 3) or 3
+    ttl = max(1, min(ttl, 6))
+    created_at = _safe_int(payoff.get("created_at_index"), current_index)
+    if created_at is None:
+        created_at = current_index
+    return ttl - max(0, current_index - created_at)
+
+
+def _summarize_gm_plan_for_prompt(plan: dict, current_index: int) -> str:
+    if not isinstance(plan, dict):
+        return "（無）"
+
+    lines: list[str] = []
+    arc = str(plan.get("arc", "")).strip()
+    if arc:
+        lines.append(f"弧線：{arc}")
+
+    beats = [
+        str(b).strip()
+        for b in plan.get("next_beats", [])
+        if isinstance(b, str) and str(b).strip()
+    ][:3]
+    if beats:
+        lines.append("節點：")
+        for i, beat in enumerate(beats, 1):
+            lines.append(f"{i}. {beat}")
+
+    payoffs: list[str] = []
+    for payoff in plan.get("must_payoff", []) if isinstance(plan.get("must_payoff"), list) else []:
+        if not isinstance(payoff, dict):
+            continue
+        title = str(payoff.get("event_title", "")).strip()
+        if not title:
+            continue
+        remaining = _compute_payoff_remaining(payoff, current_index)
+        if remaining <= 0:
+            continue
+        payoffs.append(f"{title}（剩餘 {remaining} 回合）")
+    if payoffs:
+        lines.append("待回收：")
+        lines.extend(f"- {p}" for p in payoffs[:2])
+
+    return "\n".join(lines) if lines else "（無）"
+
+
+def _build_gm_plan_injection_block(story_id: str, branch_id: str, current_index: int,
+                                   char_limit: int = GM_PLAN_CHAR_LIMIT) -> str:
+    plan = _load_gm_plan(story_id, branch_id)
+    if not isinstance(plan, dict) or not plan:
+        return ""
+
+    arc = str(plan.get("arc", "")).strip()
+    beats = [
+        str(b).strip()
+        for b in plan.get("next_beats", [])
+        if isinstance(b, str) and str(b).strip()
+    ][:3]
+
+    payoffs: list[tuple[str, int]] = []
+    for payoff in plan.get("must_payoff", []) if isinstance(plan.get("must_payoff"), list) else []:
+        if not isinstance(payoff, dict):
+            continue
+        title = str(payoff.get("event_title", "")).strip()
+        if not title:
+            continue
+        remaining = _compute_payoff_remaining(payoff, current_index)
+        if remaining <= 0:
+            continue
+        payoffs.append((title, remaining))
+    payoffs = payoffs[:2]
+
+    if not arc and not beats and not payoffs:
+        return ""
+
+    header = "[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]"
+
+    def _render(arc_text: str, beat_list: list[str], payoff_list: list[tuple[str, int]]) -> str:
+        lines = [header]
+        if arc_text:
+            lines.append(f"- 當前弧線：{arc_text}")
+        if beat_list:
+            lines.append("- 接下來節點：")
+            for i, beat in enumerate(beat_list, 1):
+                lines.append(f"  {i}. {beat}")
+        if payoff_list:
+            lines.append("- 待回收伏筆：")
+            for title, remaining in payoff_list:
+                lines.append(f"  - {title}（剩餘 {remaining} 回合）")
+        return "\n".join(lines)
+
+    while True:
+        block = _render(arc, beats, payoffs)
+        if len(block) <= char_limit:
+            return block
+        if payoffs:
+            payoffs = payoffs[:-1]
+            continue
+        if beats:
+            beats = beats[:-1]
+            continue
+        if len(arc) > 24:
+            arc = arc[: max(16, len(arc) - 12)].rstrip() + "…"
+            continue
+        return block[:char_limit].rstrip()
+
+
 def _search_branch_lore(story_id: str, branch_id: str, query: str,
                          token_budget: int = 1500,
                          context: dict | None = None) -> str:
@@ -2393,7 +2681,7 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
 
 
 def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: int, skip_state: bool = False, skip_time: bool = False):
-    """Background: use LLM to extract structured tags (lore/event/npc/state/time) from GM response."""
+    """Background: use LLM to extract structured tags (lore/event/plan/npc/state/time) from GM response."""
     if len(gm_text) < 200:
         return
 
@@ -2419,6 +2707,8 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             existing_titles = get_event_titles(story_id, branch_id)
             existing_title_map = get_event_title_map(story_id, branch_id)
             active_events_text = _build_active_events_hint(story_id, branch_id, limit=40)
+            previous_plan = _load_gm_plan(story_id, branch_id)
+            previous_plan_text = _summarize_gm_plan_for_prompt(previous_plan, current_index=msg_index)
 
             # Build schema summary for state extraction
             schema = _load_character_schema(story_id)
@@ -2488,7 +2778,18 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 'legacy events 格式：[{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}]\n'
                 "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
                 "可用狀態：planted/triggered/resolved/abandoned（可用同義詞如 ongoing/completed，系統會正規化）\n\n"
-                "## 3. NPC 資料（npcs）\n"
+                "## 3. GM 敘事計劃（plan）\n"
+                "提取 GM 回覆裡隱含的敘事走向，僅供後續 GM 生成時參考，不可透露給玩家。\n"
+                "上一輪 GM 計劃（供參考，可全部改寫）：\n"
+                f"{previous_plan_text}\n"
+                "輸出規則：\n"
+                "- arc：當前弧線，1 句話\n"
+                "- next_beats：接下來 1-3 個敘事節點（短句）\n"
+                "- must_payoff：0-2 個近期必須回收的伏筆\n"
+                "- must_payoff.event_title 必須對應目前 active 事件標題；event_id 能確認時才填\n"
+                "- ttl_turns 僅可為 1-6（預設 3）\n"
+                '格式：{"arc": "弧線", "next_beats": ["節點1", "節點2"], "must_payoff": [{"event_title": "神秘符文", "event_id": 42, "ttl_turns": 3}]}\n\n'
+                "## 4. NPC 資料（npcs）\n"
                 "提取首次登場或有重大變化的 NPC。\n"
                 '- tier：戰力等級（D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+）。'
                 "只有在文本明確提及或可直接判定時才填，否則用 null，不要猜測。\n"
@@ -2496,7 +2797,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 '格式：[{{"name": "名字", "role": "定位", "tier": "D-~S+ 或 null", "appearance": "外觀", '
                 '"personality": {{"openness": N, "conscientiousness": N, "extraversion": N, '
                 '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
-                "## 4. 角色狀態變化（state）\n"
+                "## 5. 角色狀態變化（state）\n"
                 f"Schema 告訴你角色有哪些欄位：\n{schema_summary}\n"
                 f"角色目前有這些欄位：{existing_state_keys}\n"
                 + (f"角色目前的列表內容（含人際關係）：\n{list_contents_str}\n" if list_contents_str else "")
@@ -2534,13 +2835,13 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- list_add/list_remove：list 型欄位增減\n"
                 "- 相容：若你無法輸出 state_ops，才輸出 legacy `state` 物件。\n"
                 "格式：state/state_ops 只填有變化的欄位。\n\n"
-                "## 5. 時間流逝（time）\n"
+                "## 6. 時間流逝（time）\n"
                 "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
                 "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
                 "- 隱含流逝參考：一場小戰鬥 → hours:1、大型戰役/Boss戰 → hours:3、探索建築/區域 → hours:2、長途移動/趕路 → hours:4、休息/過夜 → hours:8、訓練/修煉 → days:1\n"
                 "- 純對話/短暫互動/思考/角色創建/主神空間閒聊不需要輸出。只有場景中有實際行動推進才估算。\n"
                 '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
-                "## 6. 分支標題（branch_title）\n"
+                "## 7. 分支標題（branch_title）\n"
                 "用 4-8 個中文字總結這段 GM 回覆中**玩家的核心行動或場景轉折**。\n"
                 "例如：「七首殺屍測試」「巷道右側突圍」「自省之眼覺醒」「進入蜀山副本」「商城兌換裝備」\n"
                 "要求：動作導向、簡潔、不帶標點符號。\n"
@@ -2561,7 +2862,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     areas_str = ", ".join([a["id"] for a in template.get("areas", [])])
 
                     prompt += (
-                        f"## 7. 副本進度（dungeon）\n"
+                        f"## 8. 副本進度（dungeon）\n"
                         f"當前在副本【{template['name']}】中。分析 GM 文本中是否存在：\n"
                         f"- 主線劇情節點的完成（如「成功封印伽椰子」）\n"
                         f"- 新區域的發現或探索（如「進入二樓」、「深入地下室」）\n\n"
@@ -2585,7 +2886,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             prompt += (
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "npcs": [...], "state_ops": {...}, "state": {...}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
+                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "plan": {...}, "npcs": [...], "state_ops": {...}, "state": {...}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
@@ -2636,12 +2937,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             if not isinstance(data, dict):
                 return
 
-            saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False}
+            saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False, "plan": "no change"}
 
-            # Pistol mode: skip lore + event extraction (NSFW scenes shouldn't persist)
+            # Pistol mode: skip lore + event + plan extraction (NSFW scenes shouldn't persist)
             pistol = get_pistol_mode(_story_dir(story_id), branch_id)
             if pistol:
-                log.info("    extract_tags: pistol mode ON, skipping lore + events")
+                log.info("    extract_tags: pistol mode ON, skipping lore + events + plan")
 
             # Build prefix registry once for the batch (avoids per-entry rebuild)
             prefix_reg = build_prefix_registry(story_id)
@@ -2715,6 +3016,25 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                                 existing_title_map[title]["status"] = new_status
                                 saved_counts["events"] += 1
 
+            # GM hidden narrative plan — rewritten each round when provided.
+            if pistol:
+                saved_counts["plan"] = "skipped"
+            elif "plan" in data:
+                plan_data = data.get("plan")
+                if isinstance(plan_data, dict):
+                    active_event_rows_for_plan = get_active_events(story_id, branch_id, limit=80)
+                    normalized_plan = _normalize_gm_plan_payload(
+                        plan_data,
+                        previous_plan=previous_plan,
+                        msg_index=msg_index,
+                        active_event_rows=active_event_rows_for_plan,
+                    )
+                    if normalized_plan is not None:
+                        _save_gm_plan(story_id, branch_id, normalized_plan)
+                        saved_counts["plan"] = "updated" if normalized_plan else "cleared"
+                else:
+                    saved_counts["plan"] = "ignored"
+
             # NPCs — _save_npc has built-in merge by name
             for npc in data.get("npcs", []):
                 if npc.get("name", "").strip():
@@ -2776,12 +3096,13 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                     saved_counts["dungeon_area"] = True
 
             log.info(
-                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s, title %s, dungeon %s",
+                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s, title %s, plan %s, dungeon %s",
                 saved_counts["lore"], saved_counts["events"],
                 saved_counts["npcs"],
                 "updated" if saved_counts["state"] else "no change",
                 f"+{saved_counts['time']:.1f}d" if saved_counts.get("time") else "no change",
                 repr(saved_counts.get("title", "—")),
+                saved_counts.get("plan", "no change"),
                 "updated" if saved_counts.get("dungeon_progress") or saved_counts.get("dungeon_area") else "no change",
             )
 
@@ -3648,7 +3969,7 @@ def _migrate_design_files(story_id: str):
 # ---------------------------------------------------------------------------
 
 _CONTEXT_ECHO_RE = re.compile(
-    r"\[(?:命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
+    r"\[(?:命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態|GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
     re.DOTALL,
 )
 
@@ -3876,6 +4197,7 @@ def _build_augmented_message(
     character_state: dict | None = None,
     npcs: list[dict] | None = None,
     turn_count: int = 0,
+    current_index: int | None = None,
 ) -> tuple[str, dict | None]:
     """Add lore + events + NPC activities + dice context to user message.
 
@@ -3907,6 +4229,10 @@ def _build_augmented_message(
         events = search_relevant_events(story_id, user_text, branch_id, limit=3)
         if events:
             parts.append(events)
+        if current_index is not None:
+            plan_block = _build_gm_plan_injection_block(story_id, branch_id, current_index)
+            if plan_block:
+                parts.append(plan_block)
     activities = get_recent_activities(story_id, branch_id, limit=2)
     if activities:
         parts.append(activities)
@@ -4211,7 +4537,8 @@ def api_send():
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(
-        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc
+        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc,
+        current_index=player_msg["index"],
     )
     if dice_result:
         player_msg["dice"] = dice_result
@@ -4352,7 +4679,8 @@ def api_send_stream():
     )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(
-        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc
+        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc,
+        current_index=player_msg["index"],
     )
     if dice_result:
         player_msg["dice"] = dice_result
@@ -4553,6 +4881,7 @@ def api_branches_create():
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_branch_messages(story_id, branch_id, [])
@@ -4772,6 +5101,7 @@ def api_branches_edit():
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -4816,7 +5146,8 @@ def api_branches_edit():
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_edit, dice_result = _build_augmented_message(
-        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc
+        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc,
+        current_index=user_msg_index,
     )
     if dice_result:
         user_msg["dice"] = dice_result
@@ -4948,6 +5279,7 @@ def api_branches_edit_stream():
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -4990,7 +5322,8 @@ def api_branches_edit_stream():
     )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_edit, dice_result = _build_augmented_message(
-        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc
+        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc,
+        current_index=user_msg_index,
     )
     if dice_result:
         user_msg["dice"] = dice_result
@@ -5131,6 +5464,7 @@ def api_branches_regenerate():
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
 
     _save_branch_messages(story_id, branch_id, [])
@@ -5166,7 +5500,8 @@ def api_branches_regenerate():
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_regen, dice_result = _build_augmented_message(
-        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc
+        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc,
+        current_index=branch_point_index,
     )
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
@@ -5288,6 +5623,7 @@ def api_branches_regenerate_stream():
     copy_cheats(_story_dir(story_id), source_branch_id, branch_id)
     _copy_branch_lore_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
+    _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
     _save_branch_messages(story_id, branch_id, [])
 
@@ -5320,7 +5656,8 @@ def api_branches_regenerate_stream():
     )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_regen, dice_result = _build_augmented_message(
-        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc
+        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc,
+        current_index=branch_point_index,
     )
 
     gm_msg_index = branch_point_index + 1
@@ -5587,6 +5924,7 @@ def api_branches_merge():
     # Merge branch lore from child into parent (upsert, not overwrite)
     _merge_branch_lore_into(story_id, branch_id, parent_id)
     merge_events_into(story_id, branch_id, parent_id)
+    _copy_gm_plan(story_id, branch_id, parent_id, branch_point_index=None)
     copy_dungeon_progress(story_id, branch_id, parent_id)
 
     # 5. Reparent child's children to parent
