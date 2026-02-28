@@ -152,6 +152,14 @@ class TestBuildAugmentedMessage:
         text, dice = app_module._build_augmented_message(story_id, "main", "/gm 修改", {"current_phase": "主神空間"})
         assert dice is None
 
+    def test_must_include_skips_one_char_keys(self):
+        keys = app_module._extract_state_must_include_keys(
+            "說明",
+            {"inventory": {"明": ""}},
+            [{"name": "明"}],
+        )
+        assert keys == []
+
     @mock.patch("app.search_relevant_lore", return_value="")
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")

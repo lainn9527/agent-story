@@ -61,7 +61,8 @@ from state_db import (
     rebuild_from_json as rebuild_state_db_from_json,
     search_state as search_state_entries,
     get_summary as get_state_summary,
-    replace_category as replace_state_category,
+    replace_categories_batch as replace_state_categories_batch,
+    build_npc_content as build_state_npc_content,
     upsert_entry as upsert_state_entry,
     delete_entry as delete_state_entry,
 )
@@ -240,6 +241,7 @@ def _is_numeric_value(value: object) -> bool:
 STATE_REVIEW_LLM_TIMEOUT = _parse_env_float("STATE_REVIEW_LLM_TIMEOUT_MS", 20000.0) / 1000
 STATE_REVIEW_LLM_MAX_INFLIGHT = max(1, _parse_env_int("STATE_REVIEW_LLM_MAX_INFLIGHT", 4))
 _STATE_REVIEW_LLM_SEM = threading.BoundedSemaphore(STATE_REVIEW_LLM_MAX_INFLIGHT)
+STATE_RAG_TOKEN_BUDGET = max(200, _parse_env_int("STATE_RAG_TOKEN_BUDGET", 2000))
 
 # Scene-transient keys that should never be persisted (used by validation gate + inner)
 _SCENE_KEYS = {
@@ -767,25 +769,7 @@ def _build_npc_summary_text(story_id: str, branch_id: str = "main", npcs: list[d
 
 def _build_npc_state_entry_content(npc: dict) -> str:
     """Build compact text persisted to state.db npc entries."""
-    parts = []
-    role = (npc.get("role") or "").strip()
-    if role:
-        parts.append(f"定位:{role}")
-    tier = _normalize_npc_tier(npc.get("tier"))
-    if tier:
-        parts.append(f"戰力:{tier}級")
-    rel = (npc.get("relationship_to_player") or "").strip()
-    if rel:
-        parts.append(f"關係:{rel}")
-    status = (npc.get("current_status") or "").strip()
-    if status:
-        parts.append(f"狀態:{status}")
-    traits = npc.get("notable_traits")
-    if isinstance(traits, list) and traits:
-        compact_traits = [str(t).strip() for t in traits if str(t).strip()]
-        if compact_traits:
-            parts.append(f"特質:{'、'.join(compact_traits)}")
-    return "；".join(parts)
+    return build_state_npc_content(npc)
 
 
 def _sync_state_db_npc_entry(story_id: str, branch_id: str, npc: dict):
@@ -821,7 +805,6 @@ def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
                 key, val = _parse_item_to_kv(item.strip())
                 if key:
                     inv_rows.append((key, val, "道具"))
-        replace_state_category(story_id, branch_id, "inventory", inv_rows)
 
         ability_rows = []
         abilities = state.get("abilities", [])
@@ -829,7 +812,6 @@ def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
             for item in abilities:
                 if isinstance(item, str) and item.strip():
                     ability_rows.append((item.strip(), "", "技能"))
-        replace_state_category(story_id, branch_id, "ability", ability_rows)
 
         rel_rows = []
         rels = state.get("relationships", {})
@@ -839,7 +821,6 @@ def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
                 if not key:
                     continue
                 rel_rows.append((key, _rel_to_str(rel), "關係"))
-        replace_state_category(story_id, branch_id, "relationship", rel_rows)
 
         mission_rows = []
         missions = state.get("completed_missions", [])
@@ -847,7 +828,6 @@ def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
             for item in missions:
                 if isinstance(item, str) and item.strip():
                     mission_rows.append((item.strip(), "", "任務"))
-        replace_state_category(story_id, branch_id, "mission", mission_rows)
 
         system_rows = []
         systems = state.get("systems", {})
@@ -857,7 +837,17 @@ def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
                 if not key:
                     continue
                 system_rows.append((key, "" if level is None else str(level), "體系"))
-        replace_state_category(story_id, branch_id, "system", system_rows)
+        replace_state_categories_batch(
+            story_id,
+            branch_id,
+            {
+                "inventory": inv_rows,
+                "ability": ability_rows,
+                "relationship": rel_rows,
+                "mission": mission_rows,
+                "system": system_rows,
+            },
+        )
     except Exception:
         log.warning("state_db sync failed for %s/%s", story_id, branch_id, exc_info=True)
 
@@ -878,6 +868,8 @@ def _extract_state_must_include_keys(
     def _try_add(name: str):
         n = (name or "").strip()
         if not n or n in seen:
+            return
+        if len(n) < 2:
             return
         if n in text or n.lower() in text_lower:
             seen.add(n)
@@ -3330,7 +3322,7 @@ def _build_augmented_message(
             story_id,
             branch_id,
             user_text,
-            token_budget=None,
+            token_budget=STATE_RAG_TOKEN_BUDGET,
             must_include_keys=must_include,
             context=lore_context,
         )

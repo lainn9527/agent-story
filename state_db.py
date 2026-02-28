@@ -20,6 +20,23 @@ _CATEGORY_LABELS = {
     "system": "體系",
 }
 
+_NPC_TIER_ALLOWLIST = {
+    "D-", "D", "D+",
+    "C-", "C", "C+",
+    "B-", "B", "B+",
+    "A-", "A", "A+",
+    "S-", "S", "S+",
+}
+_NPC_TIER_TRANSLATION = str.maketrans({
+    "－": "-",
+    "—": "-",
+    "–": "-",
+    "−": "-",
+    "﹣": "-",
+    "ー": "-",
+    "＋": "+",
+})
+
 
 def _db_path(story_id: str, branch_id: str) -> str:
     return os.path.join(STORIES_DIR, story_id, "branches", branch_id, "state.db")
@@ -65,6 +82,22 @@ def _ensure_tables(conn: sqlite3.Connection):
             ON state_entries(category);
         """
     )
+
+
+def _normalize_npc_tier(raw_tier: object) -> str | None:
+    if not isinstance(raw_tier, str):
+        return None
+    tier = raw_tier.strip().upper().translate(_NPC_TIER_TRANSLATION)
+    tier = tier.replace("級", "").strip()
+    return tier if tier in _NPC_TIER_ALLOWLIST else None
+
+
+def _rel_to_str(val) -> str:
+    if isinstance(val, dict):
+        return str(val.get("summary") or val.get("description") or val.get("type") or "").strip()
+    if val is None:
+        return ""
+    return str(val).strip()
 
 
 def state_db_exists(story_id: str, branch_id: str) -> bool:
@@ -161,32 +194,81 @@ def replace_category(
     category: str,
     rows: list[tuple[str, str, str]],
 ):
-    cat = (category or "").strip()
-    if not cat:
+    replace_categories_batch(story_id, branch_id, {category: rows})
+
+
+def replace_categories_batch(
+    story_id: str,
+    branch_id: str,
+    categories: dict[str, list[tuple[str, str, str]]],
+):
+    """Replace multiple categories in one SQLite transaction."""
+    if not categories:
         return
     conn = _get_conn(story_id, branch_id)
     _ensure_tables(conn)
-    conn.execute("DELETE FROM state_entries WHERE category = ?", (cat,))
     now = datetime.now(timezone.utc).isoformat()
-    payload = []
-    for entry_key, content, tags in rows:
-        key = (entry_key or "").strip()
-        if not key:
+    for category, rows in categories.items():
+        cat = (category or "").strip()
+        if not cat:
             continue
-        if content is None:
-            content = ""
-        if not isinstance(content, str):
-            content = str(content)
-        if not isinstance(tags, str):
-            tags = str(tags)
-        payload.append((cat, key, content, tags, now))
-    if payload:
-        conn.executemany(
-            "INSERT INTO state_entries (category, entry_key, content, tags, updated_at) VALUES (?, ?, ?, ?, ?)",
-            payload,
-        )
+        conn.execute("DELETE FROM state_entries WHERE category = ?", (cat,))
+        payload = []
+        for entry_key, content, tags in rows:
+            key = (entry_key or "").strip()
+            if not key:
+                continue
+            if content is None:
+                content = ""
+            if not isinstance(content, str):
+                content = str(content)
+            if not isinstance(tags, str):
+                tags = str(tags)
+            payload.append((cat, key, content, tags, now))
+        if payload:
+            conn.executemany(
+                "INSERT INTO state_entries (category, entry_key, content, tags, updated_at) VALUES (?, ?, ?, ?, ?)",
+                payload,
+            )
     conn.commit()
     conn.close()
+
+
+def _extract_item_base_name(item: str) -> str:
+    """Extract stable base name from list-format inventory item text."""
+    item = item.strip()
+    if "—" in item:
+        return item.split("—", 1)[0].strip()
+    if " - " in item:
+        return item.split(" - ", 1)[0].strip()
+
+    # Keep explicit status suffixes in parentheses as part of key parsing
+    # fallback (e.g. 定界珠（生） vs 定界珠（死）).
+    m = re.match(r"^(.*?)(?:\s*[（(].*[）)])$", item)
+    if m:
+        return m.group(1).strip()
+
+    # Quantity suffix e.g. 鎮魂符×5
+    m = re.match(r"^(.*?)(×\d+)$", item)
+    if m:
+        return m.group(1).strip()
+    return item
+
+
+def _parse_item_to_kv(item: str) -> tuple[str, str]:
+    if " — " in item:
+        key, val = item.split(" — ", 1)
+        return key.strip(), val.strip()
+    if "—" in item:
+        key, val = item.split("—", 1)
+        return key.strip(), val.strip()
+    base = _extract_item_base_name(item)
+    suffix = item[len(base):].strip()
+    if suffix.startswith("（") and suffix.endswith("）"):
+        suffix = suffix[1:-1]
+    elif suffix.startswith("(") and suffix.endswith(")"):
+        suffix = suffix[1:-1]
+    return base, suffix
 
 
 def _to_inventory_map(inv) -> dict[str, str]:
@@ -206,23 +288,22 @@ def _to_inventory_map(inv) -> dict[str, str]:
             text = item.strip()
             if not text:
                 continue
-            if " — " in text:
-                key, val = text.split(" — ", 1)
-                out[key.strip()] = val.strip()
-            else:
-                out[text] = ""
+            key, val = _parse_item_to_kv(text)
+            if key:
+                out[key] = val
     return out
 
 
-def _npc_content(npc: dict) -> str:
+def build_npc_content(npc: dict) -> str:
+    """Build stable NPC text persisted to state.db."""
     parts = []
     role = (npc.get("role") or "").strip()
     if role:
         parts.append(f"定位:{role}")
-    tier = (npc.get("tier") or "").strip()
+    tier = _normalize_npc_tier(npc.get("tier"))
     if tier:
         parts.append(f"戰力:{tier}級")
-    rel = (npc.get("relationship_to_player") or "").strip()
+    rel = _rel_to_str(npc.get("relationship_to_player"))
     if rel:
         parts.append(f"關係:{rel}")
     status = (npc.get("current_status") or "").strip()
@@ -261,7 +342,7 @@ def rebuild_from_json(
         for name, rel in rels.items():
             key = str(name).strip()
             if key:
-                rel_rows.append((key, "" if rel is None else str(rel), "關係"))
+                rel_rows.append((key, _rel_to_str(rel), "關係"))
 
     missions = state.get("completed_missions", [])
     mission_rows = []
@@ -286,14 +367,20 @@ def rebuild_from_json(
             name = (npc.get("name") or "").strip()
             if not name:
                 continue
-            npc_rows.append((name, _npc_content(npc), "NPC"))
+            npc_rows.append((name, build_npc_content(npc), "NPC"))
 
-    replace_category(story_id, branch_id, "inventory", inv_rows)
-    replace_category(story_id, branch_id, "ability", ability_rows)
-    replace_category(story_id, branch_id, "relationship", rel_rows)
-    replace_category(story_id, branch_id, "mission", mission_rows)
-    replace_category(story_id, branch_id, "system", system_rows)
-    replace_category(story_id, branch_id, "npc", npc_rows)
+    replace_categories_batch(
+        story_id,
+        branch_id,
+        {
+            "inventory": inv_rows,
+            "ability": ability_rows,
+            "relationship": rel_rows,
+            "mission": mission_rows,
+            "system": system_rows,
+            "npc": npc_rows,
+        },
+    )
 
     return (
         len(inv_rows)
@@ -368,6 +455,10 @@ def search_state(
     must_include_keys: list[str] | None = None,
     context: dict | None = None,
 ) -> str:
+    """Search and format relevant state entries.
+
+    token_budget is a rough character-based cap (len(line) approximation).
+    """
     if not state_db_exists(story_id, branch_id):
         rebuild_from_json(story_id, branch_id)
 

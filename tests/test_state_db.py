@@ -55,6 +55,25 @@ class TestRebuild:
         assert "[相關角色狀態]" in text
         assert "封印之鏡" in text
 
+    def test_rebuild_normalizes_npc_tier(self, story_id, setup_branch):
+        branch_dir = setup_branch
+        npcs = json.loads((branch_dir / "npcs.json").read_text(encoding="utf-8"))
+        npcs[1]["tier"] = " s-級 "
+        (branch_dir / "npcs.json").write_text(json.dumps(npcs, ensure_ascii=False), encoding="utf-8")
+        state_db.rebuild_from_json(story_id, "main")
+        text = state_db.search_state(story_id, "main", "審判暴君")
+        assert "戰力:S-級" in text
+
+    def test_rebuild_relationship_dict_uses_summary(self, story_id, setup_branch):
+        branch_dir = setup_branch
+        state = json.loads((branch_dir / "character_state.json").read_text(encoding="utf-8"))
+        state["relationships"]["阿豪"] = {"summary": "深厚信任", "type": "盟友"}
+        (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        state_db.rebuild_from_json(story_id, "main")
+        text = state_db.search_state(story_id, "main", "阿豪")
+        assert "深厚信任" in text
+        assert "{'summary'" not in text
+
 
 class TestSearch:
     def test_search_must_include_keeps_forced_key(self, story_id, setup_branch):
