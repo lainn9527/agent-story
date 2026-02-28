@@ -24,6 +24,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **tier 覆蓋穩定性**: extraction prompt 補充規則「既有 NPC 若本回合無法判定 tier，省略欄位不要輸出 null」，搭配 `_save_npc()` 的 invalid-tier 忽略邏輯，避免合法 tier 被不確定輸出污染。 ([#134])
 - **Events orphan 清理**: 分支清理（failed branch cleanup、hard delete、`was_main` soft-delete、startup incomplete cleanup）會同步刪除 `events.db` 對應 `branch_id`，避免 dead data 殘留。 ([#135])
 - **State RAG 檢索噪音控制**: must-include entity 抽取忽略單字元 key，降低短詞誤命中造成的無關注入。 ([#136])
+- **未選選項回灌污染**: `recent` 在送入 LLM 前會移除所有非 `user` 訊息（含 legacy `assistant`）尾端的「可選行動」區塊；compaction 摘要前也會做同樣清洗，避免提案選項被當成既成事實反覆回灌。 ([#139])
 
 ## [0.20.16] - 2026-02-28
 
@@ -45,6 +46,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#134]: https://github.com/lainn9527/agent-story/pull/134
 [#135]: https://github.com/lainn9527/agent-story/pull/135
 [#136]: https://github.com/lainn9527/agent-story/pull/136
+[#139]: https://github.com/lainn9527/agent-story/pull/139
 
 ## [0.20.15] - 2026-02-27
 
