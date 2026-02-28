@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 
 import app as app_module
+import state_db
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +24,14 @@ def patch_app_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
     monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
     monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
     return stories_dir
+
+
+@pytest.fixture(autouse=True)
+def patch_state_search(monkeypatch):
+    """Keep augmented-message tests deterministic unless explicitly overridden."""
+    monkeypatch.setattr(app_module, "search_state_entries", lambda *a, **kw: "")
 
 
 @pytest.fixture
@@ -144,6 +152,21 @@ class TestBuildAugmentedMessage:
         text, dice = app_module._build_augmented_message(story_id, "main", "/gm 修改", {"current_phase": "主神空間"})
         assert dice is None
 
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_state_block_injected_when_search_hits(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story, monkeypatch
+    ):
+        monkeypatch.setattr(app_module, "search_state_entries", lambda *a, **kw: "[相關角色狀態]\n#### 道具\n- 封印之鏡")
+        text, _ = app_module._build_augmented_message(
+            story_id, "main", "我要用封印之鏡", {"current_phase": "副本中", "inventory": {"封印之鏡": ""}}
+        )
+        assert "[相關角色狀態]" in text
+        assert "封印之鏡" in text
+
 
 # ===================================================================
 # _build_story_system_prompt
@@ -174,6 +197,17 @@ class TestBuildStorySystemPrompt:
             story_id, "{}", branch_id="main"
         )
         assert "尚無回顧" in prompt
+
+    def test_npc_profiles_use_summary_text(self, story_id, setup_story):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "npcs.json").write_text(json.dumps([
+            {"name": "阿豪", "role": "隊友", "tier": "B+"},
+            {"name": "審判暴君", "role": "敵人", "tier": "S-"},
+        ], ensure_ascii=False), encoding="utf-8")
+        prompt = app_module._build_story_system_prompt(
+            story_id, "姓名：測試者", branch_id="main", state_dict={"name": "測試者"}
+        )
+        assert "共 2 位 NPC" in prompt
 
 
 # ===================================================================

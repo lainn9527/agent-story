@@ -52,6 +52,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 
 ## 當前角色狀態
 {character_state}
+（以上為核心狀態摘要；詳細道具/技能/NPC/任務資訊會在每回合以 `[相關角色狀態]` 自動補充。）
 
 ## 當前副本狀態
 {dungeon_context}

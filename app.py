@@ -57,6 +57,14 @@ from event_db import (
 )
 from image_gen import generate_image_async, get_image_status, get_image_path
 from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry, get_entry_count, get_category_summary, get_embedding_stats, find_duplicates
+from state_db import (
+    rebuild_from_json as rebuild_state_db_from_json,
+    search_state as search_state_entries,
+    get_summary as get_state_summary,
+    replace_category as replace_state_category,
+    upsert_entry as upsert_state_entry,
+    delete_entry as delete_state_entry,
+)
 from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
 from auto_summary import get_summaries
 from dice import roll_fate, format_dice_context
@@ -685,12 +693,232 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     return "\n".join(lines)
 
 
+_STATE_CORE_EXTRA_KEYS = ("base_power_level", "health", "spirit_status")
+
+
+def _format_state_core_value(key: str, val) -> str:
+    if key == "reward_points":
+        if _is_numeric_value(val):
+            return f"{int(val):,} 點"
+        return f"{val} 點"
+    return str(val)
+
+
+def _build_core_state_text(story_id: str, state: dict) -> str:
+    """Build compact always-injected state text (core fields + systems)."""
+    if not isinstance(state, dict):
+        return "（尚無角色核心狀態）"
+
+    schema = _load_character_schema(story_id)
+    lines = []
+    for field in schema.get("fields", []):
+        key = field.get("key")
+        if not key:
+            continue
+        if key not in state:
+            continue
+        val = state.get(key)
+        if val in (None, ""):
+            continue
+        label = field.get("label", key)
+        lines.append(f"{label}：{_format_state_core_value(key, val)}")
+
+    systems = state.get("systems", {})
+    if isinstance(systems, dict) and systems:
+        parts = []
+        for name, level in systems.items():
+            n = str(name).strip()
+            if not n:
+                continue
+            lv = "" if level is None else str(level).strip()
+            parts.append(f"{n}({lv})" if lv else n)
+        if parts:
+            lines.append(f"體系：{'、'.join(parts)}")
+
+    for key in _STATE_CORE_EXTRA_KEYS:
+        val = state.get(key)
+        if val in (None, ""):
+            continue
+        if key == "base_power_level":
+            label = "基礎戰力"
+        elif key == "health":
+            label = "生命狀態"
+        else:
+            label = "精神狀態"
+        lines.append(f"{label}：{val}")
+
+    return "\n".join(lines) if lines else "（尚無角色核心狀態）"
+
+
+def _build_npc_summary_text(story_id: str, branch_id: str = "main", npcs: list[dict] | None = None) -> str:
+    """Build compact NPC summary for system prompt (details come from state RAG)."""
+    if npcs is None:
+        npcs = _load_npcs(story_id, branch_id)
+    if not npcs:
+        return "（尚無已記錄的 NPC）"
+    tier_known = sum(1 for n in npcs if _normalize_npc_tier(n.get("tier")))
+    if tier_known:
+        return (
+            f"共 {len(npcs)} 位 NPC（已標註戰力 {tier_known} 位），"
+            "系統會根據對話內容自動檢索相關 NPC 檔案。"
+        )
+    return f"共 {len(npcs)} 位 NPC，系統會根據對話內容自動檢索相關 NPC 檔案。"
+
+
+def _build_npc_state_entry_content(npc: dict) -> str:
+    """Build compact text persisted to state.db npc entries."""
+    parts = []
+    role = (npc.get("role") or "").strip()
+    if role:
+        parts.append(f"定位:{role}")
+    tier = _normalize_npc_tier(npc.get("tier"))
+    if tier:
+        parts.append(f"戰力:{tier}級")
+    rel = (npc.get("relationship_to_player") or "").strip()
+    if rel:
+        parts.append(f"關係:{rel}")
+    status = (npc.get("current_status") or "").strip()
+    if status:
+        parts.append(f"狀態:{status}")
+    traits = npc.get("notable_traits")
+    if isinstance(traits, list) and traits:
+        compact_traits = [str(t).strip() for t in traits if str(t).strip()]
+        if compact_traits:
+            parts.append(f"特質:{'、'.join(compact_traits)}")
+    return "；".join(parts)
+
+
+def _sync_state_db_npc_entry(story_id: str, branch_id: str, npc: dict):
+    """Sync one NPC row into state.db."""
+    name = (npc.get("name") or "").strip()
+    if not name:
+        return
+    upsert_state_entry(
+        story_id,
+        branch_id,
+        category="npc",
+        entry_key=name,
+        content=_build_npc_state_entry_content(npc),
+        tags="NPC",
+    )
+
+
+def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
+    """Sync canonical state JSON into state.db categories (excluding npc)."""
+    try:
+        inv_rows = []
+        inv = state.get("inventory", {})
+        if isinstance(inv, dict):
+            for k, v in inv.items():
+                key = str(k).strip()
+                if not key:
+                    continue
+                inv_rows.append((key, "" if v is None else str(v), "道具"))
+        elif isinstance(inv, list):
+            for item in inv:
+                if not isinstance(item, str) or not item.strip():
+                    continue
+                key, val = _parse_item_to_kv(item.strip())
+                if key:
+                    inv_rows.append((key, val, "道具"))
+        replace_state_category(story_id, branch_id, "inventory", inv_rows)
+
+        ability_rows = []
+        abilities = state.get("abilities", [])
+        if isinstance(abilities, list):
+            for item in abilities:
+                if isinstance(item, str) and item.strip():
+                    ability_rows.append((item.strip(), "", "技能"))
+        replace_state_category(story_id, branch_id, "ability", ability_rows)
+
+        rel_rows = []
+        rels = state.get("relationships", {})
+        if isinstance(rels, dict):
+            for name, rel in rels.items():
+                key = str(name).strip()
+                if not key:
+                    continue
+                rel_rows.append((key, _rel_to_str(rel), "關係"))
+        replace_state_category(story_id, branch_id, "relationship", rel_rows)
+
+        mission_rows = []
+        missions = state.get("completed_missions", [])
+        if isinstance(missions, list):
+            for item in missions:
+                if isinstance(item, str) and item.strip():
+                    mission_rows.append((item.strip(), "", "任務"))
+        replace_state_category(story_id, branch_id, "mission", mission_rows)
+
+        system_rows = []
+        systems = state.get("systems", {})
+        if isinstance(systems, dict):
+            for name, level in systems.items():
+                key = str(name).strip()
+                if not key:
+                    continue
+                system_rows.append((key, "" if level is None else str(level), "體系"))
+        replace_state_category(story_id, branch_id, "system", system_rows)
+    except Exception:
+        log.warning("state_db sync failed for %s/%s", story_id, branch_id, exc_info=True)
+
+
+def _extract_state_must_include_keys(
+    user_text: str,
+    character_state: dict | None,
+    npcs: list[dict] | None,
+) -> list[str]:
+    """Extract known entities mentioned in user text; force-include in state search."""
+    text = user_text or ""
+    if not text.strip():
+        return []
+    text_lower = text.lower()
+    must = []
+    seen = set()
+
+    def _try_add(name: str):
+        n = (name or "").strip()
+        if not n or n in seen:
+            return
+        if n in text or n.lower() in text_lower:
+            seen.add(n)
+            must.append(n)
+
+    if isinstance(character_state, dict):
+        inv = character_state.get("inventory", {})
+        if isinstance(inv, dict):
+            for key in inv:
+                _try_add(str(key))
+        elif isinstance(inv, list):
+            for item in inv:
+                if isinstance(item, str):
+                    _try_add(_extract_item_base_name(item))
+
+        abilities = character_state.get("abilities", [])
+        if isinstance(abilities, list):
+            for item in abilities:
+                if isinstance(item, str):
+                    _try_add(item)
+
+        rels = character_state.get("relationships", {})
+        if isinstance(rels, dict):
+            for key in rels:
+                _try_add(str(key))
+
+    if isinstance(npcs, list):
+        for npc in npcs:
+            if isinstance(npc, dict):
+                _try_add(str(npc.get("name", "")))
+
+    return must
+
+
 def _build_story_system_prompt(
     story_id: str,
     state_text: str,
     branch_id: str = "main",
     narrative_recap: str = "",
     npcs: list[dict] | None = None,
+    state_dict: dict | None = None,
 ) -> str:
     """Read the story's system_prompt.txt and fill in placeholders."""
     # Blank branches are fresh starts — no narrative context from parent
@@ -707,12 +935,13 @@ def _build_story_system_prompt(
     # Load NPCs once — used by both npc_text and critical_facts
     if npcs is None:
         npcs = _load_npcs(story_id, branch_id)
-    npc_text = _build_npc_text(story_id, branch_id, npcs=npcs)
-    # Parse state dict from JSON string to avoid redundant _load_character_state
-    try:
-        state_dict = json.loads(state_text)
-    except (json.JSONDecodeError, TypeError):
-        state_dict = {}
+    npc_text = _build_npc_summary_text(story_id, branch_id, npcs=npcs)
+    if state_dict is None:
+        # Backward compatibility for callers that still pass JSON text.
+        try:
+            state_dict = json.loads(state_text)
+        except (json.JSONDecodeError, TypeError):
+            state_dict = {}
     critical_facts = _build_critical_facts(story_id, branch_id, state_dict, npcs)
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
@@ -914,10 +1143,12 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
             merged = {**existing, **npc_data}
             npcs[i] = merged
             _save_json(_story_npcs_path(story_id, branch_id), npcs)
+            _sync_state_db_npc_entry(story_id, branch_id, merged)
             return
 
     npcs.append(npc_data)
     _save_json(_story_npcs_path(story_id, branch_id), npcs)
+    _sync_state_db_npc_entry(story_id, branch_id, npc_data)
 
 
 def _copy_npcs_to_branch(story_id: str, from_branch_id: str, to_branch_id: str):
@@ -2357,6 +2588,7 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
             state[key] = val
 
     _save_json(_story_character_state_path(story_id, branch_id), state)
+    _sync_state_db_from_state(story_id, branch_id, state)
 
 
 def _apply_state_update(story_id: str, branch_id: str, update: dict):
@@ -3089,6 +3321,22 @@ def _build_augmented_message(
     if activities:
         parts.append(activities)
 
+    # State RAG — on-demand retrieval for inventory/skills/npcs/relations/missions/systems.
+    if character_state:
+        if npcs is None:
+            npcs = _load_npcs(story_id, branch_id)
+        must_include = _extract_state_must_include_keys(user_text, character_state, npcs)
+        state_block = search_state_entries(
+            story_id,
+            branch_id,
+            user_text,
+            token_budget=None,
+            must_include_keys=must_include,
+            context=lore_context,
+        )
+        if state_block:
+            parts.append(state_block)
+
     # Tier reminder — inject only when known-tier ally/hostile NPCs exist.
     if character_state:
         rels = character_state.get("relationships", {})
@@ -3350,10 +3598,10 @@ def api_send():
     t0 = time.time()
     state = _load_character_state(story_id, branch_id)
     npcs = _load_npcs(story_id, branch_id)
-    state_text = json.dumps(state, ensure_ascii=False, indent=2)
+    state_text = _build_core_state_text(story_id, state)
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(
-        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
     log.info("  build_prompt: %.0fms", (time.time() - t0) * 1000)
 
@@ -3497,10 +3745,10 @@ def api_send_stream():
     # 2. Build system prompt (with narrative recap)
     state = _load_character_state(story_id, branch_id)
     npcs = _load_npcs(story_id, branch_id)
-    state_text = json.dumps(state, ensure_ascii=False, indent=2)
+    state_text = _build_core_state_text(story_id, state)
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(
-        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
 
     # 3. Gather recent context
@@ -3637,6 +3885,22 @@ def api_status():
     return jsonify(state)
 
 
+@app.route("/api/state/rebuild", methods=["POST"])
+def api_state_rebuild():
+    """Force rebuild state.db from canonical state/npcs JSON for a branch."""
+    story_id = _active_story_id()
+    body = request.get_json(silent=True) or {}
+    branch_id = body.get("branch_id")
+    if not branch_id:
+        tree = _load_tree(story_id)
+        branch_id = tree.get("active_branch_id", "main")
+    state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id)
+    count = rebuild_state_db_from_json(story_id, branch_id, state=state, npcs=npcs)
+    summary = get_state_summary(story_id, branch_id)
+    return jsonify({"ok": True, "branch_id": branch_id, "count": count, "summary": summary})
+
+
 # ---------------------------------------------------------------------------
 # Branch API
 # ---------------------------------------------------------------------------
@@ -3685,6 +3949,7 @@ def api_branches_create():
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
+    rebuild_state_db_from_json(story_id, branch_id, state=forked_state, npcs=forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, source_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
@@ -3728,10 +3993,13 @@ def api_branches_blank():
     now = datetime.now(timezone.utc).isoformat()
 
     # Use blank character state (placeholder from schema)
-    _save_json(_story_character_state_path(story_id, branch_id), _blank_character_state(story_id))
+    blank_state = _blank_character_state(story_id)
+    _save_json(_story_character_state_path(story_id, branch_id), blank_state)
 
     # Empty NPCs and messages
-    _save_json(_story_npcs_path(story_id, branch_id), [])
+    blank_npcs = []
+    _save_json(_story_npcs_path(story_id, branch_id), blank_npcs)
+    rebuild_state_db_from_json(story_id, branch_id, state=blank_state, npcs=blank_npcs)
     _save_json(_story_messages_path(story_id, branch_id), [])
 
     # Initialize blank dungeon progress (no history)
@@ -3899,6 +4167,7 @@ def api_branches_edit():
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
+    rebuild_state_db_from_json(story_id, branch_id, state=forked_state, npcs=forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, source_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
@@ -3936,10 +4205,10 @@ def api_branches_edit():
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
     npcs = _load_npcs(story_id, branch_id)
-    state_text = json.dumps(state, ensure_ascii=False, indent=2)
+    state_text = _build_core_state_text(story_id, state)
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(
-        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
@@ -4073,6 +4342,7 @@ def api_branches_edit_stream():
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
+    rebuild_state_db_from_json(story_id, branch_id, state=forked_state, npcs=forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, source_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
@@ -4111,10 +4381,10 @@ def api_branches_edit_stream():
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
     npcs = _load_npcs(story_id, branch_id)
-    state_text = json.dumps(state, ensure_ascii=False, indent=2)
+    state_text = _build_core_state_text(story_id, state)
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(
-        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
@@ -4254,6 +4524,7 @@ def api_branches_regenerate():
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
+    rebuild_state_db_from_json(story_id, branch_id, state=forked_state, npcs=forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, source_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
@@ -4282,10 +4553,10 @@ def api_branches_regenerate():
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
     npcs = _load_npcs(story_id, branch_id)
-    state_text = json.dumps(state, ensure_ascii=False, indent=2)
+    state_text = _build_core_state_text(story_id, state)
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(
-        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
@@ -4408,6 +4679,7 @@ def api_branches_regenerate_stream():
     _save_json(_story_character_state_path(story_id, branch_id), forked_state)
     forked_npcs = _find_npcs_at_index(story_id, parent_branch_id, branch_point_index)
     _save_json(_story_npcs_path(story_id, branch_id), forked_npcs)
+    rebuild_state_db_from_json(story_id, branch_id, state=forked_state, npcs=forked_npcs)
     _save_branch_config(story_id, branch_id, _load_branch_config(story_id, source_branch_id))
     copy_recap_to_branch(story_id, parent_branch_id, branch_id, branch_point_index)
     forked_world_day = _find_world_day_at_index(story_id, parent_branch_id, branch_point_index)
@@ -4436,10 +4708,10 @@ def api_branches_regenerate_stream():
     full_timeline = get_full_timeline(story_id, branch_id)
     state = _load_character_state(story_id, branch_id)
     npcs = _load_npcs(story_id, branch_id)
-    state_text = json.dumps(state, ensure_ascii=False, indent=2)
+    state_text = _build_core_state_text(story_id, state)
     recap_text = get_recap_text(story_id, branch_id)
     system_prompt = _build_story_system_prompt(
-        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs
+        story_id, state_text, branch_id=branch_id, narrative_recap=recap_text, npcs=npcs, state_dict=state
     )
     recent = full_timeline[-RECENT_MESSAGE_COUNT:]
     if not get_fate_mode(_story_dir(story_id), branch_id):
@@ -4702,6 +4974,9 @@ def api_branches_merge():
     dst_npcs = _story_npcs_path(story_id, parent_id)
     if os.path.exists(src_npcs):
         shutil.copy2(src_npcs, dst_npcs)
+
+    # Keep parent state.db aligned with merged canonical JSON snapshots.
+    rebuild_state_db_from_json(story_id, parent_id)
 
     # 4. Copy recap and world_day from child to parent
     copy_recap_to_branch(story_id, branch_id, parent_id, -1)
@@ -5604,8 +5879,11 @@ def api_npcs_delete(npc_id):
     story_id = _active_story_id()
     branch_id = request.args.get("branch_id", "main")
     npcs = _load_npcs(story_id, branch_id)
+    removed_names = [n.get("name", "").strip() for n in npcs if n.get("id") == npc_id and n.get("name")]
     npcs = [n for n in npcs if n.get("id") != npc_id]
     _save_json(_story_npcs_path(story_id, branch_id), npcs)
+    for name in removed_names:
+        delete_state_entry(story_id, branch_id, category="npc", entry_key=name)
     return jsonify({"ok": True, "npcs": npcs})
 
 
