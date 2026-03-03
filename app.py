@@ -1490,7 +1490,7 @@ def _normalize_debug_action_payload(payload: object) -> dict | None:
         if nested:
             return nested
 
-    action_type = str(data.get("type") or data.get("action_type") or data.get("kind") or "").strip()
+    action_type = str(data.get("type") or data.get("action_type") or data.get("kind") or data.get("action") or "").strip()
     if action_type in _DEBUG_ACTION_TYPES:
         normalized = dict(data)
         normalized["type"] = action_type
@@ -1501,13 +1501,19 @@ def _normalize_debug_action_payload(payload: object) -> dict | None:
 
         if action_type == "state_patch":
             state_obj = normalized.get("state_patch")
+            patch_obj = normalized.get("patch")
+            patch_data_obj = normalized.get("patch_data")
             if not isinstance(normalized.get("update"), dict):
                 if isinstance(state_obj, dict):
                     normalized["update"] = state_obj
+                elif isinstance(patch_obj, dict):
+                    normalized["update"] = patch_obj
+                elif isinstance(patch_data_obj, dict):
+                    normalized["update"] = patch_data_obj
                 else:
                     extras = {
                         k: v for k, v in normalized.items()
-                        if k not in {"type", "action_type", "kind", "payload", "state_patch"}
+                        if k not in {"type", "action_type", "kind", "action", "payload", "state_patch", "patch", "patch_data"}
                     }
                     if extras:
                         normalized["update"] = extras
@@ -1532,6 +1538,10 @@ def _normalize_debug_action_payload(payload: object) -> dict | None:
 
     if isinstance(data.get("update"), dict):
         return {"type": "state_patch", "update": data["update"]}
+    if isinstance(data.get("patch"), dict):
+        return {"type": "state_patch", "update": data["patch"]}
+    if isinstance(data.get("patch_data"), dict):
+        return {"type": "state_patch", "update": data["patch_data"]}
 
     if "world_day" in data:
         return {"type": "world_day_set", "world_day": data.get("world_day")}
