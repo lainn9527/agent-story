@@ -173,6 +173,15 @@ class TestFormatMessages:
         assert "可選行動" not in text
         assert "你站在門口。" in text
 
+    def test_skips_debug_audit_messages(self):
+        msgs = [
+            {"role": "system", "message_type": "debug_audit", "content": "已套用 2/3 項修正"},
+            {"role": "user", "content": "我想繼續主線"},
+        ]
+        text = compaction._format_messages(msgs)
+        assert "已套用 2/3 項修正" not in text
+        assert "我想繼續主線" in text
+
 
 # ===================================================================
 # load_recap / save_recap / get_recap_text

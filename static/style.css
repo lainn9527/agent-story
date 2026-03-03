@@ -573,12 +573,29 @@ body {
   text-align: left;
 }
 
+.message.debug-audit {
+  background: rgba(184, 134, 11, 0.08);
+  border: 1px dashed rgba(184, 134, 11, 0.45);
+  border-radius: 10px;
+  margin: 10px auto;
+  max-width: 52em;
+  padding: 10px 12px;
+}
+
 .message.inherited {
   opacity: 1;
 }
 
 .message .role-tag {
   display: none;
+}
+
+.message.debug-audit .role-tag {
+  display: inline-block;
+  color: var(--gold);
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 
 .message .content h1,
@@ -1393,6 +1410,147 @@ body {
 }
 .prompt-modal-input:focus {
   border-color: var(--gold);
+}
+
+/* ---------- Debug Panel Modal ---------- */
+.debug-panel-content {
+  max-width: 860px;
+  width: 95%;
+}
+
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.debug-panel-header h2 {
+  margin: 0;
+}
+
+.debug-panel-meta {
+  display: flex;
+  gap: 14px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin-bottom: 10px;
+}
+
+.debug-chat-messages {
+  max-height: 34vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.1);
+  margin-bottom: 10px;
+}
+
+.debug-chat-msg {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.88rem;
+}
+
+.debug-chat-msg.user {
+  background: rgba(62, 122, 77, 0.2);
+  border-color: rgba(62, 122, 77, 0.45);
+}
+
+.debug-chat-msg.assistant {
+  background: rgba(184, 134, 11, 0.12);
+  border-color: rgba(184, 134, 11, 0.35);
+}
+
+.debug-chat-msg .debug-chat-role {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.debug-chat-input-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#debug-chat-input {
+  flex: 1;
+  min-height: 60px;
+  max-height: 140px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+#debug-chat-send {
+  align-self: flex-end;
+}
+
+.debug-block {
+  margin-bottom: 12px;
+}
+
+.debug-block-title {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.debug-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.debug-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.debug-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 6px;
+}
+
+.debug-item-json {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  padding: 8px;
+}
+
+.debug-panel-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.debug-apply-result {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  white-space: pre-wrap;
 }
 
 /* ---------- Init loading overlay ---------- */
@@ -2240,6 +2398,20 @@ body {
     right: 20px;
     left: 20px;
     width: auto;
+  }
+
+  .debug-panel-content {
+    width: 95%;
+    max-height: 92vh;
+    padding: 16px;
+  }
+
+  .debug-chat-input-row {
+    flex-direction: column;
+  }
+
+  #debug-chat-send {
+    width: 100%;
   }
 
   /* Branch tree: always show action buttons on mobile (no hover) */

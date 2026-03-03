@@ -209,7 +209,43 @@
 
 ---
 
-## 9. 存檔機制（Save/Load）
+## 9. Debug Panel（V1）
+
+### 9.1 作用域與資料
+
+- Debug 對話歷史以 blank root 為單位：`debug_units/<debug_unit_id>/chat.json`
+- 實際套用目標永遠是「目前 branch」：state / NPC / world_day / dungeon
+- V1 不處理 events，也不直接改 `gm_plan.json`
+
+### 9.2 套用與回滾
+
+- `POST /api/debug/apply` 採逐項執行：
+  - action 失敗不會中斷其他 action
+  - 全部跑完回傳逐項結果
+- 套用前會先寫完整備份：`last_apply_backup.json`
+  - 含 state / NPC / world_day / dungeon 完整快照
+- `POST /api/debug/undo` 僅回滾最近一次 apply（同 debug unit）
+
+### 9.3 劇情修正指令（Directive）
+
+- Debug 指令存於 branch：`debug_directive.json`（單一 active）
+- 下次主流程 `_build_augmented_message()` 會注入隱藏段落
+- `_process_gm_response()` 完成後自動清除，避免累積污染
+
+### 9.4 Branch 規則
+
+- `edit / regenerate`：複製 directive 到新分支
+- `promote`：保留 directive（同步到 parent 路徑）
+- 其他分支操作（create/blank/merge/delete/cleanup）：不複製 directive
+
+### 9.5 審計訊息
+
+- 每次 apply/undo 都會在主聊天寫一則 `message_type=debug_audit`
+- `debug_audit` 可見但不進 GM prompt、不進 compaction
+
+---
+
+## 10. 存檔機制（Save/Load）
 
 - `POST /api/saves` 會保存 snapshot（state/NPC/recap/world_day）
 - `load` 的語意是「切回原分支 + 狀態預覽」：
@@ -219,7 +255,7 @@
 
 ---
 
-## 10. 對話壓縮（Compaction）
+## 11. 對話壓縮（Compaction）
 
 檔案：`compaction.py`
 
@@ -230,7 +266,7 @@
 
 ---
 
-## 11. 副本系統（Dungeon）
+## 12. 副本系統（Dungeon）
 
 檔案：`dungeon_system.py` + `/api/dungeon/*`
 

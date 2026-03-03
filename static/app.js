@@ -293,6 +293,26 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch_id: branchId }),
     }).then(r => r.json()),
+
+  // Debug Panel
+  debugSession: (branchId) =>
+    fetch(`/api/debug/session?branch_id=${branchId || "main"}`).then(r => r.json()),
+  debugApply: (branchId, actions, directives) =>
+    fetch("/api/debug/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        branch_id: branchId || "main",
+        actions: actions || [],
+        directives: directives || [],
+      }),
+    }).then(r => r.json()),
+  debugUndo: (branchId) =>
+    fetch("/api/debug/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: branchId || "main" }),
+    }).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -378,6 +398,11 @@ let _livePollingBranchId = null;
 // Incomplete branch polling state (edit/regen interrupted)
 let _incompletePollTimer = null;
 let _incompletePollBranchId = null;
+
+// Debug panel state
+let _debugSession = null;
+let _debugPendingProposals = [];
+let _debugPendingDirectives = [];
 
 function isAutoBranch(branchId) {
   return branchId && branchId.startsWith("auto_");
@@ -1946,6 +1971,29 @@ function showPlaceholderSwitcher(msgEl, index) {
   msgEl.appendChild(switcher);
 }
 
+function createDebugAuditMessageElement(msg) {
+  const el = document.createElement("div");
+  el.className = "message debug-audit";
+  el.dataset.index = msg.index;
+
+  const roleTag = document.createElement("div");
+  roleTag.className = "role-tag";
+  roleTag.textContent = "系統";
+
+  const indexLabel = document.createElement("span");
+  indexLabel.className = "msg-index";
+  indexLabel.textContent = `#${msg.index}`;
+
+  const content = document.createElement("div");
+  content.className = "content";
+  content.innerHTML = markdownToHtml(msg.content || "");
+
+  el.appendChild(roleTag);
+  el.appendChild(indexLabel);
+  el.appendChild(content);
+  return el;
+}
+
 // ---------------------------------------------------------------------------
 // Render messages
 // ---------------------------------------------------------------------------
@@ -1974,6 +2022,11 @@ function renderMessages(messages) {
         $messages.appendChild(bpDiv);
         branchDividerInserted = true;
       }
+    }
+
+    if (msg.message_type === "debug_audit") {
+      $messages.appendChild(createDebugAuditMessageElement(msg));
+      continue;
     }
 
     const el = document.createElement("div");
@@ -3183,6 +3236,11 @@ function initAddonPanel() {
   // Prevent panel clicks from closing
   panel.addEventListener("click", (e) => e.stopPropagation());
 
+  document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
+    haptic();
+    await openDebugPanel();
+  });
+
   // Pistol prefs modal: chip toggles + close handlers
   const prefsModal = document.getElementById("pistol-prefs-modal");
   if (prefsModal) {
@@ -3220,6 +3278,21 @@ function initAddonPanel() {
       });
     });
   }
+
+  const debugModal = document.getElementById("debug-panel-modal");
+  document.getElementById("debug-panel-close")?.addEventListener("click", closeDebugPanel);
+  debugModal?.addEventListener("click", (e) => {
+    if (e.target === debugModal) closeDebugPanel();
+  });
+  document.getElementById("debug-chat-send")?.addEventListener("click", sendDebugChat);
+  document.getElementById("debug-chat-input")?.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      sendDebugChat();
+    }
+  });
+  document.getElementById("debug-apply-btn")?.addEventListener("click", applyDebugChanges);
+  document.getElementById("debug-undo-btn")?.addEventListener("click", undoDebugChanges);
 }
 
 async function openAddonPanel() {
@@ -3236,6 +3309,219 @@ function closeAddonPanel() {
   if (panel) panel.classList.add("hidden");
   const btn = document.getElementById("addon-panel-btn");
   if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+function _renderDebugChatMessages(messages) {
+  const box = document.getElementById("debug-chat-messages");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const msg of messages || []) {
+    const node = document.createElement("div");
+    node.className = `debug-chat-msg ${msg.role === "user" ? "user" : "assistant"}`;
+    const role = document.createElement("div");
+    role.className = "debug-chat-role";
+    role.textContent = msg.role === "user" ? "玩家" : "Debug GM";
+    const content = document.createElement("div");
+    content.innerHTML = markdownToHtml(msg.content || "");
+    node.appendChild(role);
+    node.appendChild(content);
+    box.appendChild(node);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function _createDebugItemNode(item, idx, kind) {
+  const wrap = document.createElement("div");
+  wrap.className = "debug-item";
+
+  const head = document.createElement("div");
+  head.className = "debug-item-head";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+  checkbox.dataset.kind = kind;
+  checkbox.dataset.index = String(idx);
+
+  const label = document.createElement("span");
+  if (kind === "action") {
+    label.textContent = item.type || `action_${idx + 1}`;
+  } else {
+    label.textContent = `directive_${idx + 1}`;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "debug-item-json";
+  textarea.dataset.kind = kind;
+  textarea.dataset.index = String(idx);
+  textarea.value = JSON.stringify(item, null, 2);
+
+  head.appendChild(checkbox);
+  head.appendChild(label);
+  wrap.appendChild(head);
+  wrap.appendChild(textarea);
+  return wrap;
+}
+
+function _renderDebugProposals() {
+  const actionsBox = document.getElementById("debug-proposals");
+  const directivesBox = document.getElementById("debug-directives");
+  if (!actionsBox || !directivesBox) return;
+
+  actionsBox.innerHTML = "";
+  directivesBox.innerHTML = "";
+
+  if (!_debugPendingProposals.length) {
+    actionsBox.textContent = "（目前無提案）";
+  } else {
+    _debugPendingProposals.forEach((item, idx) => {
+      actionsBox.appendChild(_createDebugItemNode(item, idx, "action"));
+    });
+  }
+
+  if (!_debugPendingDirectives.length) {
+    directivesBox.textContent = "（目前無指令）";
+  } else {
+    _debugPendingDirectives.forEach((item, idx) => {
+      directivesBox.appendChild(_createDebugItemNode(item, idx, "directive"));
+    });
+  }
+}
+
+function _collectDebugSelectedItems(kind) {
+  const modal = document.getElementById("debug-panel-modal");
+  if (!modal) return [];
+  const checked = modal.querySelectorAll(`input[type="checkbox"][data-kind="${kind}"]:checked`);
+  const items = [];
+  for (const cb of checked) {
+    const idx = cb.dataset.index;
+    const ta = modal.querySelector(`textarea.debug-item-json[data-kind="${kind}"][data-index="${idx}"]`);
+    if (!ta) continue;
+    try {
+      const parsed = JSON.parse(ta.value);
+      items.push(parsed);
+    } catch (e) {
+      throw new Error(`${kind} #${Number(idx) + 1} JSON 格式錯誤`);
+    }
+  }
+  return items;
+}
+
+async function _loadDebugSession(resetSuggestions = true) {
+  const res = await API.debugSession(currentBranchId);
+  if (!res.ok) throw new Error(res.error || "載入 debug session 失敗");
+  _debugSession = res;
+  document.getElementById("debug-target-branch").textContent = `branch: ${res.target_branch_id}`;
+  document.getElementById("debug-unit-id").textContent = `unit: ${res.debug_unit_id}`;
+  _renderDebugChatMessages(res.messages || []);
+  if (resetSuggestions) {
+    _debugPendingProposals = [];
+    _debugPendingDirectives = [];
+  }
+  _renderDebugProposals();
+}
+
+async function openDebugPanel() {
+  closeAddonPanel();
+  const modal = document.getElementById("debug-panel-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  document.getElementById("debug-apply-result").textContent = "";
+  await _loadDebugSession();
+}
+
+function closeDebugPanel() {
+  const modal = document.getElementById("debug-panel-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+}
+
+async function sendDebugChat() {
+  const input = document.getElementById("debug-chat-input");
+  const sendBtn = document.getElementById("debug-chat-send");
+  const box = document.getElementById("debug-chat-messages");
+  const result = document.getElementById("debug-apply-result");
+  if (!input || !sendBtn || !box || !result) return;
+
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  sendBtn.disabled = true;
+  result.textContent = "";
+
+  const userNode = document.createElement("div");
+  userNode.className = "debug-chat-msg user";
+  userNode.innerHTML = `<div class="debug-chat-role">玩家</div><div>${markdownToHtml(text)}</div>`;
+  box.appendChild(userNode);
+
+  const gmNode = document.createElement("div");
+  gmNode.className = "debug-chat-msg assistant";
+  gmNode.innerHTML = `<div class="debug-chat-role">Debug GM</div><div class="debug-chat-stream"></div>`;
+  box.appendChild(gmNode);
+  box.scrollTop = box.scrollHeight;
+
+  let streamed = "";
+  try {
+    await streamFromSSE(
+      "/api/debug/chat/stream",
+      { branch_id: currentBranchId, user_message: text },
+      (chunk) => {
+        streamed += chunk;
+        const target = gmNode.querySelector(".debug-chat-stream");
+        if (target) target.innerHTML = markdownToHtml(streamed);
+        box.scrollTop = box.scrollHeight;
+      },
+      async (data) => {
+        const finalText = data.response || streamed;
+        const target = gmNode.querySelector(".debug-chat-stream");
+        if (target) target.innerHTML = markdownToHtml(finalText);
+        _debugPendingProposals = data.proposals || [];
+        _debugPendingDirectives = data.directives || [];
+        _renderDebugProposals();
+        await _loadDebugSession(false);
+      },
+      (errMsg) => {
+        gmNode.remove();
+        showAlert(errMsg || "debug chat 失敗");
+      },
+    );
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+async function applyDebugChanges() {
+  const result = document.getElementById("debug-apply-result");
+  if (!result) return;
+  try {
+    const actions = _collectDebugSelectedItems("action");
+    const directives = _collectDebugSelectedItems("directive");
+    const res = await API.debugApply(currentBranchId, actions, directives);
+    if (!res.ok) {
+      result.textContent = res.error || "套用失敗";
+      return;
+    }
+    const failed = (res.results || []).filter(x => !x.ok);
+    const failLines = failed.map(x => `- ${x.type}: ${x.error || "unknown error"}`);
+    result.textContent = [res.audit_summary || "", ...failLines].filter(Boolean).join("\n");
+    await loadMessages(currentBranchId);
+    await _loadDebugSession();
+  } catch (e) {
+    result.textContent = e.message || "套用失敗";
+  }
+}
+
+async function undoDebugChanges() {
+  const result = document.getElementById("debug-apply-result");
+  if (!result) return;
+  const res = await API.debugUndo(currentBranchId);
+  if (!res.ok) {
+    result.textContent = res.error || "Undo 失敗";
+    return;
+  }
+  result.textContent = res.audit_summary || "已回滾";
+  await loadMessages(currentBranchId);
+  await _loadDebugSession();
 }
 
 async function loadAddonPanelState() {
@@ -3932,6 +4218,11 @@ function appendMessage(msg) {
     }
   }
 
+  if (msg.message_type === "debug_audit") {
+    $messages.appendChild(createDebugAuditMessageElement(msg));
+    return;
+  }
+
   const el = document.createElement("div");
   el.className = `message ${msg.role}`;
   if (msg.inherited) el.classList.add("inherited");
@@ -4216,6 +4507,11 @@ document.addEventListener("keydown", (e) => {
     if (!document.getElementById("pistol-prefs-modal").classList.contains("hidden")) {
       e.stopImmediatePropagation();
       closePistolPrefsModal();
+      return;
+    }
+    if (!document.getElementById("debug-panel-modal").classList.contains("hidden")) {
+      e.stopImmediatePropagation();
+      closeDebugPanel();
       return;
     }
     if (!document.getElementById("addon-panel").classList.contains("hidden")) {

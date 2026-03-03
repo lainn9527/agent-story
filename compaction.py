@@ -170,6 +170,8 @@ def _format_messages(messages: list[dict]) -> str:
     """Format messages for the compaction prompt."""
     lines = []
     for msg in messages:
+        if msg.get("message_type") == "debug_audit":
+            continue
         prefix = "【玩家】" if msg.get("role") == "user" else "【GM】"
         content = msg.get("content", "")
         if msg.get("role") != "user":

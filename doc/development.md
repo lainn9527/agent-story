@@ -51,6 +51,7 @@ pytest
 pytest -m "not slow"
 pytest tests/test_api_routes.py
 pytest tests/test_extract_tags_async.py -q
+pytest tests/test_debug_api.py
 ```
 
 ### 目前測試範圍（重點）
@@ -89,7 +90,11 @@ pytest tests/test_extract_tags_async.py -q
 3. 若改了狀態/抽取格式，順手驗證：
    - `tests/test_state_update.py`
    - `tests/test_extract_tags_async.py`
-4. 若改 lore/event 搜尋，跑：
+4. 若改 Debug Panel（debug chat/apply/undo/directive），至少跑：
+   - `tests/test_debug_api.py`
+   - `tests/test_context_injection.py`
+   - `tests/test_compaction.py`
+5. 若改 lore/event 搜尋，跑：
    - `tests/test_lore_db.py`
    - `tests/test_event_db.py`
 

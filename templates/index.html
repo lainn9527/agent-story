@@ -229,6 +229,13 @@
               </div>
             </div>
           </div>
+          <div class="addon-section">
+            <div class="addon-section-title">Debug</div>
+            <div class="addon-toggle-field">
+              <span>修正面板</span>
+              <button id="addon-debug-btn" class="cheat-toggle">開啟</button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -324,6 +331,38 @@
         <button id="branch-tree-modal-close" class="summary-modal-close-btn">&times;</button>
       </div>
       <div id="branch-tree-container" class="branch-tree-container"></div>
+    </div>
+  </div>
+
+  <!-- Debug Panel Modal -->
+  <div id="debug-panel-modal" class="modal-overlay hidden">
+    <div class="modal-content debug-panel-content">
+      <div class="debug-panel-header">
+        <h2>Debug Panel</h2>
+        <button id="debug-panel-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div class="debug-panel-meta">
+        <span id="debug-target-branch">branch: -</span>
+        <span id="debug-unit-id">unit: -</span>
+      </div>
+      <div id="debug-chat-messages" class="debug-chat-messages"></div>
+      <div class="debug-chat-input-row">
+        <textarea id="debug-chat-input" rows="2" placeholder="輸入要查核或修正的問題..."></textarea>
+        <button id="debug-chat-send" class="modal-create-btn">送出</button>
+      </div>
+      <div class="debug-block">
+        <div class="debug-block-title">修正提案（actions）</div>
+        <div id="debug-proposals" class="debug-items"></div>
+      </div>
+      <div class="debug-block">
+        <div class="debug-block-title">劇情指令（directives）</div>
+        <div id="debug-directives" class="debug-items"></div>
+      </div>
+      <div class="debug-panel-actions">
+        <button id="debug-apply-btn" class="modal-create-btn">套用勾選項目</button>
+        <button id="debug-undo-btn" class="modal-cancel-btn">Undo</button>
+      </div>
+      <div id="debug-apply-result" class="debug-apply-result"></div>
     </div>
   </div>
 

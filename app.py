@@ -248,6 +248,9 @@ STATE_RAG_TOKEN_BUDGET = max(200, _parse_env_int("STATE_RAG_TOKEN_BUDGET", 2000)
 STATE_RAG_MAX_ITEMS = max(1, _parse_env_int("STATE_RAG_MAX_ITEMS", 30))
 STATE_RAG_NPC_LIMIT = max(1, _parse_env_int("STATE_RAG_NPC_LIMIT", 10))
 GM_PLAN_CHAR_LIMIT = max(120, _parse_env_int("GM_PLAN_CHAR_LIMIT", 500))
+DEBUG_CHAT_CONTEXT_COUNT = max(1, _parse_env_int("DEBUG_CHAT_CONTEXT_COUNT", 20))
+DEBUG_CHAT_MAX_USER_CHARS = max(200, _parse_env_int("DEBUG_CHAT_MAX_USER_CHARS", 4000))
+DEBUG_APPLY_MAX_ACTIONS = max(1, _parse_env_int("DEBUG_APPLY_MAX_ACTIONS", 20))
 
 # Track in-flight async tag extraction jobs keyed by (story, branch, msg_index).
 _PENDING_EXTRACT_LOCK = threading.Lock()
@@ -421,6 +424,34 @@ def _branch_dir(story_id: str, branch_id: str) -> str:
     return d
 
 
+def _debug_units_dir(story_id: str) -> str:
+    d = os.path.join(_story_dir(story_id), "debug_units")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _debug_unit_dir(story_id: str, debug_unit_id: str) -> str:
+    d = os.path.join(_debug_units_dir(story_id), debug_unit_id)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _debug_chat_path(story_id: str, debug_unit_id: str) -> str:
+    return os.path.join(_debug_unit_dir(story_id, debug_unit_id), "chat.json")
+
+
+def _last_apply_backup_path(story_id: str, debug_unit_id: str) -> str:
+    return os.path.join(_debug_unit_dir(story_id, debug_unit_id), "last_apply_backup.json")
+
+
+def _debug_directive_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "debug_directive.json")
+
+
+def _dungeon_progress_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
+
+
 def _story_messages_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "messages.json")
 
@@ -508,6 +539,143 @@ def _load_tree(story_id: str) -> dict:
 
 def _save_tree(story_id: str, tree: dict):
     _save_json(_story_tree_path(story_id), tree)
+
+
+def _resolve_debug_unit_id(story_id: str, branch_id: str) -> str:
+    """Resolve debug-unit id from branch ancestry.
+
+    Walk parent_branch_id upward and use the top-most blank ancestor as unit id.
+    If no blank ancestor exists, fallback to current branch_id.
+    """
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+    if branch_id not in branches:
+        return branch_id
+
+    cur = branch_id
+    visited = set()
+    top_blank_id: str | None = None
+    while cur is not None and cur not in visited:
+        visited.add(cur)
+        b = branches.get(cur)
+        if not b:
+            break
+        if b.get("blank"):
+            top_blank_id = b.get("id") or cur
+        cur = b.get("parent_branch_id")
+
+    return top_blank_id or branch_id
+
+
+def _load_debug_chat(story_id: str, debug_unit_id: str) -> list[dict]:
+    data = _load_json(_debug_chat_path(story_id, debug_unit_id), [])
+    if not isinstance(data, list):
+        return []
+    cleaned: list[dict] = []
+    for m in data:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(m.get("content", "")).strip()
+        if not content:
+            continue
+        cleaned.append({
+            "role": role,
+            "content": content,
+            "created_at": m.get("created_at"),
+        })
+    return cleaned
+
+
+def _save_debug_chat(story_id: str, debug_unit_id: str, messages: list[dict]):
+    _save_json(_debug_chat_path(story_id, debug_unit_id), messages)
+
+
+def _append_debug_chat_message(story_id: str, debug_unit_id: str, role: str, content: str):
+    if role not in {"user", "assistant"}:
+        return
+    text = str(content or "").strip()
+    if not text:
+        return
+    chat = _load_debug_chat(story_id, debug_unit_id)
+    chat.append({
+        "role": role,
+        "content": text,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _save_debug_chat(story_id, debug_unit_id, chat)
+
+
+def _load_last_apply_backup(story_id: str, debug_unit_id: str) -> dict:
+    data = _load_json(_last_apply_backup_path(story_id, debug_unit_id), {})
+    return data if isinstance(data, dict) else {}
+
+
+def _save_last_apply_backup(story_id: str, debug_unit_id: str, backup: dict):
+    _save_json(_last_apply_backup_path(story_id, debug_unit_id), backup)
+
+
+def _clear_last_apply_backup(story_id: str, debug_unit_id: str):
+    path = _last_apply_backup_path(story_id, debug_unit_id)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def _load_debug_directive(story_id: str, branch_id: str) -> dict:
+    data = _load_json(_debug_directive_path(story_id, branch_id), {})
+    if not isinstance(data, dict):
+        return {}
+    instruction = str(data.get("instruction", "")).strip()
+    if not instruction:
+        return {}
+    result = dict(data)
+    result["instruction"] = instruction
+    return result
+
+
+def _save_debug_directive(story_id: str, branch_id: str, directive: dict):
+    if not isinstance(directive, dict):
+        return
+    instruction = str(directive.get("instruction", "")).strip()
+    if not instruction:
+        _clear_debug_directive(story_id, branch_id)
+        return
+    payload = dict(directive)
+    payload["instruction"] = instruction
+    if not payload.get("created_at"):
+        payload["created_at"] = datetime.now(timezone.utc).isoformat()
+    _save_json(_debug_directive_path(story_id, branch_id), payload)
+
+
+def _clear_debug_directive(story_id: str, branch_id: str):
+    path = _debug_directive_path(story_id, branch_id)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def _copy_debug_directive(story_id: str, from_bid: str, to_bid: str):
+    directive = _load_debug_directive(story_id, from_bid)
+    if directive:
+        _save_debug_directive(story_id, to_bid, directive)
+    else:
+        _clear_debug_directive(story_id, to_bid)
+
+
+def _append_debug_audit_message(story_id: str, branch_id: str, content: str) -> dict:
+    text = str(content or "").strip()
+    if not text:
+        text = "Debug 修正流程已執行。"
+    msg = {
+        "role": "system",
+        "message_type": "debug_audit",
+        "content": text,
+        "index": len(get_full_timeline(story_id, branch_id)),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _upsert_branch_message(story_id, branch_id, msg)
+    return msg
 
 
 def _clear_loaded_save_preview(tree: dict) -> bool:
@@ -1187,6 +1355,8 @@ _LORE_RE = re.compile(_TAG_OPEN + r"LORE\s*(.*?)\s*LORE" + _TAG_CLOSE, re.DOTALL
 _NPC_RE = re.compile(_TAG_OPEN + r"NPC\s*(.*?)\s*NPC" + _TAG_CLOSE, re.DOTALL)
 _EVENT_RE = re.compile(_TAG_OPEN + r"EVENT\s*(.*?)\s*EVENT" + _TAG_CLOSE, re.DOTALL)
 _IMG_RE = re.compile(_TAG_OPEN + r"IMG\s+prompt:\s*(.*?)\s*IMG" + _TAG_CLOSE, re.DOTALL)
+_DEBUG_ACTION_RE = re.compile(r"<!--DEBUG_ACTION\s*(.*?)\s*DEBUG_ACTION-->", re.DOTALL)
+_DEBUG_DIRECTIVE_RE = re.compile(r"<!--DEBUG_DIRECTIVE\s*(.*?)\s*DEBUG_DIRECTIVE-->", re.DOTALL)
 
 
 def _extract_state_tag(text: str) -> tuple[str, list[dict]]:
@@ -1266,6 +1436,44 @@ def _extract_img_tag(text: str) -> tuple[str, str | None]:
         text = text[: m.start()].rstrip() + text[m.end():]
         text = text.strip()
     return text, first_prompt
+
+
+def _extract_debug_action_tags(text: str) -> tuple[str, list[dict]]:
+    """Extract all <!--DEBUG_ACTION {...} DEBUG_ACTION--> tags from debug response."""
+    actions: list[dict] = []
+    while True:
+        m = _DEBUG_ACTION_RE.search(text)
+        if not m:
+            break
+        try:
+            payload = json.loads(m.group(1))
+            if isinstance(payload, dict):
+                actions.append(payload)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        text = text[: m.start()].rstrip() + text[m.end():]
+        text = text.strip()
+    return text, actions
+
+
+def _extract_debug_directive_tags(text: str) -> tuple[str, list[dict]]:
+    """Extract all <!--DEBUG_DIRECTIVE {...} DEBUG_DIRECTIVE--> tags from debug response."""
+    directives: list[dict] = []
+    while True:
+        m = _DEBUG_DIRECTIVE_RE.search(text)
+        if not m:
+            break
+        try:
+            payload = json.loads(m.group(1))
+            if isinstance(payload, dict):
+                instruction = str(payload.get("instruction", "")).strip()
+                if instruction:
+                    directives.append({"instruction": instruction})
+        except (json.JSONDecodeError, ValueError):
+            pass
+        text = text[: m.start()].rstrip() + text[m.end():]
+        text = text.strip()
+    return text, directives
 
 
 # ---------------------------------------------------------------------------
@@ -1844,6 +2052,66 @@ def _build_gm_plan_injection_block(story_id: str, branch_id: str, current_index:
             arc = arc[: max(16, len(arc) - 12)].rstrip() + "…"
             continue
         return block[:char_limit].rstrip()
+
+
+def _build_debug_directive_injection_block(story_id: str, branch_id: str) -> str:
+    directive = _load_debug_directive(story_id, branch_id)
+    instruction = str(directive.get("instruction", "")).strip()
+    if not instruction:
+        return ""
+    return "\n".join([
+        "[Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）]",
+        instruction,
+    ])
+
+
+def _format_debug_recent_messages(messages: list[dict]) -> str:
+    if not messages:
+        return "（無）"
+    lines: list[str] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "user":
+            label = "玩家"
+        elif role in {"gm", "assistant"}:
+            label = "GM"
+        else:
+            label = "系統"
+        idx = m.get("index")
+        content = str(m.get("content", "")).strip()
+        if len(content) > 320:
+            content = content[:320].rstrip() + "…"
+        lines.append(f"[#{idx}][{label}] {content}")
+    return "\n".join(lines)
+
+
+def _build_debug_system_prompt(story_id: str, branch_id: str, recent_messages: list[dict]) -> str:
+    state = _load_character_state(story_id, branch_id)
+    npcs = _load_npcs(story_id, branch_id, include_archived=True)
+    world_day = get_world_day(story_id, branch_id)
+    dungeon_progress = _load_dungeon_progress(story_id, branch_id) or {}
+    gm_plan = _load_gm_plan(story_id, branch_id)
+    pending_directive = _load_debug_directive(story_id, branch_id)
+    recent_text = _format_debug_recent_messages(recent_messages)
+
+    return (
+        "你是 RPG Debug 診斷與修正助手。你的任務是：\n"
+        "1. 協助檢查狀態/NPC/獎勵點/世界日/副本進度是否一致。\n"
+        "2. 可以提供修正提案，但不做劇情演出。\n"
+        "3. 修正提案請用標籤輸出：<!--DEBUG_ACTION {json} DEBUG_ACTION-->。\n"
+        "4. 劇情修正指令請用標籤輸出：<!--DEBUG_DIRECTIVE {\"instruction\":\"...\"} DEBUG_DIRECTIVE-->。\n"
+        "5. 標籤以外的文字會顯示給使用者，請清楚說明判斷依據。\n"
+        "6. 若資訊不足，先追問，不要硬猜。\n\n"
+        "可用 action type：state_patch / npc_upsert / npc_delete / world_day_set / dungeon_patch。\n"
+        "dungeon_patch 可用欄位：progress_delta、completed_nodes、discovered_areas、explored_area_updates。\n\n"
+        f"[主聊天最近訊息（唯讀參考）]\n{recent_text}\n\n"
+        f"[character_state.json]\n{json.dumps(state, ensure_ascii=False, indent=2)}\n\n"
+        f"[npcs.json（含 archived）]\n{json.dumps(npcs, ensure_ascii=False, indent=2)}\n\n"
+        f"[world_day]\n{json.dumps(world_day, ensure_ascii=False)}\n\n"
+        f"[dungeon_progress.json]\n{json.dumps(dungeon_progress, ensure_ascii=False, indent=2)}\n\n"
+        f"[gm_plan.json]\n{json.dumps(gm_plan, ensure_ascii=False, indent=2)}\n\n"
+        f"[pending_debug_directive]\n{json.dumps(pending_directive, ensure_ascii=False, indent=2)}\n"
+    )
 
 
 def _search_branch_lore(story_id: str, branch_id: str, query: str,
@@ -3976,7 +4244,7 @@ def _migrate_design_files(story_id: str):
 # ---------------------------------------------------------------------------
 
 _CONTEXT_ECHO_RE = re.compile(
-    r"\[(?:命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態|GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
+    r"\[(?:命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態|GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）|Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
     re.DOTALL,
 )
 
@@ -4037,7 +4305,8 @@ def _strip_choices_from_messages(messages: list[dict]) -> list[dict]:
 
 def _sanitize_recent_messages(messages: list[dict], *, strip_fate: bool) -> list[dict]:
     """Strip non-narrative scaffolding from recent messages before model input."""
-    cleaned = _strip_choices_from_messages(messages)
+    cleaned = [m for m in messages if m.get("message_type") != "debug_audit"]
+    cleaned = _strip_choices_from_messages(cleaned)
     if strip_fate:
         cleaned = _strip_fate_from_messages(cleaned)
     return cleaned
@@ -4112,6 +4381,9 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         "world_day_snapshot": get_world_day(story_id, branch_id),
         "dungeon_progress_snapshot": get_dungeon_progress_snapshot(story_id, branch_id),
     }
+
+    # One-shot consume: clear debug directive after one GM turn is produced.
+    _clear_debug_directive(story_id, branch_id)
 
     return gm_response, image_info, snapshots
 
@@ -4240,6 +4512,9 @@ def _build_augmented_message(
             plan_block = _build_gm_plan_injection_block(story_id, branch_id, current_index)
             if plan_block:
                 parts.append(plan_block)
+    directive_block = _build_debug_directive_injection_block(story_id, branch_id)
+    if directive_block:
+        parts.append(directive_block)
     activities = get_recent_activities(story_id, branch_id, limit=2)
     if activities:
         parts.append(activities)
@@ -4890,6 +5165,7 @@ def api_branches_create():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    _copy_debug_directive(story_id, source_branch_id, branch_id)
 
     _save_branch_messages(story_id, branch_id, [])
 
@@ -5110,6 +5386,7 @@ def api_branches_edit():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    _copy_debug_directive(story_id, source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -5288,6 +5565,7 @@ def api_branches_edit_stream():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    _copy_debug_directive(story_id, source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -5473,6 +5751,7 @@ def api_branches_regenerate():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    _copy_debug_directive(story_id, source_branch_id, branch_id)
 
     _save_branch_messages(story_id, branch_id, [])
 
@@ -5857,6 +6136,7 @@ def api_branches_promote():
     parent_id = branches[branch_id].get("parent_branch_id")
     if isinstance(parent_id, str) and parent_id in branches:
         _copy_gm_plan(story_id, branch_id, parent_id, branch_point_index=None)
+        _copy_debug_directive(story_id, branch_id, parent_id)
 
     tree["active_branch_id"] = branch_id
     tree["promoted_mainline_leaf_id"] = branch_id
@@ -6797,6 +7077,366 @@ def api_lore_apply():
                 delete_lore_entry(story_id, topic, sub)
                 applied.append({"action": "delete", "topic": topic})
     return jsonify({"ok": True, "applied": applied})
+
+
+# ---------------------------------------------------------------------------
+# Debug Panel API
+# ---------------------------------------------------------------------------
+
+def _pick_latest_debug_directive(directives: object) -> dict | None:
+    if not isinstance(directives, list):
+        return None
+    latest: dict | None = None
+    for item in directives:
+        if not isinstance(item, dict):
+            continue
+        instruction = str(item.get("instruction", "")).strip()
+        if not instruction:
+            continue
+        latest = {"instruction": instruction}
+    return latest
+
+
+def _apply_debug_action(story_id: str, branch_id: str, action: dict) -> dict:
+    action_type = str(action.get("type", "")).strip()
+    if not action_type:
+        return {"type": "unknown", "ok": False, "error": "missing action type"}
+
+    if action_type == "state_patch":
+        update = action.get("update")
+        if not isinstance(update, dict):
+            return {"type": action_type, "ok": False, "error": "invalid state update"}
+        _apply_state_update(story_id, branch_id, update)
+        return {"type": action_type, "ok": True}
+
+    if action_type == "npc_upsert":
+        npc = action.get("npc")
+        if not isinstance(npc, dict) or not str(npc.get("name", "")).strip():
+            return {"type": action_type, "ok": False, "error": "invalid npc payload"}
+        _save_npc(story_id, npc, branch_id)
+        return {"type": action_type, "ok": True}
+
+    if action_type == "npc_delete":
+        npc_id = str(action.get("npc_id", "")).strip()
+        if not npc_id:
+            return {"type": action_type, "ok": False, "error": "npc_id required"}
+        npcs = _load_npcs(story_id, branch_id, include_archived=True)
+        removed_names = [n.get("name", "").strip() for n in npcs if n.get("id") == npc_id and n.get("name")]
+        if not removed_names:
+            return {"type": action_type, "ok": False, "error": "npc not found"}
+        npcs = [n for n in npcs if n.get("id") != npc_id]
+        _save_json(_story_npcs_path(story_id, branch_id), npcs)
+        for name in removed_names:
+            delete_state_entry(story_id, branch_id, category="npc", entry_key=name)
+        return {"type": action_type, "ok": True}
+
+    if action_type == "world_day_set":
+        world_day = action.get("world_day")
+        try:
+            day_value = float(world_day)
+        except (TypeError, ValueError):
+            return {"type": action_type, "ok": False, "error": "invalid world_day"}
+        if day_value < 0:
+            return {"type": action_type, "ok": False, "error": "world_day must be >= 0"}
+        set_world_day(story_id, branch_id, day_value)
+        return {"type": action_type, "ok": True}
+
+    if action_type == "dungeon_patch":
+        progress = _load_dungeon_progress(story_id, branch_id)
+        if not progress or not progress.get("current_dungeon"):
+            return {"type": action_type, "ok": False, "error": "no active dungeon"}
+
+        progress_delta_raw = action.get("progress_delta", action.get("mainline_progress_delta"))
+        completed_nodes = action.get("completed_nodes", [])
+        discovered_areas = action.get("discovered_areas", [])
+        explored_updates = action.get("explored_area_updates", {})
+        did_update = False
+
+        if progress_delta_raw is not None or completed_nodes:
+            if progress_delta_raw is None:
+                progress_delta = 0
+            else:
+                try:
+                    progress_delta = int(float(progress_delta_raw))
+                except (TypeError, ValueError):
+                    return {"type": action_type, "ok": False, "error": "invalid progress_delta"}
+            if not isinstance(completed_nodes, list):
+                return {"type": action_type, "ok": False, "error": "completed_nodes must be a list"}
+            update_dungeon_progress(story_id, branch_id, {
+                "progress_delta": progress_delta,
+                "nodes_completed": [str(x) for x in completed_nodes if str(x).strip()],
+            })
+            did_update = True
+
+        if discovered_areas or explored_updates:
+            if not isinstance(discovered_areas, list):
+                return {"type": action_type, "ok": False, "error": "discovered_areas must be a list"}
+            if not isinstance(explored_updates, dict):
+                return {"type": action_type, "ok": False, "error": "explored_area_updates must be an object"}
+            cleaned_updates = {}
+            for area_id, delta in explored_updates.items():
+                try:
+                    cleaned_updates[str(area_id)] = int(float(delta))
+                except (TypeError, ValueError):
+                    continue
+            update_dungeon_area(story_id, branch_id, {
+                "discovered_areas": [str(x) for x in discovered_areas if str(x).strip()],
+                "explored_area_updates": cleaned_updates,
+            })
+            did_update = True
+
+        if not did_update:
+            return {"type": action_type, "ok": False, "error": "empty dungeon patch"}
+        return {"type": action_type, "ok": True}
+
+    return {"type": action_type, "ok": False, "error": f"unsupported action type: {action_type}"}
+
+
+def _build_debug_apply_audit_summary(results: list[dict], directive_applied: int) -> str:
+    total = len(results)
+    success = sum(1 for r in results if r.get("ok"))
+    failed_types = [str(r.get("type", "unknown")) for r in results if not r.get("ok")]
+    if total == 0:
+        summary = "未套用資料修正"
+    elif success == 0:
+        summary = f"所有修正項目失敗（0/{total}）"
+    elif success == total:
+        summary = f"已套用 {success}/{total} 項修正"
+    else:
+        summary = f"已套用 {success}/{total} 項修正（{total - success} 項失敗：{', '.join(failed_types[:5])}）"
+
+    if directive_applied > 0:
+        summary += "；已注入劇情指令"
+    return summary
+
+
+@app.route("/api/debug/session")
+def api_debug_session():
+    story_id = _active_story_id()
+    branch_id = request.args.get("branch_id", "main")
+    tree = _load_tree(story_id)
+    if branch_id not in tree.get("branches", {}):
+        return jsonify({"ok": False, "error": "branch not found"}), 404
+
+    debug_unit_id = _resolve_debug_unit_id(story_id, branch_id)
+    messages = _load_debug_chat(story_id, debug_unit_id)
+    return jsonify({
+        "ok": True,
+        "debug_unit_id": debug_unit_id,
+        "target_branch_id": branch_id,
+        "messages": messages,
+        "state_snapshot": _load_character_state(story_id, branch_id),
+        "npcs_snapshot": _load_npcs(story_id, branch_id, include_archived=True),
+        "world_day": get_world_day(story_id, branch_id),
+        "dungeon_progress": _load_dungeon_progress(story_id, branch_id) or {},
+        "gm_plan": _load_gm_plan(story_id, branch_id),
+        "pending_directive": _load_debug_directive(story_id, branch_id),
+    })
+
+
+@app.route("/api/debug/chat/stream", methods=["POST"])
+def api_debug_chat_stream():
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "main")
+    user_message = str(body.get("user_message", "")).strip()
+    if not user_message:
+        return Response(_sse_event({"type": "error", "message": "user_message required"}),
+                        mimetype="text/event-stream")
+    if len(user_message) > DEBUG_CHAT_MAX_USER_CHARS:
+        return Response(_sse_event({"type": "error", "message": f"user_message too long (>{DEBUG_CHAT_MAX_USER_CHARS})"}),
+                        mimetype="text/event-stream")
+
+    tree = _load_tree(story_id)
+    if branch_id not in tree.get("branches", {}):
+        return Response(_sse_event({"type": "error", "message": "branch not found"}),
+                        mimetype="text/event-stream")
+
+    debug_unit_id = _resolve_debug_unit_id(story_id, branch_id)
+    existing_chat = _load_debug_chat(story_id, debug_unit_id)
+    prior = [{"role": m["role"], "content": m["content"]} for m in existing_chat[-DEBUG_CHAT_CONTEXT_COUNT:]]
+    _append_debug_chat_message(story_id, debug_unit_id, "user", user_message)
+
+    full_timeline = get_full_timeline(story_id, branch_id)
+    recent = _sanitize_recent_messages(
+        full_timeline[-RECENT_MESSAGE_COUNT:],
+        strip_fate=not get_fate_mode(_story_dir(story_id), branch_id),
+    )
+    debug_system_prompt = _build_debug_system_prompt(story_id, branch_id, recent)
+
+    _trace_llm(
+        stage="debug_chat_request",
+        story_id=story_id,
+        branch_id=branch_id,
+        source="/api/debug/chat/stream",
+        payload={
+            "debug_unit_id": debug_unit_id,
+            "user_message": user_message,
+            "system_prompt": debug_system_prompt,
+            "recent_debug_messages": prior,
+        },
+        tags={"mode": "stream"},
+    )
+
+    def generate():
+        t_start = time.time()
+        try:
+            for event_type, payload in call_claude_gm_stream(
+                user_message, debug_system_prompt, prior, session_id=None
+            ):
+                if event_type == "text":
+                    yield _sse_event({"type": "text", "chunk": payload})
+                elif event_type == "error":
+                    yield _sse_event({"type": "error", "message": payload})
+                    return
+                elif event_type == "done":
+                    response_raw = payload.get("response", "")
+                    _log_llm_usage(story_id, "debug_chat", time.time() - t_start,
+                                   branch_id=branch_id, usage=payload.get("usage"))
+                    _trace_llm(
+                        stage="debug_chat_response_raw",
+                        story_id=story_id,
+                        branch_id=branch_id,
+                        source="/api/debug/chat/stream",
+                        payload={"response": response_raw, "usage": payload.get("usage")},
+                        tags={"mode": "stream"},
+                    )
+
+                    display_text, proposals = _extract_debug_action_tags(response_raw)
+                    display_text, directives = _extract_debug_directive_tags(display_text)
+                    display_text = display_text.strip()
+                    if display_text:
+                        _append_debug_chat_message(story_id, debug_unit_id, "assistant", display_text)
+                    done_payload = {
+                        "type": "done",
+                        "response": display_text,
+                        "proposals": proposals,
+                        "directives": directives,
+                    }
+                    yield _sse_event(done_payload)
+        except Exception as e:
+            log.info("/api/debug/chat/stream EXCEPTION %s", e)
+            yield _sse_event({"type": "error", "message": str(e)})
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+
+
+@app.route("/api/debug/apply", methods=["POST"])
+def api_debug_apply():
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "main")
+    actions = body.get("actions", [])
+    directives = body.get("directives", [])
+
+    tree = _load_tree(story_id)
+    if branch_id not in tree.get("branches", {}):
+        return jsonify({"ok": False, "error": "branch not found"}), 404
+    if not isinstance(actions, list):
+        return jsonify({"ok": False, "error": "actions must be a list"}), 400
+    if not isinstance(directives, list):
+        return jsonify({"ok": False, "error": "directives must be a list"}), 400
+    if len(actions) > DEBUG_APPLY_MAX_ACTIONS:
+        return jsonify({"ok": False, "error": f"too many actions (max {DEBUG_APPLY_MAX_ACTIONS})"}), 400
+
+    debug_unit_id = _resolve_debug_unit_id(story_id, branch_id)
+    backup = {
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "debug_unit_id": debug_unit_id,
+        "target_branch_id": branch_id,
+        "state_snapshot": _load_character_state(story_id, branch_id),
+        "npcs_snapshot": _load_npcs(story_id, branch_id, include_archived=True),
+        "world_day": get_world_day(story_id, branch_id),
+        "dungeon_progress_snapshot": _load_dungeon_progress(story_id, branch_id) or {
+            "history": [],
+            "current_dungeon": None,
+            "total_dungeons_completed": 0,
+        },
+    }
+    _save_last_apply_backup(story_id, debug_unit_id, backup)
+
+    results: list[dict] = []
+    for raw_action in actions:
+        if not isinstance(raw_action, dict):
+            results.append({"type": "unknown", "ok": False, "error": "invalid action payload"})
+            continue
+        try:
+            results.append(_apply_debug_action(story_id, branch_id, raw_action))
+        except Exception as e:
+            action_type = str(raw_action.get("type", "unknown"))
+            results.append({"type": action_type, "ok": False, "error": str(e)})
+
+    directive_result = {"ok": True, "applied": 0}
+    latest_directive = _pick_latest_debug_directive(directives)
+    if latest_directive:
+        try:
+            _save_debug_directive(story_id, branch_id, {
+                **latest_directive,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "source": "debug_apply",
+                "debug_unit_id": debug_unit_id,
+            })
+            directive_result["applied"] = 1
+        except Exception as e:
+            directive_result = {"ok": False, "applied": 0, "error": str(e)}
+
+    audit_summary = _build_debug_apply_audit_summary(results, directive_result.get("applied", 0))
+    _append_debug_audit_message(story_id, branch_id, audit_summary)
+
+    return jsonify({
+        "ok": True,
+        "results": results,
+        "directive_result": directive_result,
+        "audit_summary": audit_summary,
+    })
+
+
+@app.route("/api/debug/undo", methods=["POST"])
+def api_debug_undo():
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "main")
+
+    tree = _load_tree(story_id)
+    if branch_id not in tree.get("branches", {}):
+        return jsonify({"ok": False, "error": "branch not found"}), 404
+
+    debug_unit_id = _resolve_debug_unit_id(story_id, branch_id)
+    backup = _load_last_apply_backup(story_id, debug_unit_id)
+    if not backup:
+        return jsonify({"ok": False, "error": "no backup available"}), 400
+    if backup.get("target_branch_id") != branch_id:
+        return jsonify({"ok": False, "error": "backup target mismatch"}), 400
+
+    state_snapshot = backup.get("state_snapshot")
+    npcs_snapshot = backup.get("npcs_snapshot")
+    world_day = backup.get("world_day")
+    dungeon_snapshot = backup.get("dungeon_progress_snapshot")
+
+    if not isinstance(state_snapshot, dict):
+        return jsonify({"ok": False, "error": "backup state invalid"}), 400
+    if not isinstance(npcs_snapshot, list):
+        return jsonify({"ok": False, "error": "backup npc snapshot invalid"}), 400
+    if not isinstance(dungeon_snapshot, dict):
+        return jsonify({"ok": False, "error": "backup dungeon snapshot invalid"}), 400
+
+    _save_json(_story_character_state_path(story_id, branch_id), state_snapshot)
+    _save_json(_story_npcs_path(story_id, branch_id), npcs_snapshot)
+    rebuild_state_db_from_json(story_id, branch_id, state=state_snapshot, npcs=npcs_snapshot)
+
+    try:
+        set_world_day(story_id, branch_id, float(world_day))
+    except (TypeError, ValueError):
+        set_world_day(story_id, branch_id, get_world_day(story_id, branch_id))
+
+    _save_json(_dungeon_progress_path(story_id, branch_id), dungeon_snapshot)
+    _clear_debug_directive(story_id, branch_id)
+    _clear_last_apply_backup(story_id, debug_unit_id)
+
+    audit_summary = "已回滾 Debug 修正（還原至套用前）"
+    _append_debug_audit_message(story_id, branch_id, audit_summary)
+    return jsonify({"ok": True, "restored": True, "audit_summary": audit_summary})
 
 
 # ---------------------------------------------------------------------------
