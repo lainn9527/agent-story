@@ -356,6 +356,20 @@ class TestBranchesAPI:
         child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
         assert not child_plan_path.exists()
 
+    def test_create_branch_does_not_copy_debug_directive(self, client, setup_story):
+        main_directive_path = setup_story / "branches" / "main" / "debug_directive.json"
+        main_directive_path.write_text(json.dumps({
+            "instruction": "下回合請補主線提示",
+            "source": "debug_panel",
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches", json={"name": "不帶directive", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+
+        child_directive_path = setup_story / "branches" / child_id / "debug_directive.json"
+        assert not child_directive_path.exists()
+
     def test_switch_branch(self, client, setup_story):
         # Create a branch first
         resp = client.post("/api/branches", json={"name": "切換用", "branch_point_index": 1})

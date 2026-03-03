@@ -5165,8 +5165,6 @@ def api_branches_create():
     copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     _copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     copy_dungeon_progress(story_id, parent_branch_id, branch_id)
-    _copy_debug_directive(story_id, source_branch_id, branch_id)
-
     _save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
