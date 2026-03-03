@@ -345,13 +345,11 @@ def organize_lore_async(story_id: str):
 def _organize_orphans_llm(story_id: str):
     """LLM-based orphan classification (closed-option, no generation).
 
-    Always uses claude_cli to avoid burning Gemini quota on background tasks.
+    Uses the current global provider from llm_bridge.
     """
     import time as _time
-    from llm_bridge import call_oneshot as _call_oneshot
+    from llm_bridge import call_oneshot
     import usage_db
-    def call_oneshot(prompt):
-        return _call_oneshot(prompt, provider="claude_cli")
 
     lock = get_lore_lock(story_id)
     state = _load_state(story_id)
