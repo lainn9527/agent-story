@@ -1357,6 +1357,7 @@ _EVENT_RE = re.compile(_TAG_OPEN + r"EVENT\s*(.*?)\s*EVENT" + _TAG_CLOSE, re.DOT
 _IMG_RE = re.compile(_TAG_OPEN + r"IMG\s+prompt:\s*(.*?)\s*IMG" + _TAG_CLOSE, re.DOTALL)
 _DEBUG_ACTION_RE = re.compile(r"<!--DEBUG_ACTION\s*(.*?)\s*DEBUG_ACTION-->", re.DOTALL)
 _DEBUG_DIRECTIVE_RE = re.compile(r"<!--DEBUG_DIRECTIVE\s*(.*?)\s*DEBUG_DIRECTIVE-->", re.DOTALL)
+_DEBUG_ACTION_TYPES = {"state_patch", "npc_upsert", "npc_delete", "world_day_set", "dungeon_patch"}
 
 
 def _extract_state_tag(text: str) -> tuple[str, list[dict]]:
@@ -1447,8 +1448,9 @@ def _extract_debug_action_tags(text: str) -> tuple[str, list[dict]]:
             break
         try:
             payload = json.loads(m.group(1))
-            if isinstance(payload, dict):
-                actions.append(payload)
+            normalized = _normalize_debug_action_payload(payload)
+            if isinstance(normalized, dict):
+                actions.append(normalized)
         except (json.JSONDecodeError, ValueError):
             pass
         text = text[: m.start()].rstrip() + text[m.end():]
@@ -1474,6 +1476,120 @@ def _extract_debug_directive_tags(text: str) -> tuple[str, list[dict]]:
         text = text[: m.start()].rstrip() + text[m.end():]
         text = text.strip()
     return text, directives
+
+
+def _normalize_debug_action_payload(payload: object) -> dict | None:
+    """Normalize model-emitted debug action payloads into canonical action objects."""
+    if not isinstance(payload, dict):
+        return None
+
+    data = dict(payload)
+    nested_action = data.get("action")
+    if isinstance(nested_action, dict):
+        nested = _normalize_debug_action_payload(nested_action)
+        if nested:
+            return nested
+
+    action_type = str(data.get("type") or data.get("action_type") or data.get("kind") or "").strip()
+    if action_type in _DEBUG_ACTION_TYPES:
+        normalized = dict(data)
+        normalized["type"] = action_type
+        payload_obj = normalized.get("payload")
+        if isinstance(payload_obj, dict):
+            for k, v in payload_obj.items():
+                normalized.setdefault(k, v)
+
+        if action_type == "state_patch":
+            state_obj = normalized.get("state_patch")
+            if not isinstance(normalized.get("update"), dict):
+                if isinstance(state_obj, dict):
+                    normalized["update"] = state_obj
+                else:
+                    extras = {
+                        k: v for k, v in normalized.items()
+                        if k not in {"type", "action_type", "kind", "payload", "state_patch"}
+                    }
+                    if extras:
+                        normalized["update"] = extras
+        elif action_type == "npc_upsert":
+            npc_obj = normalized.get("npc_upsert")
+            if not isinstance(normalized.get("npc"), dict) and isinstance(npc_obj, dict):
+                normalized["npc"] = npc_obj
+        elif action_type == "npc_delete":
+            if not str(normalized.get("npc_id", "")).strip():
+                npc_delete_val = normalized.get("npc_delete")
+                if isinstance(npc_delete_val, str) and npc_delete_val.strip():
+                    normalized["npc_id"] = npc_delete_val.strip()
+        elif action_type == "world_day_set":
+            if "world_day" not in normalized and "value" in normalized:
+                normalized["world_day"] = normalized.get("value")
+        elif action_type == "dungeon_patch":
+            dungeon_obj = normalized.get("dungeon_patch")
+            if isinstance(dungeon_obj, dict):
+                for k, v in dungeon_obj.items():
+                    normalized.setdefault(k, v)
+        return normalized
+
+    if isinstance(data.get("update"), dict):
+        return {"type": "state_patch", "update": data["update"]}
+
+    if "world_day" in data:
+        return {"type": "world_day_set", "world_day": data.get("world_day")}
+
+    if isinstance(data.get("npc"), dict):
+        return {"type": "npc_upsert", "npc": data["npc"]}
+
+    npc_id = str(data.get("npc_id", "")).strip()
+    if npc_id:
+        return {"type": "npc_delete", "npc_id": npc_id}
+
+    dungeon_keys = {"progress_delta", "mainline_progress_delta", "completed_nodes", "discovered_areas", "explored_area_updates"}
+    if any(k in data for k in dungeon_keys):
+        out = {"type": "dungeon_patch"}
+        for k in dungeon_keys:
+            if k in data:
+                out[k] = data[k]
+        return out
+
+    for key in _DEBUG_ACTION_TYPES:
+        if key not in data:
+            continue
+        value = data.get(key)
+        if key == "state_patch":
+            if isinstance(value, dict):
+                if isinstance(value.get("update"), dict):
+                    return {"type": "state_patch", "update": value["update"]}
+                return {"type": "state_patch", "update": value}
+            return None
+        if key == "npc_upsert":
+            if isinstance(value, dict):
+                if isinstance(value.get("npc"), dict):
+                    return {"type": "npc_upsert", "npc": value["npc"]}
+                return {"type": "npc_upsert", "npc": value}
+            return None
+        if key == "npc_delete":
+            if isinstance(value, dict):
+                nested_id = str(value.get("npc_id", "")).strip()
+                if nested_id:
+                    return {"type": "npc_delete", "npc_id": nested_id}
+                return None
+            if isinstance(value, str) and value.strip():
+                return {"type": "npc_delete", "npc_id": value.strip()}
+            return None
+        if key == "world_day_set":
+            if isinstance(value, dict) and "world_day" in value:
+                return {"type": "world_day_set", "world_day": value.get("world_day")}
+            return {"type": "world_day_set", "world_day": value}
+        if key == "dungeon_patch":
+            if isinstance(value, dict):
+                out = {"type": "dungeon_patch"}
+                for k in dungeon_keys:
+                    if k in value:
+                        out[k] = value[k]
+                return out
+            return None
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -7096,6 +7212,9 @@ def _pick_latest_debug_directive(directives: object) -> dict | None:
 
 
 def _apply_debug_action(story_id: str, branch_id: str, action: dict) -> dict:
+    normalized = _normalize_debug_action_payload(action)
+    if isinstance(normalized, dict):
+        action = normalized
     action_type = str(action.get("type", "")).strip()
     if not action_type:
         return {"type": "unknown", "ok": False, "error": "missing action type"}

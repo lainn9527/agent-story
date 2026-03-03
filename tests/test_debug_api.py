@@ -180,6 +180,29 @@ def test_debug_chat_stream_parses_tags_and_persists_history(client, setup_story,
     assert chat[1]["role"] == "assistant"
 
 
+def test_debug_chat_stream_normalizes_action_without_type(client, setup_story, monkeypatch):
+    def _fake_stream(*_args, **_kwargs):
+        yield ("done", {
+            "response": (
+                "可先整理欄位。\n"
+                "<!--DEBUG_ACTION {\"update\":{\"reward_points_delta\":5}} DEBUG_ACTION-->"
+            ),
+            "usage": None,
+        })
+
+    monkeypatch.setattr(app_module, "call_claude_gm_stream", _fake_stream)
+
+    resp = client.post("/api/debug/chat/stream", json={
+        "branch_id": "main",
+        "user_message": "整理一下欄位",
+    })
+    assert resp.status_code == 200
+    events = _read_sse_events(resp)
+    done = next(e for e in events if e.get("type") == "done")
+    assert done["proposals"][0]["type"] == "state_patch"
+    assert done["proposals"][0]["update"]["reward_points_delta"] == 5
+
+
 def test_debug_apply_partial_success_and_audit(client, setup_story):
     resp = client.post("/api/debug/apply", json={
         "branch_id": "main",
@@ -206,6 +229,25 @@ def test_debug_apply_partial_success_and_audit(client, setup_story):
 
     messages = json.loads((setup_story / "branches" / "main" / "messages.json").read_text(encoding="utf-8"))
     assert any(m.get("message_type") == "debug_audit" for m in messages)
+
+
+def test_debug_apply_infers_state_patch_when_type_missing(client, setup_story):
+    resp = client.post("/api/debug/apply", json={
+        "branch_id": "main",
+        "actions": [
+            {"update": {"reward_points_delta": 10}},
+        ],
+        "directives": [],
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["results"][0]["type"] == "state_patch"
+    assert data["results"][0]["ok"] is True
+
+    state_path = setup_story / "branches" / "main" / "character_state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["reward_points"] == 1010
 
 
 def test_debug_undo_restores_snapshot_and_clears_directive(client, setup_story):
