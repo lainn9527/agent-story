@@ -3119,6 +3119,29 @@ async function toggleDiceCheat() {
   }
 }
 
+async function runStateCleanup() {
+  const btn = document.getElementById("cleanup-btn");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "清理中...";
+  try {
+    const res = await fetch("/api/state/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId }),
+    });
+    const data = await res.json();
+    if (data.ok) showToast("狀態清理已啟動");
+    else showToast(data.error || "清理請求失敗");
+  } catch (e) {
+    console.error("cleanup error:", e);
+    showToast("網路錯誤");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "清理";
+  }
+}
+
 async function toggleFateMode() {
   const addonBtn = document.getElementById("addon-fate-btn");
   const drawerBtn = document.getElementById("fate-cheat-btn");

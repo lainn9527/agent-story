@@ -4065,10 +4065,17 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         gm_response = re.sub(r"\n{3,}", "\n\n", gm_response).strip()
 
     gm_response, state_updates = _extract_state_tag(gm_response)
+    old_phase_before_state = _load_character_state(story_id, branch_id).get("current_phase")
     for state_update in state_updates:
         _apply_state_update(story_id, branch_id, state_update)
     if not state_updates:
         log.info("GM response missing STATE tag (msg_index=%d)", msg_index)
+    # Phase transition 副本中/副本結算 → 主神空間: trigger state cleanup
+    if state_updates:
+        new_state = _load_character_state(story_id, branch_id)
+        if old_phase_before_state in ("副本中", "副本結算") and new_state.get("current_phase") == "主神空間":
+            from state_cleanup import run_state_cleanup_async
+            run_state_cleanup_async(story_id, branch_id, force=True)
 
     gm_response, lore_entries = _extract_lore_tag(gm_response)
     for lore_entry in lore_entries:
@@ -4104,6 +4111,11 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
                         skip_state=False,
                         skip_time=had_time_tags)
+
+    # Periodic state cleanup (every N turns, cooldown)
+    from state_cleanup import should_run_cleanup, run_state_cleanup_async
+    if should_run_cleanup(story_id, branch_id, msg_index):
+        run_state_cleanup_async(story_id, branch_id, force=False, turn_index=msg_index)
 
     # Build snapshots for branch forking accuracy
     snapshots = {
@@ -4829,6 +4841,20 @@ def api_state_rebuild():
     count = rebuild_state_db_from_json(story_id, branch_id, state=state, npcs=npcs)
     summary = get_state_summary(story_id, branch_id)
     return jsonify({"ok": True, "branch_id": branch_id, "count": count, "summary": summary})
+
+
+@app.route("/api/state/cleanup", methods=["POST"])
+def api_state_cleanup():
+    """Start LLM-based state cleanup in background (archive stale NPCs, merge duplicates, resolve events, remove inventory)."""
+    story_id = _active_story_id()
+    body = request.get_json(silent=True) or {}
+    branch_id = body.get("branch_id")
+    if not branch_id:
+        tree = _load_tree(story_id)
+        branch_id = tree.get("active_branch_id", "main")
+    from state_cleanup import run_state_cleanup_async
+    run_state_cleanup_async(story_id, branch_id, force=True)
+    return jsonify({"ok": True, "message": "cleanup started", "branch_id": branch_id})
 
 
 # ---------------------------------------------------------------------------
@@ -7560,6 +7586,10 @@ def api_dungeon_return():
     state["current_dungeon"] = ""
     state["reward_points"] = state.get("reward_points", 0) + total_reward
     _save_character_state(story_id, branch_id, state)
+
+    # State cleanup after dungeon return (archive dungeon-specific NPCs, resolve events)
+    from state_cleanup import run_state_cleanup_async
+    run_state_cleanup_async(story_id, branch_id, force=True)
 
     # Advance world time (recovery time)
     try:
