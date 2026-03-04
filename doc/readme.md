@@ -8,7 +8,7 @@
 - 角色狀態追蹤（含 inventory/systems/relationships）
 - 世界觀知識庫（lore）與事件追蹤（events）
 - 命運骰、GM cheats、存檔、副本進度系統
-- 多 LLM provider（Gemini / Claude CLI）與串流回應
+- 多 LLM provider（Gemini / Claude CLI / Ollama 本地）與串流回應
 
 ## 快速開始
 
@@ -31,9 +31,15 @@ pip install -r requirements.txt
   },
   "claude_cli": {
     "model": "claude-opus-4-6"
+  },
+  "ollama": {
+    "base_url": "http://localhost:11434",
+    "model": "qwen3.5:latest"
   }
 }
 ```
+
+使用本地 Qwen 3.5 時設 `"provider": "ollama"`，並先安裝 [Ollama](https://ollama.com) 與模型：`ollama run qwen3.5`
 
 3. 啟動服務
 

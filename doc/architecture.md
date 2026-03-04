@@ -8,7 +8,7 @@
 Browser (static/app.js, templates/index.html)
   -> Flask app (app.py)
       -> LLM bridge (llm_bridge.py)
-          -> gemini_bridge.py 或 claude_bridge.py
+          -> gemini_bridge.py 或 claude_bridge.py 或 ollama_bridge.py
       -> Lore / Event / Usage / State SQLite
       -> JSON runtime files (messages/state/npcs/branch tree/saves...)
       -> Background threads (tag extraction, compaction, NPC evolution, image gen)
@@ -29,8 +29,8 @@ Browser (static/app.js, templates/index.html)
   - 結構化落盤 LLM request/response trace
   - 依 story/date/branch/message 分區存檔
   - 內建 retention prune（按日期資料夾清理）
-- `gemini_bridge.py` / `claude_bridge.py`
-  - Gemini API 或 Claude CLI 的實際呼叫
+- `gemini_bridge.py` / `claude_bridge.py` / `ollama_bridge.py`
+  - Gemini API、Claude CLI 或本地 Ollama（如 Qwen 3.5）的實際呼叫
 - `lore_db.py` / `event_db.py` / `usage_db.py`
   - 各自獨立 SQLite
 - `state_db.py`

@@ -1,7 +1,7 @@
 """LLM Bridge — dispatches GM calls to the configured provider.
 
 Swap provider by editing llm_config.json (auto-reloads on file change).
-Supported providers: "gemini", "claude_cli"
+Supported providers: "gemini", "claude_cli", "ollama"
 """
 
 import json
@@ -70,6 +70,9 @@ def _capture_usage(provider: str, model: str):
     if provider == "gemini":
         from gemini_bridge import get_last_usage as _gemini_usage
         usage = _gemini_usage()
+    elif provider == "ollama":
+        from ollama_bridge import get_last_usage as _ollama_usage
+        usage = _ollama_usage()
     else:
         from claude_bridge import get_last_usage as _claude_usage
         usage = _claude_usage()
@@ -99,6 +102,22 @@ def call_claude_gm(
             user_message, system_prompt, recent_messages,
             gemini_cfg=g, model=model,
             session_id=session_id,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "ollama":
+        from ollama_bridge import call_ollama_gm
+        o = cfg.get("ollama", {})
+        base_url = o.get("base_url", "http://localhost:11434")
+        model = o.get("model", "qwen3.5:latest")
+        think = o.get("think", False)
+        result = call_ollama_gm(
+            user_message, system_prompt, recent_messages,
+            session_id=session_id,
+            base_url=base_url,
+            model=model,
+            think=think,
         )
         _capture_usage(provider, model)
         return result
@@ -146,6 +165,26 @@ def call_claude_gm_stream(
             yield (event_type, payload)
         return
 
+    if provider == "ollama":
+        from ollama_bridge import call_ollama_gm_stream
+        o = cfg.get("ollama", {})
+        base_url = o.get("base_url", "http://localhost:11434")
+        model = o.get("model", "qwen3.5:latest")
+        think = o.get("think", False)
+        for event_type, payload in call_ollama_gm_stream(
+            user_message, system_prompt, recent_messages,
+            session_id=session_id,
+            base_url=base_url,
+            model=model,
+            think=think,
+        ):
+            if event_type == "done" and isinstance(payload, dict):
+                usage = payload.get("usage")
+                if usage:
+                    payload["usage"] = {**usage, "provider": provider, "model": model}
+            yield (event_type, payload)
+        return
+
     # Default: Claude CLI (tools not supported)
     if tools:
         log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
@@ -176,6 +215,22 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
             prompt,
             gemini_cfg=g, model=model,
             system_prompt=system_prompt,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "ollama":
+        from ollama_bridge import call_ollama_oneshot
+        o = cfg.get("ollama", {})
+        base_url = o.get("base_url", "http://localhost:11434")
+        model = o.get("model", "qwen3.5:latest")
+        think = o.get("think", False)
+        result = call_ollama_oneshot(
+            prompt,
+            system_prompt=system_prompt,
+            base_url=base_url,
+            model=model,
+            think=think,
         )
         _capture_usage(provider, model)
         return result
