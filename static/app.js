@@ -3119,6 +3119,45 @@ async function toggleDiceCheat() {
   }
 }
 
+async function runStateCleanup() {
+  const btn = document.getElementById("cleanup-btn");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "清理中…";
+  try {
+    const res = await fetch("/api/state/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId }),
+    });
+    const data = await res.json();
+    if (data.ok && data.summary) {
+      const s = data.summary;
+      const parts = [];
+      if (s.archived_npcs) parts.push(`歸檔 ${s.archived_npcs} NPC`);
+      if (s.merged_npcs) parts.push(`合併 ${s.merged_npcs} NPC`);
+      if (s.resolved_events) parts.push(`結案 ${s.resolved_events} 事件`);
+      if (s.removed_inventory) parts.push(`移除 ${s.removed_inventory} 道具`);
+      if (s.removed_abilities) parts.push(`移除 ${s.removed_abilities} 技能`);
+      if (s.added_abilities) parts.push(`新增 ${s.added_abilities} 整合技能`);
+      if (s.updated_systems) parts.push(`更新 ${s.updated_systems} 體系`);
+      if (s.clean_relationships) parts.push(`歸檔 ${s.clean_relationships} 關係`);
+      const msg = parts.length > 0
+        ? "清理完成：" + parts.join("、")
+        : "清理完成，沒有需要清理的項目";
+      showToast(msg, 5000);
+    } else {
+      showToast(data.error || "清理失敗");
+    }
+  } catch (e) {
+    console.error("cleanup error:", e);
+    showToast("清理失敗：網路錯誤");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "清理";
+  }
+}
+
 async function toggleFateMode() {
   const addonBtn = document.getElementById("addon-fate-btn");
   const drawerBtn = document.getElementById("fate-cheat-btn");

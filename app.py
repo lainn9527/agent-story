@@ -4111,8 +4111,11 @@ def _sanitize_recent_messages(messages: list[dict], *, strip_fate: bool) -> list
 _REWARD_HINT_RE = re.compile(r"【主神提示[:：].*?獎勵點.*?】")
 
 
-def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_index: int) -> tuple[str, dict | None, dict]:
-    """Extract all hidden tags from GM response. Returns (clean_text, image_info, snapshots)."""
+def _process_gm_response(
+    gm_response: str, story_id: str, branch_id: str, msg_index: int, turn_count: int | None = None
+) -> tuple[str, dict | None, dict]:
+    """Extract all hidden tags from GM response. Returns (clean_text, image_info, snapshots).
+    turn_count: optional user-message count for periodic cleanup; if None, msg_index is used."""
     # Strip context injection sections that the GM may have echoed back
     gm_response = _CONTEXT_ECHO_RE.sub("", gm_response).strip()
     gm_response = re.sub(r"^---\s*", "", gm_response).strip()
@@ -4130,10 +4133,18 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         gm_response = re.sub(r"\n{3,}", "\n\n", gm_response).strip()
 
     gm_response, state_updates = _extract_state_tag(gm_response)
+    if state_updates:
+        old_phase_before_state = _load_character_state(story_id, branch_id).get("current_phase")
     for state_update in state_updates:
         _apply_state_update(story_id, branch_id, state_update)
     if not state_updates:
         log.info("GM response missing STATE tag (msg_index=%d)", msg_index)
+    # Phase transition 副本中/副本結算 → 主神空間: trigger state cleanup
+    if state_updates:
+        new_state = _load_character_state(story_id, branch_id)
+        if old_phase_before_state in ("副本中", "副本結算") and new_state.get("current_phase") == "主神空間":
+            from state_cleanup import run_state_cleanup_async
+            run_state_cleanup_async(story_id, branch_id, force=True)
 
     gm_response, lore_entries = _extract_lore_tag(gm_response)
     for lore_entry in lore_entries:
@@ -4169,6 +4180,12 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
                         skip_state=False,
                         skip_time=had_time_tags)
+
+    # Periodic state cleanup (every N turns, cooldown)
+    from state_cleanup import should_run_cleanup, run_state_cleanup_async
+    cleanup_turn = turn_count if turn_count is not None else msg_index
+    if should_run_cleanup(story_id, branch_id, cleanup_turn):
+        run_state_cleanup_async(story_id, branch_id, force=False, turn_index=cleanup_turn)
 
     # Build snapshots for branch forking accuracy
     snapshots = {
@@ -4653,7 +4670,10 @@ def api_send():
 
     # 5. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
     t0 = time.time()
-    gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
+    send_turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
+    gm_response, image_info, snapshots = _process_gm_response(
+        gm_response, story_id, branch_id, gm_msg_index, turn_count=send_turn_count
+    )
     log.info("  parse_tags: %.0fms", (time.time() - t0) * 1000)
 
     # 6. Save GM response
@@ -4894,6 +4914,24 @@ def api_state_rebuild():
     count = rebuild_state_db_from_json(story_id, branch_id, state=state, npcs=npcs)
     summary = get_state_summary(story_id, branch_id)
     return jsonify({"ok": True, "branch_id": branch_id, "count": count, "summary": summary})
+
+
+@app.route("/api/state/cleanup", methods=["POST"])
+def api_state_cleanup():
+    """Run LLM-based state cleanup synchronously and return summary."""
+    story_id = _active_story_id()
+    body = request.get_json(silent=True) or {}
+    branch_id = body.get("branch_id")
+    if not branch_id:
+        tree = _load_tree(story_id)
+        branch_id = tree.get("active_branch_id", "main")
+    from state_cleanup import run_state_cleanup_sync
+    try:
+        summary = run_state_cleanup_sync(story_id, branch_id)
+        return jsonify({"ok": True, "branch_id": branch_id, "summary": summary})
+    except Exception as e:
+        log.warning("api_state_cleanup error: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -7625,6 +7663,10 @@ def api_dungeon_return():
     state["current_dungeon"] = ""
     state["reward_points"] = state.get("reward_points", 0) + total_reward
     _save_character_state(story_id, branch_id, state)
+
+    # State cleanup after dungeon return (button path). Narrative return triggers cleanup in _process_gm_response.
+    from state_cleanup import run_state_cleanup_async
+    run_state_cleanup_async(story_id, branch_id, force=True)
 
     # Advance world time (recovery time)
     try:
