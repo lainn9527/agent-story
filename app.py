@@ -4853,16 +4853,20 @@ def api_state_rebuild():
 
 @app.route("/api/state/cleanup", methods=["POST"])
 def api_state_cleanup():
-    """Start LLM-based state cleanup in background (archive stale NPCs, merge duplicates, resolve events, remove inventory)."""
+    """Run LLM-based state cleanup synchronously and return summary."""
     story_id = _active_story_id()
     body = request.get_json(silent=True) or {}
     branch_id = body.get("branch_id")
     if not branch_id:
         tree = _load_tree(story_id)
         branch_id = tree.get("active_branch_id", "main")
-    from state_cleanup import run_state_cleanup_async
-    run_state_cleanup_async(story_id, branch_id, force=True)
-    return jsonify({"ok": True, "message": "cleanup started", "branch_id": branch_id})
+    from state_cleanup import run_state_cleanup_sync
+    try:
+        summary = run_state_cleanup_sync(story_id, branch_id)
+        return jsonify({"ok": True, "branch_id": branch_id, "summary": summary})
+    except Exception as e:
+        log.warning("api_state_cleanup error: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------

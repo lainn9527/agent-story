@@ -22,6 +22,8 @@ CLEANUP_SCHEMA = {
     "lists": [
         {"key": "inventory", "type": "map"},
         {"key": "relationships", "type": "map"},
+        {"key": "abilities", "label": "功法與技能", "state_add_key": "abilities_add", "state_remove_key": "abilities_remove"},
+        {"key": "systems", "label": "體系", "type": "map"},
     ],
     "direct_overwrite_keys": ["current_phase"],
 }
@@ -207,6 +209,162 @@ def test_apply_cleanup_clean_relationships(branch_dir):
     rels = loaded.get("relationships", {})
     assert "已歸檔" in rels.get("猿飛日斬", "")
     assert "已歸檔" not in rels.get("小琳", "")
+
+
+def test_apply_cleanup_remove_abilities(branch_dir):
+    (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
+    state = {
+        "current_phase": "主神空間",
+        "inventory": {},
+        "relationships": {},
+        "abilities": [
+            "萬象召喚（初階）",
+            "基因鎖·第一階",
+            "第一階基因鎖 (爆發感適應)",
+            "隱藏成就：影之掠奪者",
+            "戰術直覺",
+        ],
+        "systems": {},
+    }
+    (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ops = {
+        "archive_npcs": [],
+        "merge_npcs": [],
+        "resolve_events": [],
+        "remove_inventory": [],
+        "remove_abilities": [
+            {"ability": "基因鎖·第一階", "reason": "與第一階基因鎖重複"},
+            {"ability": "隱藏成就：影之掠奪者", "reason": "非技能，是成就"},
+        ],
+        "update_systems": [],
+        "clean_relationships": [],
+    }
+    summary = state_cleanup._apply_cleanup_operations(STORY_ID, BRANCH_ID, ops)
+    assert summary["removed_abilities"] == 2
+
+    loaded = json.loads((branch_dir / "character_state.json").read_text(encoding="utf-8"))
+    abilities = loaded.get("abilities", [])
+    assert "基因鎖·第一階" not in abilities
+    assert "隱藏成就：影之掠奪者" not in abilities
+    assert "戰術直覺" in abilities
+    assert "萬象召喚（初階）" in abilities
+
+
+def test_apply_cleanup_consolidate_abilities(branch_dir):
+    """Remove fragmented sub-abilities and add consolidated replacements."""
+    (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
+    state = {
+        "current_phase": "主神空間",
+        "inventory": {},
+        "relationships": {},
+        "abilities": [
+            "空間解析：逆向追蹤",
+            "空間解析：反向重疊模式",
+            "反向傳送導引 (空間特質)",
+            "空間干擾 · 座標鎖死",
+            "戰術直覺",
+        ],
+        "systems": {"萬象召喚": "B級"},
+    }
+    (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ops = {
+        "archive_npcs": [],
+        "merge_npcs": [],
+        "resolve_events": [],
+        "remove_inventory": [],
+        "remove_abilities": [
+            {"ability": "空間解析：逆向追蹤", "reason": "碎片化子技能整合"},
+            {"ability": "空間解析：反向重疊模式", "reason": "碎片化子技能整合"},
+            {"ability": "反向傳送導引 (空間特質)", "reason": "碎片化子技能整合"},
+            {"ability": "空間干擾 · 座標鎖死", "reason": "碎片化子技能整合"},
+        ],
+        "add_abilities": ["空間解析系列 (門之鑰衍生·B級)"],
+        "update_systems": [],
+        "clean_relationships": [],
+    }
+    summary = state_cleanup._apply_cleanup_operations(STORY_ID, BRANCH_ID, ops)
+    assert summary["removed_abilities"] == 4
+    assert summary["added_abilities"] == 1
+
+    loaded = json.loads((branch_dir / "character_state.json").read_text(encoding="utf-8"))
+    abilities = loaded.get("abilities", [])
+    assert "空間解析：逆向追蹤" not in abilities
+    assert "空間解析：反向重疊模式" not in abilities
+    assert "反向傳送導引 (空間特質)" not in abilities
+    assert "空間干擾 · 座標鎖死" not in abilities
+    assert "空間解析系列 (門之鑰衍生·B級)" in abilities
+    assert "戰術直覺" in abilities
+
+
+def test_apply_cleanup_update_systems(branch_dir):
+    (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
+    state = {
+        "current_phase": "主神空間",
+        "inventory": {},
+        "relationships": {},
+        "abilities": [],
+        "systems": {"萬象召喚": "B級（觸碰因果轉化門檻）", "舊體系": "已過時"},
+    }
+    (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ops = {
+        "archive_npcs": [],
+        "merge_npcs": [],
+        "resolve_events": [],
+        "remove_inventory": [],
+        "remove_abilities": [],
+        "update_systems": [
+            {"key": "舊體系", "value": None, "reason": "已過時移除"},
+        ],
+        "clean_relationships": [],
+    }
+    summary = state_cleanup._apply_cleanup_operations(STORY_ID, BRANCH_ID, ops)
+    assert summary["updated_systems"] == 1
+
+    loaded = json.loads((branch_dir / "character_state.json").read_text(encoding="utf-8"))
+    systems = loaded.get("systems", {})
+    assert "舊體系" not in systems
+    assert systems.get("萬象召喚") == "B級（觸碰因果轉化門檻）"
+
+
+def test_apply_cleanup_remove_inventory_array_values(branch_dir):
+    """Inventory keys with array values (misplaced equipment loadouts) should be removable."""
+    (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
+    state = {
+        "current_phase": "主神空間",
+        "inventory": {
+            "奈米防護塗層": "良好",
+            "主角": ["縛魂者之脊", "影鐵強化作戰服"],
+            "C 級支線劇情": "1",
+        },
+        "relationships": {},
+        "abilities": [],
+        "systems": {},
+    }
+    (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ops = {
+        "archive_npcs": [],
+        "merge_npcs": [],
+        "resolve_events": [],
+        "remove_inventory": [
+            {"item": "主角", "reason": "角色裝備清單錯放為道具欄 key"},
+            {"item": "C 級支線劇情", "reason": "非道具"},
+        ],
+        "remove_abilities": [],
+        "update_systems": [],
+        "clean_relationships": [],
+    }
+    summary = state_cleanup._apply_cleanup_operations(STORY_ID, BRANCH_ID, ops)
+    assert summary["removed_inventory"] == 2
+
+    loaded = json.loads((branch_dir / "character_state.json").read_text(encoding="utf-8"))
+    inv = loaded.get("inventory", {})
+    assert "主角" not in inv
+    assert "C 級支線劇情" not in inv
+    assert inv.get("奈米防護塗層") == "良好"
 
 
 def test_should_run_cleanup_respects_interval():

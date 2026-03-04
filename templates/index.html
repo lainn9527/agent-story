@@ -177,10 +177,6 @@
           <label>必勝模式</label>
           <button id="dice-cheat-btn" class="cheat-toggle" onclick="toggleDiceCheat()">OFF</button>
         </div>
-        <div class="config-field">
-          <label>狀態清理</label>
-          <button id="cleanup-btn" class="cheat-toggle" onclick="runStateCleanup()">清理</button>
-        </div>
       </div>
     </div>
   </aside>
@@ -231,6 +227,13 @@
                 <button id="addon-pistol-btn" class="cheat-toggle" onclick="togglePistolMode()">OFF</button>
                 <button id="addon-pistol-prefs-btn" class="pistol-prefs-btn hidden" onclick="openPistolPrefsModal()" title="偏好設定">&#x2699;</button>
               </div>
+            </div>
+          </div>
+          <div class="addon-section">
+            <div class="addon-section-title">狀態管理</div>
+            <div class="addon-toggle-field">
+              <span>清理狀態</span>
+              <button id="cleanup-btn" class="cheat-toggle" onclick="runStateCleanup()">清理</button>
             </div>
           </div>
         </div>
