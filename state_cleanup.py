@@ -66,7 +66,7 @@ def _build_cleanup_prompt(
     events_text = "\n".join(f"- [{e.get('status')}] {e.get('title', '')} (id={e.get('id')})" for e in active_events)
     inv_text = json.dumps(inventory, ensure_ascii=False) if inventory else "（空）"
     rel_text = json.dumps(relationships, ensure_ascii=False) if relationships else "（空）"
-    recap_preview = (recap or "")[:2000]
+    recap_preview = (recap or "")[:1000]
 
     return (
         "## 當前狀態\n"
@@ -82,7 +82,7 @@ def _build_cleanup_prompt(
         + rel_text + "\n\n"
         "## 劇情回顧（節錄）\n"
         + recap_preview + "\n\n"
-        "請根據上述規則輸出清理建議的 JSON（只輸出 JSON，不要 markdown 包裝）。"
+        "請根據上述規則輸出清理建議的 JSON（只輸出 JSON）。"
     )
 
 
@@ -107,7 +107,13 @@ def _apply_cleanup_operations(
     """Apply cleanup operations. Uses late import of app to avoid circular import."""
     import app as app_module
 
-    summary = {"archived_npcs": 0, "merged_npcs": 0, "resolved_events": 0, "removed_inventory": 0}
+    summary = {
+        "archived_npcs": 0,
+        "merged_npcs": 0,
+        "resolved_events": 0,
+        "removed_inventory": 0,
+        "clean_relationships": 0,
+    }
 
     # archive_npcs
     for item in ops.get("archive_npcs") or []:
@@ -141,7 +147,13 @@ def _apply_cleanup_operations(
             remove_npc = next((n for n in npcs if (n.get("name") or "").strip() == remove), None)
             if not remove_npc:
                 continue
-            merged = {**remove_npc, **keep_npc} if keep_npc else dict(remove_npc)
+            # Keep canonical entry (keep_npc) as base; fill missing/empty fields from remove_npc
+            merged = dict(keep_npc) if keep_npc else dict(remove_npc)
+            for k, v in (remove_npc or {}).items():
+                if k in ("name", "id"):
+                    continue
+                if v and (k not in merged or merged[k] in (None, "")):
+                    merged[k] = v
             merged["name"] = keep
             merged["lifecycle_status"] = "active"
             merged["archived_reason"] = None
@@ -187,9 +199,32 @@ def _apply_cleanup_operations(
         except Exception as e:
             log.warning("state_cleanup: remove_inventory failed: %s", e)
 
-    # clean_relationships: optional — could remove or annotate; for now we only log
-    for item in ops.get("clean_relationships") or []:
-        pass  # No-op for now; relationships stay, NPC is already archived
+    # clean_relationships: annotate relationship value with " (已歸檔)" for archived NPCs
+    clean_rel_names = [
+        (x.get("name") or "").strip()
+        for x in (ops.get("clean_relationships") or [])
+        if (x.get("name") or "").strip()
+    ]
+    if clean_rel_names:
+        try:
+            state = app_module._load_character_state(story_id, branch_id)
+            rels = dict(state.get("relationships") or {})
+            updated = 0
+            for name in clean_rel_names:
+                if name not in rels or not rels[name]:
+                    continue
+                if "已歸檔" in (rels[name] or ""):
+                    continue
+                rels[name] = (rels[name] or "").strip() + " (已歸檔)"
+                updated += 1
+            if updated:
+                schema = app_module._load_character_schema(story_id)
+                app_module._apply_state_update_inner(
+                    story_id, branch_id, {"relationships": rels}, schema
+                )
+                summary["clean_relationships"] = updated
+        except Exception as e:
+            log.warning("state_cleanup: clean_relationships failed: %s", e)
 
     return summary
 
@@ -285,11 +320,12 @@ def run_state_cleanup_async(
 
             summary = _apply_cleanup_operations(story_id, branch_id, ops)
             log.info(
-                "state_cleanup: applied archived=%d merged=%d resolved=%d removed_inv=%d",
+                "state_cleanup: applied archived=%d merged=%d resolved=%d removed_inv=%d clean_rel=%d",
                 summary["archived_npcs"],
                 summary["merged_npcs"],
                 summary["resolved_events"],
                 summary["removed_inventory"],
+                summary.get("clean_relationships", 0),
             )
         except Exception as e:
             log.warning("state_cleanup: error — %s", e)

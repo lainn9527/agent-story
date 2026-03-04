@@ -182,6 +182,33 @@ def test_apply_cleanup_remove_inventory(branch_dir):
     assert "淨化之塵" in loaded.get("inventory", {})
 
 
+def test_apply_cleanup_clean_relationships(branch_dir):
+    (branch_dir / "npcs.json").write_text("[]", encoding="utf-8")
+    state = {
+        "current_phase": "主神空間",
+        "inventory": {},
+        "relationships": {"猿飛日斬": "已退場", "小琳": "隊友"},
+    }
+    (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ops = {
+        "archive_npcs": [],
+        "merge_npcs": [],
+        "resolve_events": [],
+        "remove_inventory": [],
+        "clean_relationships": [
+            {"name": "猿飛日斬", "action": "archive_note", "reason": "已歸檔"},
+        ],
+    }
+    summary = state_cleanup._apply_cleanup_operations(STORY_ID, BRANCH_ID, ops)
+    assert summary["clean_relationships"] == 1
+
+    loaded = json.loads((branch_dir / "character_state.json").read_text(encoding="utf-8"))
+    rels = loaded.get("relationships", {})
+    assert "已歸檔" in rels.get("猿飛日斬", "")
+    assert "已歸檔" not in rels.get("小琳", "")
+
+
 def test_should_run_cleanup_respects_interval():
     # First run: no previous, turn_index 20 -> should run if we don't check last
     # We can't easily test without mocking _last_cleanup. Just test that with negative turn we get False.
