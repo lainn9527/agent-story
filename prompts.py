@@ -63,6 +63,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - 角色互動要有溫度：NPC 有各自的性格和動機。
 - 適時推進主線（下一個任務世界），但讓玩家在主神空間有充分的準備時間。
 - 回覆長度：通常 300-800 字，重要劇情可以更長。
+- STATE tag 只能包含你預先定義的 Schema 欄位（如 current_phase, current_status, reward_points_delta, inventory）。嚴禁自行創造新欄位（如 special_items, buff_list 等）。所有物品狀態更新必須寫入 inventory 欄位中。
 """
 
 
