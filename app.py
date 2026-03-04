@@ -2760,7 +2760,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "提取**通用世界規則與設定**，這些設定要適用於任何角色、任何分支時間線。\n"
                 "**核心判斷標準：GM 在未來的其他場景中是否需要參考這條設定？** 只有「是」才提取。\n"
                 "✓ 適合提取：體系或副本的核心規則與運作機制、重要且可重複出現的地點（如總部、主要設施）、商城兌換項目\n"
-                "✗ 禁止提取：一次性場景細節（具體房間、走廊、臨時戰場的描述）、"
+                "✗ 禁止提取：玩家或特定 NPC 專屬的獨有道具、一次性消耗品、個人技能與強化素材（如『空白的因果律之格』、『紅衣核心』等）。**這些屬於 `inventory` 或 `abilities` 的管轄範圍。Lore 僅保留所有輪迴者皆適用的「客觀世界規律、體系通用設定與常規商城販售物」。**"
                 "劇情事件的具體過程（交給 events 追蹤）、"
                 "角色的個人數值或進度（如「基因鎖進度15%」「獎勵點5740」）、"
                 "角色獲得/失去的具體道具、角色習得的功法與技能進度、角色的戰鬥過程與經歷、角色之間的互動劇情\n"
@@ -2776,6 +2776,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 道具：角色可使用的物品與裝備\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
+                "**【防幻覺絕對規則】：**\n"
+                "* **嚴禁僅因對話中「提及」、「討論」或「回憶」某事件就更改其狀態（例如提及「回歸現實」不代表該事件被 triggered）。**\n"
+                "* `triggered`（觸發）：必須是該事件在物理層面、劇情層面產生了**實質性的初步進展或變故**。\n"
+                "* `resolved`（解決）：必須是該事件的目標已徹底完成或因故徹底終結。\n"
                 "優先輸出 `event_ops`（用 id 更新，避免 title 漂移）：\n"
                 f"{active_events_text}\n"
                 "- update：已有事件狀態變化（如伏筆被觸發、事件被解決）時，輸出 id + status\n"
@@ -2821,8 +2825,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- **人際關係**：`relationships: {\"NPC名\": \"新關係描述\"}`。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
                 "- **體系等級**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），**必須輸出 systems 更新**，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
-                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
+                "**【欄位嚴格寫入規則】：**\n"
+                "- **`completed_missions`（已完成任務）**：**絕對約束！** 僅限於主神明確發布並結算的「主線/支線任務」與「隱藏成就」。**嚴禁**將「獲得裝備」、「得知情報」、「抵達某地」或「日常行為」視為任務寫入此陣列。\n"
+                "- **`relationships`（人際關係與 NPC 狀態）**：不僅記錄好感度與敵友關係。當 GM 文本明確描寫 NPC 的**心理狀態或情緒發生重大轉折**（例如：對未來副本感到恐懼、對玩家產生依賴/警惕），**必須更新該 NPC 的關係描述**，以確保 NPC 具備記憶與情緒連貫性。\n"
+                "- **`systems`（體系等級）**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），必須輸出 systems 更新，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）。\n"
+                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 "\n**道具欄清理原則**（每次提取時都必須遵守）：\n"
                 "- **禁止寫入場景/戰鬥狀態**：「戰鬥中」「對峙中」「集結中」「盤旋中」「佔領中」「啟動中」「錄製中」「噴湧中」等臨時狀態不是道具，不要寫入 inventory。這些只是當前回合的敘事描述，下一回合就過時了。\n"
                 "- **已消耗/已使用的道具**：設為 null 移除（如 `\"榴彈\": null`）\n"
@@ -3191,6 +3199,38 @@ def _extract_item_base_name(item: str) -> str:
     return name
 
 
+def _dedup_inventory_plain_vs_variant(inv_map: dict) -> dict:
+    """Drop plain-name keys when a variant with the same base name exists.
+
+    Example:
+      "縛魂者之脊" + "縛魂者之脊 (C級)" -> keep only the variant key.
+
+    Safety:
+      Distinct variant keys (e.g. 定界珠(生) vs 定界珠(死)) are preserved.
+    """
+    if not isinstance(inv_map, dict) or len(inv_map) < 2:
+        return inv_map
+
+    groups: dict[str, list[str]] = {}
+    for key in inv_map.keys():
+        base = _extract_item_base_name(key)
+        norm_base = _normalize_map_key(base)
+        groups.setdefault(norm_base, []).append(key)
+
+    remove_keys: set[str] = set()
+    for keys in groups.values():
+        if len(keys) < 2:
+            continue
+        plain_keys = [k for k in keys if k.strip() == _extract_item_base_name(k)]
+        variant_keys = [k for k in keys if k not in plain_keys]
+        if plain_keys and variant_keys:
+            remove_keys.update(plain_keys)
+
+    if not remove_keys:
+        return inv_map
+    return {k: v for k, v in inv_map.items() if k not in remove_keys}
+
+
 def _migrate_list_to_map(items: list) -> dict:
     """Convert a list of item strings to a map (key→value).
 
@@ -3399,6 +3439,11 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
     for key in schema.get("direct_overwrite_keys", []):
         if key in update:
             state[key] = update[key]
+
+    # Inventory hygiene: if both plain and variant keys coexist for same base
+    # item, keep the variant key and drop the plain key.
+    if isinstance(state.get("inventory"), dict):
+        state["inventory"] = _dedup_inventory_plain_vs_variant(state["inventory"])
 
     # Build handled_keys set
     handled_keys = set()
@@ -3983,8 +4028,28 @@ _CONTEXT_ECHO_RE = re.compile(
 # Trailing choice section generated for the player UI.
 # Kept in stored transcript but stripped from model-facing "recent" context.
 _CHOICE_BLOCK_RE = re.compile(
-    r"(?:^|\n)\*{0,2}\s*可選行動\s*[:：]\s*\*{0,2}\s*(?:\n.*)?\Z",
-    re.DOTALL,
+    r"""
+    (?:
+        (?:\n|^)
+        (?:
+            \*{0,2}[^\n]*(?:可選行動|你打算)[^\n]*\*{0,2}\s*\n
+        )?
+        (?:
+            \s*(?:\d+[.)、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*.+(?:\n|$)
+        ){2,}
+        \s*\Z
+    )
+    |
+    (?:
+        (?:\n|^)
+        (?:
+            \s*-\s*\*{0,2}[「『][^\n」』]{1,80}[」』]\s*[:：]\*{0,2}\s*.+(?:\n|$)
+            (?:\s*\n)*
+        ){2,}
+        \s*\Z
+    )
+    """,
+    re.DOTALL | re.VERBOSE,
 )
 
 # Pattern to strip fate direction labels from GM text in conversation history
