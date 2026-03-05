@@ -643,7 +643,7 @@ _TEAM_RULES = {
     ),
 }
 
-DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
+DEFAULT_IMAGE_MODEL = "imagen-4.0-ultra-generate-001"
 
 
 def _branch_config_defaults() -> dict:

@@ -2998,7 +2998,11 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
-const GEMINI_IMAGE_MODELS = ["gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"];
+const GEMINI_IMAGE_MODELS = [
+  "imagen-4.0-ultra-generate-001",
+  "gemini-3.1-flash-image-preview",
+  "gemini-2.5-flash-image",
+];
 let serverDefaultImageModel = "";
 const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
 
