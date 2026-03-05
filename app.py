@@ -621,9 +621,11 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
             dirty = True
             log.info("    auto-migrate: converted %s from list to map in %s/%s", lkey, story_id, branch_id)
 
+    needs_persist = dirty or not os.path.exists(path)
     if dirty:
         log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
-    _save_json(path, state)
+    if needs_persist:
+        _save_json(path, state)
     return state
 
 
@@ -642,6 +644,13 @@ _TEAM_RULES = {
 }
 
 DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
+
+
+def _branch_config_defaults() -> dict:
+    return {
+        "image_gen_enabled": True,
+        "image_model": DEFAULT_IMAGE_MODEL,
+    }
 
 
 def _is_image_gen_enabled(branch_config: dict) -> bool:
@@ -5116,7 +5125,7 @@ def api_branch_config_get(branch_id):
     """Get branch config."""
     story_id = _active_story_id()
     config = _load_branch_config(story_id, branch_id)
-    return jsonify({"ok": True, "config": config})
+    return jsonify({"ok": True, "config": config, "defaults": _branch_config_defaults()})
 
 
 @app.route("/api/branches/<branch_id>/config", methods=["POST"])
@@ -5127,7 +5136,7 @@ def api_branch_config_set(branch_id):
     body = request.get_json(force=True)
     config.update(body)
     _save_branch_config(story_id, branch_id, config)
-    return jsonify({"ok": True, "config": config})
+    return jsonify({"ok": True, "config": config, "defaults": _branch_config_defaults()})
 
 
 @app.route("/api/branches/edit", methods=["POST"])

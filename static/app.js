@@ -2999,8 +2999,14 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
 const GEMINI_IMAGE_MODELS = ["gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"];
-const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
+let serverDefaultImageModel = "";
 const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
+
+function getDefaultImageModel() {
+  const model = (serverDefaultImageModel || "").trim();
+  if (model) return model;
+  return GEMINI_IMAGE_MODELS[0] || "";
+}
 
 async function loadConfigPanel() {
   const provSel = document.getElementById("provider-select");
@@ -3293,7 +3299,7 @@ function closeAddonPanel() {
 function _renderImageModelOptions(selectEl, selectedModel) {
   if (!selectEl) return;
   const options = [];
-  const pick = (selectedModel || "").trim() || DEFAULT_IMAGE_MODEL;
+  const pick = (selectedModel || "").trim() || getDefaultImageModel();
   options.push(pick);
   for (const m of GEMINI_IMAGE_MODELS) {
     if (!options.includes(m)) options.push(m);
@@ -3316,10 +3322,15 @@ async function loadImageGenAddonState() {
   try {
     const res = await API.getBranchConfig(currentBranchId);
     const cfg = (res && res.ok && res.config && typeof res.config === "object") ? res.config : {};
+    const defaults = (res && res.defaults && typeof res.defaults === "object") ? res.defaults : {};
+    if (typeof defaults.image_model === "string" && defaults.image_model.trim()) {
+      serverDefaultImageModel = defaults.image_model.trim();
+    }
+    const defaultModel = getDefaultImageModel();
     const enabled = cfg.image_gen_enabled !== false;
     const model = (typeof cfg.image_model === "string" && cfg.image_model.trim())
       ? cfg.image_model.trim()
-      : DEFAULT_IMAGE_MODEL;
+      : defaultModel;
 
     btn.textContent = enabled ? "ON" : "OFF";
     btn.classList.toggle("active", enabled);
@@ -3332,7 +3343,7 @@ async function loadImageGenAddonState() {
     console.error("loadImageGenAddonState error:", e);
     btn.textContent = "ON";
     btn.classList.add("active");
-    _renderImageModelOptions(modelSel, DEFAULT_IMAGE_MODEL);
+    _renderImageModelOptions(modelSel, getDefaultImageModel());
     modelSel.disabled = false;
   }
 }
@@ -3438,7 +3449,7 @@ async function toggleImageGen() {
   try {
     await API.setBranchConfig(currentBranchId, {
       image_gen_enabled: newState,
-      image_model: modelSel.value || DEFAULT_IMAGE_MODEL,
+      image_model: modelSel.value || getDefaultImageModel(),
     });
     btn.textContent = newState ? "ON" : "OFF";
     btn.classList.toggle("active", newState);
