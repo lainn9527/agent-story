@@ -104,9 +104,9 @@ def _extract_gemini_image_bytes(response_data: dict) -> tuple[bytes, str] | None
     return None
 
 
-def _download_via_gemini(dest: str, prompt: str) -> bool:
+def _download_via_gemini(dest: str, prompt: str, model_override: str | None = None) -> bool:
     gemini_cfg = _load_gemini_cfg()
-    model = gemini_cfg.get("image_model") or GEMINI_IMAGE_MODEL
+    model = (model_override or "").strip() or gemini_cfg.get("image_model") or GEMINI_IMAGE_MODEL
     keys = get_available_keys(gemini_cfg)
     if not keys:
         log.info("    image_gen: Gemini unavailable (no active API keys)")
@@ -210,15 +210,17 @@ def _download_via_pollinations(dest: str, prompt: str) -> bool:
         return False
 
 
-def _download_image(dest: str, prompt: str) -> str | None:
-    if _download_via_gemini(dest, prompt):
+def _download_image(dest: str, prompt: str, model_override: str | None = None) -> str | None:
+    if _download_via_gemini(dest, prompt, model_override=model_override):
         return "gemini"
     if _download_via_pollinations(dest, prompt):
         return "pollinations"
     return None
 
 
-def generate_image_async(story_id: str, prompt: str, message_index: int) -> str:
+def generate_image_async(
+    story_id: str, prompt: str, message_index: int, model: str | None = None
+) -> str:
     """Start background image download. Returns expected filename."""
     filename = _make_filename(message_index, prompt)
     dest = os.path.join(_images_dir(story_id), filename)
@@ -227,7 +229,7 @@ def generate_image_async(story_id: str, prompt: str, message_index: int) -> str:
         return filename
 
     def _download():
-        provider = _download_image(dest, prompt)
+        provider = _download_image(dest, prompt, model_override=model)
         if not provider:
             log.warning("    image_gen: FAILED %s (all providers)", filename)
 

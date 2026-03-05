@@ -1000,7 +1000,7 @@ class TestSavesAPI:
         monkeypatch.setattr(
             app_module,
             "_process_gm_response",
-            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
         )
 
         send_resp = client.post("/api/send", json={"message": "繼續前進", "branch_id": "main"})
@@ -1030,7 +1030,7 @@ class TestSavesAPI:
         monkeypatch.setattr(
             app_module,
             "_process_gm_response",
-            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
         )
 
         resp = client.post("/api/send/stream", json={"message": "繼續推進", "branch_id": "main"})
@@ -1066,7 +1066,7 @@ class TestSavesAPI:
         monkeypatch.setattr(
             app_module,
             "_process_gm_response",
-            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
         )
 
         edit_resp = client.post("/api/branches/edit", json={

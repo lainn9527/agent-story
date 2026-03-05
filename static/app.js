@@ -209,6 +209,16 @@ const API = {
       body: JSON.stringify({ name: newName }),
     }).then(r => r.json()),
 
+  getBranchConfig: (branchId) =>
+    fetch(`/api/branches/${encodeURIComponent(branchId || "main")}/config`).then(r => r.json()),
+
+  setBranchConfig: (branchId, data) =>
+    fetch(`/api/branches/${encodeURIComponent(branchId || "main")}/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data || {}),
+    }).then(r => r.json()),
+
   // Story APIs
   stories: () => fetch("/api/stories").then(r => r.json()),
 
@@ -1560,6 +1570,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   loadFateModeStatus();
   loadDiceCheatStatus();
   loadPistolModeStatus();
+  loadImageGenAddonState();
 
   // Show/hide "load earlier" button for auto branches with truncated messages
   if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
@@ -2987,6 +2998,8 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
+const GEMINI_IMAGE_MODELS = ["gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"];
+const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
 
 async function loadConfigPanel() {
@@ -3277,6 +3290,53 @@ function closeAddonPanel() {
   if (btn) btn.setAttribute("aria-expanded", "false");
 }
 
+function _renderImageModelOptions(selectEl, selectedModel) {
+  if (!selectEl) return;
+  const options = [];
+  const pick = (selectedModel || "").trim() || DEFAULT_IMAGE_MODEL;
+  options.push(pick);
+  for (const m of GEMINI_IMAGE_MODELS) {
+    if (!options.includes(m)) options.push(m);
+  }
+  selectEl.innerHTML = "";
+  for (const m of options) {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m;
+    if (m === pick) opt.selected = true;
+    selectEl.appendChild(opt);
+  }
+}
+
+async function loadImageGenAddonState() {
+  const btn = document.getElementById("addon-image-gen-btn");
+  const modelSel = document.getElementById("addon-image-model");
+  if (!btn || !modelSel) return;
+
+  try {
+    const res = await API.getBranchConfig(currentBranchId);
+    const cfg = (res && res.ok && res.config && typeof res.config === "object") ? res.config : {};
+    const enabled = cfg.image_gen_enabled !== false;
+    const model = (typeof cfg.image_model === "string" && cfg.image_model.trim())
+      ? cfg.image_model.trim()
+      : DEFAULT_IMAGE_MODEL;
+
+    btn.textContent = enabled ? "ON" : "OFF";
+    btn.classList.toggle("active", enabled);
+    _renderImageModelOptions(modelSel, model);
+    modelSel.disabled = !enabled;
+    modelSel.onchange = async () => {
+      await API.setBranchConfig(currentBranchId, { image_model: modelSel.value });
+    };
+  } catch (e) {
+    console.error("loadImageGenAddonState error:", e);
+    btn.textContent = "ON";
+    btn.classList.add("active");
+    _renderImageModelOptions(modelSel, DEFAULT_IMAGE_MODEL);
+    modelSel.disabled = false;
+  }
+}
+
 async function loadAddonPanelState() {
   // Load model config — combined provider+model select with optgroups
   try {
@@ -3365,7 +3425,28 @@ async function loadAddonPanelState() {
     pistolPrefsBtn.classList.toggle("hidden", !pistolBtn.classList.contains("active"));
   }
 
+  await loadImageGenAddonState();
   updateAddonBtnIndicator();
+}
+
+async function toggleImageGen() {
+  const btn = document.getElementById("addon-image-gen-btn");
+  const modelSel = document.getElementById("addon-image-model");
+  if (!btn || !modelSel) return;
+  const isActive = btn.classList.contains("active");
+  const newState = !isActive;
+  try {
+    await API.setBranchConfig(currentBranchId, {
+      image_gen_enabled: newState,
+      image_model: modelSel.value || DEFAULT_IMAGE_MODEL,
+    });
+    btn.textContent = newState ? "ON" : "OFF";
+    btn.classList.toggle("active", newState);
+    modelSel.disabled = !newState;
+    updateAddonBtnIndicator();
+  } catch (e) {
+    console.error("toggleImageGen error:", e);
+  }
 }
 
 async function toggleAddonDiceCheat() {
@@ -3573,7 +3654,10 @@ function updateAddonBtnIndicator() {
   const pistolActive = document.getElementById("addon-pistol-btn")?.classList.contains("active")
     || document.getElementById("pistol-badge")?.classList.contains("visible")
     || false;
-  btn.classList.toggle("addon-active", diceActive || pistolActive);
+  const imageDisabled = document.getElementById("addon-image-gen-btn")
+    ? !document.getElementById("addon-image-gen-btn").classList.contains("active")
+    : false;
+  btn.classList.toggle("addon-active", diceActive || pistolActive || imageDisabled);
 }
 
 async function loadPistolModeStatus() {

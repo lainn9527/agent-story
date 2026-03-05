@@ -75,9 +75,11 @@ def test_is_key_error_400_only_for_specific_markers():
 
 def test_download_image_prefers_gemini(monkeypatch, tmp_path):
     called = {"gemini": 0, "pollinations": 0}
+    captured = {"model": None}
 
-    def _fake_gemini(dest, prompt):
+    def _fake_gemini(dest, prompt, model_override=None):
         called["gemini"] += 1
+        captured["model"] = model_override
         with open(dest, "wb") as f:
             f.write(b"x")
         return True
@@ -89,16 +91,17 @@ def test_download_image_prefers_gemini(monkeypatch, tmp_path):
     monkeypatch.setattr(image_gen, "_download_via_gemini", _fake_gemini)
     monkeypatch.setattr(image_gen, "_download_via_pollinations", _fake_pollinations)
 
-    provider = image_gen._download_image(str(tmp_path / "img.png"), "test prompt")
+    provider = image_gen._download_image(str(tmp_path / "img.png"), "test prompt", model_override="gemini-x")
     assert provider == "gemini"
     assert called["gemini"] == 1
     assert called["pollinations"] == 0
+    assert captured["model"] == "gemini-x"
 
 
 def test_download_image_fallback_pollinations(monkeypatch, tmp_path):
     called = {"gemini": 0, "pollinations": 0}
 
-    def _fake_gemini(dest, prompt):
+    def _fake_gemini(dest, prompt, model_override=None):
         called["gemini"] += 1
         return False
 

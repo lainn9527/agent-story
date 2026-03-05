@@ -56,7 +56,7 @@
 | DELETE | `/api/branches/<branch_id>` | 刪除分支（main 不可刪） | - |
 | POST | `/api/branches/<branch_id>/protect` | 切換 protected（防 auto-prune） | - |
 | GET | `/api/branches/<branch_id>/config` | 讀分支設定 | - |
-| POST | `/api/branches/<branch_id>/config` | 更新分支設定（merge） | 任意 JSON |
+| POST | `/api/branches/<branch_id>/config` | 更新分支設定（merge） | 任意 JSON（常用：`team_mode`, `image_gen_enabled`, `image_model`） |
 | POST | `/api/branches/edit` | 編輯歷史玩家訊息並生成新分支 | body: `parent_branch_id`, `branch_point_index`, `edited_message` |
 | POST | `/api/branches/edit/stream` | `edit` 的 SSE 版本 | 同上 |
 | POST | `/api/branches/regenerate` | 對既有玩家訊息重生成 GM 回覆（新分支） | body: `parent_branch_id`, `branch_point_index` |
