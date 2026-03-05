@@ -835,12 +835,17 @@ class TestBranchesAPI:
         # GET default config
         resp = client.get("/api/branches/main/config")
         assert resp.status_code == 200
-        assert resp.get_json()["ok"] is True
+        payload = resp.get_json()
+        assert payload["ok"] is True
+        assert payload["defaults"]["image_model"] == app_module.DEFAULT_IMAGE_MODEL
+        assert payload["defaults"]["image_gen_enabled"] is True
 
         # POST config
         resp2 = client.post("/api/branches/main/config", json={"cheat_dice": True})
         assert resp2.status_code == 200
-        config = resp2.get_json()["config"]
+        payload2 = resp2.get_json()
+        assert payload2["defaults"]["image_model"] == app_module.DEFAULT_IMAGE_MODEL
+        config = payload2["config"]
         assert config["cheat_dice"] is True
 
         # GET again to verify
@@ -1000,7 +1005,7 @@ class TestSavesAPI:
         monkeypatch.setattr(
             app_module,
             "_process_gm_response",
-            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
         )
 
         send_resp = client.post("/api/send", json={"message": "繼續前進", "branch_id": "main"})
@@ -1030,7 +1035,7 @@ class TestSavesAPI:
         monkeypatch.setattr(
             app_module,
             "_process_gm_response",
-            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
         )
 
         resp = client.post("/api/send/stream", json={"message": "繼續推進", "branch_id": "main"})
@@ -1066,7 +1071,7 @@ class TestSavesAPI:
         monkeypatch.setattr(
             app_module,
             "_process_gm_response",
-            lambda gm_response, _story_id, _branch_id, _idx: (gm_response, None, {}),
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
         )
 
         edit_resp = client.post("/api/branches/edit", json={

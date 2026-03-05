@@ -799,3 +799,53 @@ class TestInlineLoreTagGoesToBranch:
         base_lore = app_module._load_lore(story_id)
         base_topics = [e["topic"] for e in base_lore]
         assert "內聯設定" not in base_topics
+
+
+class TestInlineImgTagRespectsBranchConfig:
+    def test_img_tag_ignored_when_image_gen_disabled(self, story_id, setup_story, monkeypatch):
+        app_module._save_branch_config(story_id, "main", {"image_gen_enabled": False})
+
+        called = {"count": 0}
+
+        def _fake_generate(*args, **kwargs):
+            called["count"] += 1
+            return "never.png"
+
+        monkeypatch.setattr(app_module, "generate_image_async", _fake_generate)
+
+        gm_text = '場景<!--IMG prompt: cinematic city IMG-->結尾'
+        clean, image_info, _snapshots = app_module._process_gm_response(gm_text, story_id, "main", msg_index=9)
+
+        assert called["count"] == 0
+        assert image_info is None
+        assert "IMG" not in clean
+
+    def test_img_tag_uses_branch_selected_model(self, story_id, setup_story, monkeypatch):
+        app_module._save_branch_config(
+            story_id,
+            "main",
+            {
+                "image_gen_enabled": True,
+                "image_model": "gemini-3.1-flash-image-preview",
+            },
+        )
+
+        captured = {}
+
+        def _fake_generate(story_id_arg, prompt, msg_index, model=None):
+            captured["story_id"] = story_id_arg
+            captured["prompt"] = prompt
+            captured["msg_index"] = msg_index
+            captured["model"] = model
+            return "ok.png"
+
+        monkeypatch.setattr(app_module, "generate_image_async", _fake_generate)
+
+        gm_text = '場景<!--IMG prompt: anime duel IMG-->結尾'
+        _clean, image_info, _snapshots = app_module._process_gm_response(gm_text, story_id, "main", msg_index=10)
+
+        assert image_info == {"filename": "ok.png", "ready": False}
+        assert captured["story_id"] == story_id
+        assert captured["prompt"] == "anime duel"
+        assert captured["msg_index"] == 10
+        assert captured["model"] == "gemini-3.1-flash-image-preview"

@@ -380,6 +380,20 @@ class TestBuildStorySystemPrompt:
         )
         assert "共 2 位 NPC" in prompt
 
+    def test_prompt_disables_img_when_branch_config_off(self, story_id, setup_story):
+        app_module._save_branch_config(story_id, "main", {"image_gen_enabled": False})
+        prompt = app_module._build_story_system_prompt(story_id, "{}", branch_id="main")
+        assert "禁止輸出任何 IMG tag" in prompt
+
+    def test_prompt_shows_selected_image_model(self, story_id, setup_story):
+        app_module._save_branch_config(
+            story_id,
+            "main",
+            {"image_gen_enabled": True, "image_model": "gemini-3.1-flash-image-preview"},
+        )
+        prompt = app_module._build_story_system_prompt(story_id, "{}", branch_id="main")
+        assert "當前圖片模型：`gemini-3.1-flash-image-preview`" in prompt
+
 
 # ===================================================================
 # NPC tier display + reminder injection

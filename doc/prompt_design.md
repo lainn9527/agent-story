@@ -42,6 +42,10 @@
 - `pistol_mode = true`：
   - 追加「親密場景指示」段落
   - 追加 NSFW 偏好（chips/custom）
+- `branch_config.image_gen_enabled = false`：
+  - 追加「禁止輸出 IMG tag」系統段落，避免模型繼續發出插圖指令
+- `branch_config.image_model`：
+  - 追加目前圖片模型提示（預設 `gemini-2.5-flash-image`），方便同一故事不同分支使用不同產圖模型
 
 ### 2.4 玩家訊息 augmentation（送進 LLM 前）
 
@@ -96,6 +100,9 @@
 - `NPC`：合併 NPC
 - `EVENT`：寫入 events DB
 - `IMG`：非同步生成圖片
+  - 會先檢查 branch config：
+    - `image_gen_enabled = false`：只移除 IMG tag，不會觸發下載
+    - `image_gen_enabled = true`：觸發下載；若有 `image_model` 則優先使用該模型
 - `TIME`：推進 `world_day`
 
 ### 3.2 回覆清理

@@ -79,6 +79,18 @@ def test_parse_cleanup_response_strips_markdown():
     assert state_cleanup._parse_cleanup_response(wrapped) == ops
 
 
+def test_parse_cleanup_response_trailing_backticks():
+    ops = {"archive_npcs": [{"name": "NPC1", "reason": "done"}], "remove_inventory": []}
+    trailing = json.dumps(ops, ensure_ascii=False) + "\n```"
+    assert state_cleanup._parse_cleanup_response(trailing) == ops
+
+
+def test_parse_cleanup_response_leading_backticks():
+    ops = {"archive_npcs": [], "merge_npcs": []}
+    leading = "```json\n" + json.dumps(ops, ensure_ascii=False)
+    assert state_cleanup._parse_cleanup_response(leading) == ops
+
+
 def test_apply_cleanup_archive_npcs(branch_dir):
     npcs = [
         {"name": "猿飛日斬", "id": "npc_1", "role": "三代火影", "current_status": "副本已結束"},

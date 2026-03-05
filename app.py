@@ -289,7 +289,7 @@ def _load_json(path, default=None):
 
 def _save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
@@ -621,9 +621,11 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
             dirty = True
             log.info("    auto-migrate: converted %s from list to map in %s/%s", lkey, story_id, branch_id)
 
+    needs_persist = dirty or not os.path.exists(path)
     if dirty:
         log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
-    _save_json(path, state)
+    if needs_persist:
+        _save_json(path, state)
     return state
 
 
@@ -640,6 +642,30 @@ _TEAM_RULES = {
         "固定隊伍間偶爾會被安排進同一副本，形成合作或對抗局面。"
     ),
 }
+
+DEFAULT_IMAGE_MODEL = "imagen-4.0-ultra-generate-001"
+
+
+def _branch_config_defaults() -> dict:
+    return {
+        "image_gen_enabled": True,
+        "image_model": DEFAULT_IMAGE_MODEL,
+    }
+
+
+def _is_image_gen_enabled(branch_config: dict) -> bool:
+    """Branch config gate for scene image generation. Default: enabled."""
+    val = branch_config.get("image_gen_enabled", True)
+    if isinstance(val, str):
+        return val.strip().lower() not in {"0", "false", "off", "no"}
+    return bool(val)
+
+
+def _get_image_model(branch_config: dict) -> str:
+    model = branch_config.get("image_model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return DEFAULT_IMAGE_MODEL
 
 
 def _rel_to_str(val) -> str:
@@ -1110,6 +1136,8 @@ def _build_story_system_prompt(
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
+    image_gen_enabled = _is_image_gen_enabled(branch_config)
+    image_model = _get_image_model(branch_config)
     # Build dungeon context
     dungeon_context = build_dungeon_context(story_id, branch_id)
     if os.path.exists(prompt_path):
@@ -1172,6 +1200,19 @@ def _build_story_system_prompt(
         if prefs_text:
             pistol_block += f"- 玩家偏好設定：\n{prefs_text}\n"
         result += pistol_block
+
+    if image_gen_enabled:
+        result += (
+            "\n\n## 場景插圖設定（系統）\n"
+            "- 本分支已啟用場景插圖。若需插圖，可依既有規則輸出單一 IMG tag。\n"
+            f"- 當前圖片模型：`{image_model}`。\n"
+        )
+    else:
+        result += (
+            "\n\n## 場景插圖設定（系統）\n"
+            "- 本分支已關閉場景插圖。\n"
+            "- 禁止輸出任何 IMG tag。\n"
+        )
 
     return result
 
@@ -4169,8 +4210,17 @@ def _process_gm_response(
     gm_response, img_prompt = _extract_img_tag(gm_response)
     image_info = None
     if img_prompt:
-        filename = generate_image_async(story_id, img_prompt, msg_index)
-        image_info = {"filename": filename, "ready": False}
+        branch_config = _load_branch_config(story_id, branch_id)
+        if _is_image_gen_enabled(branch_config):
+            filename = generate_image_async(
+                story_id,
+                img_prompt,
+                msg_index,
+                model=_get_image_model(branch_config),
+            )
+            image_info = {"filename": filename, "ready": False}
+        else:
+            log.info("image_gen disabled by branch config: branch=%s msg_index=%s", branch_id, msg_index)
 
     # Extract TIME tags and advance world_day
     had_time_tags = bool(TIME_RE.search(gm_response))
@@ -5140,7 +5190,7 @@ def api_branch_config_get(branch_id):
     """Get branch config."""
     story_id = _active_story_id()
     config = _load_branch_config(story_id, branch_id)
-    return jsonify({"ok": True, "config": config})
+    return jsonify({"ok": True, "config": config, "defaults": _branch_config_defaults()})
 
 
 @app.route("/api/branches/<branch_id>/config", methods=["POST"])
@@ -5151,7 +5201,7 @@ def api_branch_config_set(branch_id):
     body = request.get_json(force=True)
     config.update(body)
     _save_branch_config(story_id, branch_id, config)
-    return jsonify({"ok": True, "config": config})
+    return jsonify({"ok": True, "config": config, "defaults": _branch_config_defaults()})
 
 
 @app.route("/api/branches/edit", methods=["POST"])

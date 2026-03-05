@@ -202,14 +202,25 @@
         </div>
         <button id="addon-panel-btn" title="附加功能" aria-haspopup="true" aria-expanded="false">&#x2699;</button>
         <div id="addon-panel" class="addon-panel hidden">
-          <div class="addon-section">
-            <div class="addon-section-title">模型選擇</div>
-            <div class="addon-field">
-              <select id="addon-model-combined"></select>
-            </div>
+        <div class="addon-section">
+          <div class="addon-section-title">模型選擇</div>
+          <div class="addon-field">
+            <select id="addon-model-combined"></select>
           </div>
-          <div class="addon-section">
-            <div class="addon-section-title">命運走向</div>
+        </div>
+        <div class="addon-section">
+          <div class="addon-section-title">場景插圖</div>
+          <div class="addon-toggle-field">
+            <span>啟用</span>
+            <button id="addon-image-gen-btn" class="cheat-toggle active" onclick="toggleImageGen()">ON</button>
+          </div>
+          <div class="addon-field">
+            <label for="addon-image-model">圖片模型</label>
+            <select id="addon-image-model"></select>
+          </div>
+        </div>
+        <div class="addon-section">
+          <div class="addon-section-title">命運走向</div>
             <div class="addon-toggle-field">
               <span>啟用</span>
               <button id="addon-fate-btn" class="cheat-toggle active" onclick="toggleFateMode()">ON</button>
