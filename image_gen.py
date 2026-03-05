@@ -55,10 +55,22 @@ def _load_gemini_cfg() -> dict:
 
 
 def _is_key_error(http_code: int, body_text: str) -> bool:
-    body = body_text.lower()
     if http_code in (401, 403, 429):
         return True
-    return http_code == 400 and "api key" in body
+    if http_code != 400:
+        return False
+    body = body_text.lower()
+    key_error_markers = (
+        "api key not valid",
+        "invalid api key",
+        "request is missing required authentication credential",
+        "api_key_invalid",
+    )
+    return any(m in body for m in key_error_markers)
+
+
+def _is_retryable_http_error(http_code: int) -> bool:
+    return http_code == 408 or 500 <= http_code < 600
 
 
 def _aspect_ratio(width: int, height: int) -> str:
@@ -142,6 +154,13 @@ def _download_via_gemini(dest: str, prompt: str) -> bool:
                 mark_rate_limited(api_key)
                 log.info("    image_gen: Gemini key error HTTP %d on ...%s, trying next key", e.code, api_key[-6:])
                 continue
+            if _is_retryable_http_error(e.code):
+                log.warning(
+                    "    image_gen: Gemini transient HTTP %d on ...%s, trying next key",
+                    e.code,
+                    api_key[-6:],
+                )
+                continue
             log.warning("    image_gen: Gemini HTTP %d — %s", e.code, body_text)
             return False
         except Exception as e:
@@ -152,22 +171,40 @@ def _download_via_gemini(dest: str, prompt: str) -> bool:
 
 
 def _download_via_pollinations(dest: str, prompt: str) -> bool:
-    try:
-        encoded = urllib.parse.quote(prompt, safe="")
-        url = f"{POLLINATIONS_BASE}/{encoded}?width={IMAGE_WIDTH}&height={IMAGE_HEIGHT}&nologo=true"
-        log.info("    image_gen: fallback Pollinations %s", url[:120])
+    encoded = urllib.parse.quote(prompt, safe="")
+    url = f"{POLLINATIONS_BASE}/{encoded}?width={IMAGE_WIDTH}&height={IMAGE_HEIGHT}&nologo=true"
+    req = urllib.request.Request(url, headers={"User-Agent": "StoryRPG/1.0"})
 
-        req = urllib.request.Request(url, headers={"User-Agent": "StoryRPG/1.0"})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=90, context=ctx) as resp:
+    # First try with normal certificate verification.
+    try:
+        log.info("    image_gen: fallback Pollinations %s", url[:120])
+        with urllib.request.urlopen(req, timeout=90, context=_ssl_ctx) as resp:
             data = resp.read()
 
         with open(dest, "wb") as f:
             f.write(data)
         log.info("    image_gen: saved via Pollinations %s (%d bytes)", os.path.basename(dest), len(data))
         return True
+    except ssl.SSLError as e:
+        # Compatibility fallback for occasional broken cert chains on third-party host.
+        log.warning("    image_gen: Pollinations TLS verify failed, retrying insecure fallback — %s", e)
+        try:
+            insecure_ctx = ssl.create_default_context()
+            insecure_ctx.check_hostname = False
+            insecure_ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=90, context=insecure_ctx) as resp:
+                data = resp.read()
+            with open(dest, "wb") as f:
+                f.write(data)
+            log.warning(
+                "    image_gen: saved via Pollinations insecure TLS fallback %s (%d bytes)",
+                os.path.basename(dest),
+                len(data),
+            )
+            return True
+        except Exception as e2:
+            log.warning("    image_gen: Pollinations insecure fallback failed %s — %s", os.path.basename(dest), e2)
+            return False
     except Exception as e:
         log.warning("    image_gen: Pollinations failed %s — %s", os.path.basename(dest), e)
         return False

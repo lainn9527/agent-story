@@ -55,6 +55,24 @@ def test_extract_gemini_image_bytes_inlineData():
     assert mime == "image/jpeg"
 
 
+def test_extract_gemini_image_bytes_missing_inline_returns_none():
+    response = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": "no image part"}]
+                }
+            }
+        ]
+    }
+    assert image_gen._extract_gemini_image_bytes(response) is None
+
+
+def test_is_key_error_400_only_for_specific_markers():
+    assert image_gen._is_key_error(400, "API key not valid. Please pass a valid API key.") is True
+    assert image_gen._is_key_error(400, "Invalid argument: responseModalities not supported") is False
+
+
 def test_download_image_prefers_gemini(monkeypatch, tmp_path):
     called = {"gemini": 0, "pollinations": 0}
 

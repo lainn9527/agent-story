@@ -623,7 +623,7 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
 
     if dirty:
         log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
-        _save_json(path, state)
+    _save_json(path, state)
     return state
 
 
