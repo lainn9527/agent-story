@@ -117,10 +117,12 @@ def _build_cleanup_prompt(
 
 def _parse_cleanup_response(response_text: str) -> dict:
     text = (response_text or "").strip()
-    # Strip optional markdown code block
     m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if m:
         text = m.group(1).strip()
+    else:
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```\s*$", "", text)
     try:
         return json.loads(text)
     except json.JSONDecodeError:

@@ -289,7 +289,7 @@ def _load_json(path, default=None):
 
 def _save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
@@ -623,7 +623,7 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
 
     if dirty:
         log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
-    _save_json(path, state)
+        _save_json(path, state)
     return state
 
 
