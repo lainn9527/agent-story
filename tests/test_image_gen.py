@@ -87,7 +87,7 @@ def test_download_image_prefers_gemini(monkeypatch, tmp_path):
     called = {"gemini": 0, "pollinations": 0}
     captured = {"model": None}
 
-    def _fake_gemini(dest, prompt, model_override=None):
+    def _fake_gemini(dest, prompt, model_override=None, **kwargs):
         called["gemini"] += 1
         captured["model"] = model_override
         with open(dest, "wb") as f:
@@ -111,7 +111,7 @@ def test_download_image_prefers_gemini(monkeypatch, tmp_path):
 def test_download_image_fallback_pollinations(monkeypatch, tmp_path):
     called = {"gemini": 0, "pollinations": 0}
 
-    def _fake_gemini(dest, prompt, model_override=None):
+    def _fake_gemini(dest, prompt, model_override=None, **kwargs):
         called["gemini"] += 1
         return False
 
@@ -293,3 +293,104 @@ def test_download_via_gemini_quota_exhausted_tries_next_key(monkeypatch, tmp_pat
     assert dest.read_bytes() == raw
     assert calls == ["first-key", "second-key"]
     assert marked == ["first-key"]
+
+
+def test_get_image_status_returns_warning_once(monkeypatch, tmp_path):
+    monkeypatch.setattr(image_gen, "STORIES_DIR", str(tmp_path / "stories"))
+    image_gen._set_image_warning(
+        "story-x",
+        "img-x.png",
+        image_gen.FREE_QUOTA_WARNING_CODE,
+        image_gen.FREE_QUOTA_WARNING_MESSAGE,
+    )
+
+    first = image_gen.get_image_status("story-x", "img-x.png")
+    second = image_gen.get_image_status("story-x", "img-x.png")
+
+    assert first["ready"] is False
+    assert first["warning"]["code"] == image_gen.FREE_QUOTA_WARNING_CODE
+    assert "warning" not in second
+
+
+def test_download_via_gemini_sets_free_quota_warning(monkeypatch, tmp_path):
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    raw = b"paid-key-image"
+    encoded = base64.b64encode(raw).decode("ascii")
+    calls = []
+
+    def _fake_urlopen(req, timeout=90, context=None):
+        headers = dict(req.header_items())
+        key = headers.get("X-goog-api-key")
+        calls.append(key)
+        if len(calls) == 1:
+            body = {
+                "error": {
+                    "code": 400,
+                    "message": "RESOURCE_EXHAUSTED: quota exceeded",
+                    "status": "RESOURCE_EXHAUSTED",
+                }
+            }
+            raise urllib.error.HTTPError(
+                req.full_url,
+                400,
+                "Bad Request",
+                hdrs=None,
+                fp=io.BytesIO(json.dumps(body).encode("utf-8")),
+            )
+        return _Resp(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"inline_data": {"data": encoded, "mime_type": "image/png"}}
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(image_gen, "_load_gemini_cfg", lambda: {})
+    monkeypatch.setattr(
+        image_gen,
+        "get_available_keys",
+        lambda cfg: [
+            {"key": "free-key", "tier": "free"},
+            {"key": "paid-key", "tier": "paid"},
+        ],
+    )
+    monkeypatch.setattr(image_gen.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(image_gen, "STORIES_DIR", str(tmp_path / "stories"))
+
+    story_id = "story-y"
+    filename = "img-y.png"
+    image_gen._consume_image_warning(story_id, filename)
+
+    dest = tmp_path / "img.png"
+    ok = image_gen._download_via_gemini(
+        str(dest),
+        "scene prompt",
+        model_override="gemini-2.5-flash-image",
+        story_id=story_id,
+        filename=filename,
+    )
+    status = image_gen.get_image_status(story_id, filename)
+
+    assert ok is True
+    assert dest.read_bytes() == raw
+    assert calls == ["free-key", "paid-key"]
+    assert status["warning"]["code"] == image_gen.FREE_QUOTA_WARNING_CODE
+    assert status["warning"]["message"] == image_gen.FREE_QUOTA_WARNING_MESSAGE

@@ -24,6 +24,11 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
 IMAGE_WIDTH = 768
 IMAGE_HEIGHT = 512
+FREE_QUOTA_WARNING_CODE = "free_quota_exhausted"
+FREE_QUOTA_WARNING_MESSAGE = "Gemini 免費圖片額度已用盡，已自動切換到下一把 API key。"
+
+_image_warning_lock = threading.Lock()
+_image_warnings: dict[tuple[str, str], dict] = {}
 
 # Build SSL context using certifi certificates when available.
 try:
@@ -42,6 +47,18 @@ def _images_dir(story_id: str) -> str:
 def _make_filename(message_index: int, prompt: str) -> str:
     h = hashlib.md5(prompt.encode("utf-8")).hexdigest()[:8]
     return f"img_{message_index}_{h}.png"
+
+
+def _set_image_warning(story_id: str | None, filename: str | None, code: str, message: str):
+    if not story_id or not filename:
+        return
+    with _image_warning_lock:
+        _image_warnings[(story_id, filename)] = {"code": code, "message": message}
+
+
+def _consume_image_warning(story_id: str, filename: str) -> dict | None:
+    with _image_warning_lock:
+        return _image_warnings.pop((story_id, filename), None)
 
 
 def _load_gemini_cfg() -> dict:
@@ -174,7 +191,14 @@ def _extract_imagen_image_bytes(response_data: dict) -> tuple[bytes, str] | None
     return _extract_from_node(response_data.get("generatedImages", []))
 
 
-def _download_via_gemini(dest: str, prompt: str, model_override: str | None = None) -> bool:
+def _download_via_gemini(
+    dest: str,
+    prompt: str,
+    model_override: str | None = None,
+    *,
+    story_id: str | None = None,
+    filename: str | None = None,
+) -> bool:
     gemini_cfg = _load_gemini_cfg()
     model = (model_override or "").strip() or gemini_cfg.get("image_model") or GEMINI_IMAGE_MODEL
     keys = get_available_keys(gemini_cfg)
@@ -240,6 +264,13 @@ def _download_via_gemini(dest: str, prompt: str, model_override: str | None = No
                 continue
             if _is_quota_exhausted_error(e.code, body_text):
                 mark_rate_limited(api_key)
+                if key_info.get("tier") == "free":
+                    _set_image_warning(
+                        story_id,
+                        filename,
+                        FREE_QUOTA_WARNING_CODE,
+                        FREE_QUOTA_WARNING_MESSAGE,
+                    )
                 log.info("    image_gen: Gemini quota exhausted HTTP %d on ...%s, trying next key", e.code, api_key[-6:])
                 continue
             if _is_retryable_http_error(e.code):
@@ -298,8 +329,21 @@ def _download_via_pollinations(dest: str, prompt: str) -> bool:
         return False
 
 
-def _download_image(dest: str, prompt: str, model_override: str | None = None) -> str | None:
-    if _download_via_gemini(dest, prompt, model_override=model_override):
+def _download_image(
+    dest: str,
+    prompt: str,
+    model_override: str | None = None,
+    *,
+    story_id: str | None = None,
+    filename: str | None = None,
+) -> str | None:
+    if _download_via_gemini(
+        dest,
+        prompt,
+        model_override=model_override,
+        story_id=story_id,
+        filename=filename,
+    ):
         return "gemini"
     if _download_via_pollinations(dest, prompt):
         return "pollinations"
@@ -317,7 +361,13 @@ def generate_image_async(
         return filename
 
     def _download():
-        provider = _download_image(dest, prompt, model_override=model)
+        provider = _download_image(
+            dest,
+            prompt,
+            model_override=model,
+            story_id=story_id,
+            filename=filename,
+        )
         if not provider:
             log.warning("    image_gen: FAILED %s (all providers)", filename)
 
@@ -329,7 +379,11 @@ def generate_image_async(
 def get_image_status(story_id: str, filename: str) -> dict:
     """Check whether an image file has been downloaded."""
     path = os.path.join(_images_dir(story_id), filename)
-    return {"ready": os.path.exists(path), "filename": filename}
+    status = {"ready": os.path.exists(path), "filename": filename}
+    warning = _consume_image_warning(story_id, filename)
+    if warning:
+        status["warning"] = warning
+    return status
 
 
 def get_image_path(story_id: str, filename: str) -> str | None:

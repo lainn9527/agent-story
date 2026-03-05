@@ -3804,6 +3804,22 @@ function renderSummaryTimeline(summaries) {
 // Image polling
 // ---------------------------------------------------------------------------
 const _imagePollers = {};
+const _seenImageWarnings = new Set();
+
+function handleImageWarning(filename, res) {
+  const warning = res?.warning;
+  if (!warning || typeof warning !== "object") return;
+  const code = typeof warning.code === "string" && warning.code.trim()
+    ? warning.code.trim()
+    : "generic";
+  const key = `${filename}:${code}`;
+  if (_seenImageWarnings.has(key)) return;
+  _seenImageWarnings.add(key);
+  const message = typeof warning.message === "string" && warning.message.trim()
+    ? warning.message.trim()
+    : "圖片生成遇到額度限制，系統已自動切換 API key。";
+  showAlert(message);
+}
 
 function startImagePolling(storyId, filename, imgEl) {
   if (_imagePollers[filename]) return;
@@ -3820,6 +3836,7 @@ function startImagePolling(storyId, filename, imgEl) {
     }
     try {
       const res = await API.imageStatus(filename);
+      handleImageWarning(filename, res);
       if (res.ready) {
         delete _imagePollers[filename];
         imgEl.src = `/api/stories/${storyId}/images/${filename}`;
@@ -3855,6 +3872,7 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
     } else {
       // Page load — check once, don't endlessly poll
       API.imageStatus(msg.image.filename).then(res => {
+        handleImageWarning(msg.image.filename, res);
         if (res.ready) {
           img.src = `/api/stories/${storyId}/images/${msg.image.filename}`;
           img.style.display = "";
