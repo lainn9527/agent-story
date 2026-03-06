@@ -256,6 +256,8 @@ _PENDING_EXTRACT: set[tuple[str, str, int]] = set()
 # Thread-safe lock registry for branch messages.json read-modify-write operations.
 _BRANCH_MESSAGES_LOCKS: dict[str, threading.Lock] = {}
 _BRANCH_MESSAGES_LOCKS_META = threading.Lock()
+_SYNCED_IMAGE_READY: set[tuple[str, str]] = set()
+_SYNCED_IMAGE_READY_LOCK = threading.Lock()
 
 # Scene-transient keys that should never be persisted (used by validation gate + inner)
 _SCENE_KEYS = {
@@ -355,6 +357,45 @@ def _save_branch_messages(story_id: str, branch_id: str, messages: list[dict]):
     lock = _get_branch_messages_lock(story_id, branch_id)
     with lock:
         _save_json(path, messages)
+
+
+def _mark_image_ready_in_branch_messages(story_id: str, branch_id: str, filename: str) -> bool:
+    """Persist ready=true for any message in the branch that references filename."""
+    path = _story_messages_path(story_id, branch_id)
+    lock = _get_branch_messages_lock(story_id, branch_id)
+    with lock:
+        msgs = _load_json(path, [])
+        if not isinstance(msgs, list):
+            return False
+        changed = False
+        for msg in msgs:
+            image = msg.get("image")
+            if not isinstance(image, dict):
+                continue
+            if image.get("filename") != filename or image.get("ready") is True:
+                continue
+            image["ready"] = True
+            changed = True
+        if changed:
+            _save_json(path, msgs)
+        return changed
+
+
+def _sync_message_image_ready(story_id: str, filename: str) -> bool:
+    """Best-effort sync of stale message.image.ready flags after file creation."""
+    cache_key = (story_id, filename)
+    with _SYNCED_IMAGE_READY_LOCK:
+        if cache_key in _SYNCED_IMAGE_READY:
+            return False
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+    changed = False
+    for branch_id in branches:
+        if _mark_image_ready_in_branch_messages(story_id, branch_id, filename):
+            changed = True
+    with _SYNCED_IMAGE_READY_LOCK:
+        _SYNCED_IMAGE_READY.add(cache_key)
+    return changed
 
 
 def _upsert_branch_message(story_id: str, branch_id: str, message: dict):
@@ -7083,7 +7124,13 @@ def api_images_status():
     if not filename:
         return jsonify({"ok": False, "error": "filename required"}), 400
     status = get_image_status(story_id, filename)
-    return jsonify({"ok": True, **status})
+    if status.get("ready"):
+        _sync_message_image_ready(story_id, filename)
+    resp = jsonify({"ok": True, **status})
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/api/stories/<story_id>/images/<filename>")
