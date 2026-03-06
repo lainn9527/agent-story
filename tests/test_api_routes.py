@@ -1439,6 +1439,42 @@ class TestNPCsAPI:
         assert "臨時NPC" not in state_db.search_state("test_story", "main", "臨時NPC")
 
 
+class TestImageAPI:
+    def test_image_status_disables_cache_and_syncs_ready_flag(self, client, setup_story, story_id, monkeypatch):
+        messages_path = app_module._story_messages_path(story_id, "main")
+        with open(messages_path, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "index": 5,
+                    "role": "gm",
+                    "content": "場景回覆",
+                    "image": {"filename": "img_5_test.png", "ready": False},
+                }
+            ], f, ensure_ascii=False)
+
+        monkeypatch.setattr(
+            app_module,
+            "get_image_status",
+            lambda story_id_arg, filename_arg: {
+                "ready": True,
+                "filename": filename_arg,
+            },
+        )
+
+        resp = client.get("/api/images/status?filename=img_5_test.png")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["ready"] is True
+        assert "no-store" in resp.headers["Cache-Control"]
+        assert resp.headers["Pragma"] == "no-cache"
+
+        with open(messages_path, "r", encoding="utf-8") as f:
+            messages = json.load(f)
+        assert messages[0]["image"]["ready"] is True
+
+
 class TestStateAPI:
     def test_rebuild_state_endpoint(self, client, setup_story):
         resp = client.post("/api/state/rebuild", json={"branch_id": "main"})

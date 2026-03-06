@@ -115,7 +115,7 @@
 | GET | `/api/events` | 列事件 | `branch_id`, `limit` |
 | GET | `/api/events/search` | 搜事件 | `q`, `branch_id`, `limit` |
 | PATCH | `/api/events/<event_id>` | 更新事件狀態 | body: `status` (`planted/triggered/resolved/abandoned`) |
-| GET | `/api/images/status` | 查圖片生成狀態 | `filename` |
+| GET | `/api/images/status` | 查圖片生成狀態（live status，no-store） | `filename` |
 | GET | `/api/stories/<story_id>/images/<filename>` | 取圖片檔 | path params |
 | GET | `/api/npc-activities` | 取 NPC 活動紀錄 | `branch_id` |
 

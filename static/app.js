@@ -256,7 +256,10 @@ const API = {
 
   // Image APIs
   imageStatus: (filename) =>
-    fetch(`/api/images/status?filename=${encodeURIComponent(filename)}`).then(r => r.json()),
+    fetch(
+      `/api/images/status?filename=${encodeURIComponent(filename)}&_ts=${Date.now()}`,
+      { cache: "no-store" }
+    ).then(r => r.json()),
 
   // NPC Activities
   npcActivities: (branchId) =>
@@ -3805,32 +3808,48 @@ function renderSummaryTimeline(summaries) {
 // ---------------------------------------------------------------------------
 const _imagePollers = {};
 
-function startImagePolling(storyId, filename, imgEl) {
+function startImagePolling(storyId, filename, imgEl, {
+  maxWait = 60000,
+  interval = 3000,
+  immediate = false,
+  removeWrapperOnTimeout = false,
+  onReady = null,
+} = {}) {
   if (_imagePollers[filename]) return;
 
-  const maxWait = 60000;
-  const interval = 3000;
   const startTime = Date.now();
 
   const poll = async () => {
+    const wrapper = imgEl.parentElement;
+    if (!wrapper) {
+      delete _imagePollers[filename];
+      return;
+    }
     if (Date.now() - startTime > maxWait) {
       delete _imagePollers[filename];
-      imgEl.parentElement.querySelector(".msg-image-placeholder")?.remove();
+      wrapper.querySelector(".msg-image-placeholder")?.remove();
+      if (removeWrapperOnTimeout) wrapper.remove();
       return;
     }
     try {
       const res = await API.imageStatus(filename);
       if (res.ready) {
         delete _imagePollers[filename];
+        if (typeof onReady === "function") onReady(res);
         imgEl.src = `/api/stories/${storyId}/images/${filename}`;
         imgEl.style.display = "";
-        imgEl.parentElement.querySelector(".msg-image-placeholder")?.remove();
+        wrapper.querySelector(".msg-image-placeholder")?.remove();
         return;
       }
     } catch (e) { /* ignore */ }
     _imagePollers[filename] = setTimeout(poll, interval);
   };
-  _imagePollers[filename] = setTimeout(poll, interval);
+  if (immediate) {
+    _imagePollers[filename] = true;
+    poll();
+  } else {
+    _imagePollers[filename] = setTimeout(poll, interval);
+  }
 }
 
 function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
@@ -3840,9 +3859,15 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
 
   const img = document.createElement("img");
   img.className = "msg-image";
+  const showReadyImage = () => {
+    if (msg.image) msg.image.ready = true;
+    img.src = `/api/stories/${storyId}/images/${msg.image.filename}`;
+    img.style.display = "";
+    wrapper.querySelector(".msg-image-placeholder")?.remove();
+  };
 
   if (msg.image.ready) {
-    img.src = `/api/stories/${storyId}/images/${msg.image.filename}`;
+    showReadyImage();
   } else {
     img.style.display = "none";
     const placeholder = document.createElement("div");
@@ -3851,16 +3876,21 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
     wrapper.appendChild(placeholder);
     if (fresh) {
       // Just generated — poll for completion
-      startImagePolling(storyId, msg.image.filename, img);
+      startImagePolling(storyId, msg.image.filename, img, {
+        immediate: true,
+        onReady: showReadyImage,
+      });
     } else {
-      // Page load — check once, don't endlessly poll
+      // Page load — check once, then briefly retry in case the file finished moments later.
       API.imageStatus(msg.image.filename).then(res => {
         if (res.ready) {
-          img.src = `/api/stories/${storyId}/images/${msg.image.filename}`;
-          img.style.display = "";
-          placeholder.remove();
+          showReadyImage();
         } else {
-          wrapper.remove();
+          startImagePolling(storyId, msg.image.filename, img, {
+            maxWait: 15000,
+            removeWrapperOnTimeout: true,
+            onReady: showReadyImage,
+          });
         }
       }).catch(() => {
         wrapper.remove();

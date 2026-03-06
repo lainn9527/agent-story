@@ -357,6 +357,39 @@ def _save_branch_messages(story_id: str, branch_id: str, messages: list[dict]):
         _save_json(path, messages)
 
 
+def _mark_image_ready_in_branch_messages(story_id: str, branch_id: str, filename: str) -> bool:
+    """Persist ready=true for any message in the branch that references filename."""
+    path = _story_messages_path(story_id, branch_id)
+    lock = _get_branch_messages_lock(story_id, branch_id)
+    with lock:
+        msgs = _load_json(path, [])
+        if not isinstance(msgs, list):
+            return False
+        changed = False
+        for msg in msgs:
+            image = msg.get("image")
+            if not isinstance(image, dict):
+                continue
+            if image.get("filename") != filename or image.get("ready") is True:
+                continue
+            image["ready"] = True
+            changed = True
+        if changed:
+            _save_json(path, msgs)
+        return changed
+
+
+def _sync_message_image_ready(story_id: str, filename: str) -> bool:
+    """Best-effort sync of stale message.image.ready flags after file creation."""
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+    changed = False
+    for branch_id in branches:
+        if _mark_image_ready_in_branch_messages(story_id, branch_id, filename):
+            changed = True
+    return changed
+
+
 def _upsert_branch_message(story_id: str, branch_id: str, message: dict):
     """Thread-safe upsert by message index (avoids stale list overwrite races)."""
     path = _story_messages_path(story_id, branch_id)
@@ -7083,7 +7116,13 @@ def api_images_status():
     if not filename:
         return jsonify({"ok": False, "error": "filename required"}), 400
     status = get_image_status(story_id, filename)
-    return jsonify({"ok": True, **status})
+    if status.get("ready"):
+        _sync_message_image_ready(story_id, filename)
+    resp = jsonify({"ok": True, **status})
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/api/stories/<story_id>/images/<filename>")
