@@ -1399,43 +1399,104 @@ body {
   margin-top: 5px;
 }
 
-.debug-pending-options-container {
-  margin: 10px 0;
-  padding: 12px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-}
-
-.debug-options-header {
-  font-size: 0.9em;
-  font-weight: 600;
-  color: var(--text-color);
-  margin-bottom: 10px;
-}
-
-.debug-option-item {
+/* Proposal cards in chat */
+.proposal-cards {
+  margin-top: 10px;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proposal-card {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.proposal-card.applied {
+  opacity: 0.5;
+  border-color: #4a7c59;
+}
+
+.proposal-card.rejected {
+  opacity: 0.4;
+}
+
+.proposal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.proposal-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.proposal-badge.add {
+  background: #2d5a3a;
+  color: #7fdb96;
+}
+
+.proposal-badge.edit {
+  background: #5a4a2d;
+  color: #dbc37f;
+}
+
+.proposal-badge.delete {
+  background: #5a2d2d;
+  color: #db7f7f;
+}
+
+.proposal-topic {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.proposal-content {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
   margin-bottom: 8px;
-  font-size: 0.9em;
-  color: var(--text-color);
+}
+
+.proposal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.proposal-actions button {
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font-size: 0.8rem;
   cursor: pointer;
-  line-height: 1.4;
 }
 
-.debug-option-item:last-child {
-  margin-bottom: 0;
+.proposal-actions .btn-accept {
+  border-color: #4a7c59;
+  color: #7fdb96;
 }
 
-.debug-option-item input[type="checkbox"] {
-  margin-top: 3px;
-  cursor: pointer;
+.proposal-actions .btn-accept:hover {
+  background: #2d5a3a;
 }
 
-.debug-option-item.directive span {
-  color: #a5d6a7;
+.proposal-actions .btn-reject {
+  color: var(--text-dim);
+}
+
+.proposal-actions .btn-reject:hover {
+  background: var(--bg-user);
 }
 
 .debug-panel-tools .cheat-toggle:disabled {

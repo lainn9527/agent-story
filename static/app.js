@@ -4537,66 +4537,113 @@ function _renderDebugChatMessages(messages) {
   box.scrollTop = box.scrollHeight;
 }
 
-function _updateDebugApplyButton() {
-  const btn = document.getElementById("debug-apply-btn");
-  if (!btn) return;
+function _renderInlineProposalCards(container) {
   const count = _debugPendingProposals.length + _debugPendingDirectives.length;
-  if (count > 0) {
-    btn.textContent = `套用修正 (${count} 筆)`;
-    btn.classList.add("pulse-ready");
-    btn.disabled = false;
-  } else {
-    btn.textContent = "目前無待套用修正";
-    btn.classList.remove("pulse-ready");
-    btn.disabled = true;
-  }
-  _renderDebugPendingOptions();
-}
+  if (count === 0) return;
 
-function _renderDebugPendingOptions() {
-  const container = document.getElementById("debug-pending-options-container");
-  if (!container) return;
-
-  const count = _debugPendingProposals.length + _debugPendingDirectives.length;
-  if (count === 0) {
-    container.classList.add("hidden");
-    container.innerHTML = "";
-    return;
-  }
-
-  let html = `<div class="debug-options-header">準備套用的修正列表 (${count})：</div>`;
+  const cardsContainer = document.createElement("div");
+  cardsContainer.className = "proposal-cards";
 
   _debugPendingProposals.forEach((p, i) => {
-    let text = "";
-    if (p.type === "state_patch") text = `狀態修改: ${JSON.stringify(p.update)}`;
-    else if (p.type === "npc_upsert") text = `新增/覆寫 NPC: ${(p.npc && (p.npc.name || p.npc.id)) || '未命名'}`;
-    else if (p.type === "npc_delete") text = `刪除 NPC: ${p.npc_id}`;
-    else if (p.type === "world_day_set") text = `修改天數為: ${p.day || p.world_day}`;
-    else if (p.type === "dungeon_patch") text = `副本進度: ${JSON.stringify(p.update)}`;
-    else text = `其他修改: ${p.type}`;
+    let badgeClass = "edit";
+    let badgeText = "狀態";
+    let topic = p.type;
+    let contentHtml = "";
 
-    html += `
-      <label class="debug-option-item">
-        <input type="checkbox" class="debug-prop-cb" data-index="${i}" checked>
-        <span>${escapeHtml(text)}</span>
-      </label>
+    if (p.type === "state_patch") {
+      const key = Object.keys(p.update)[0];
+      const val = p.update[key];
+      topic = key;
+      contentHtml = `數值調整為: ${JSON.stringify(val)}`;
+    } else if (p.type === "npc_upsert") {
+      badgeClass = "add"; badgeText = "NPC";
+      topic = (p.npc && (p.npc.name || p.npc.id)) || '未命名';
+      contentHtml = `覆寫設定: ${JSON.stringify(p.npc)}`;
+    } else if (p.type === "npc_delete") {
+      badgeClass = "delete"; badgeText = "刪除 NPC";
+      topic = p.npc_id;
+      contentHtml = `刪除此 NPC`;
+    } else if (p.type === "world_day_set") {
+      badgeClass = "edit"; badgeText = "系統";
+      topic = "推進天數";
+      contentHtml = `修改為: ${p.day || p.world_day}`;
+    } else if (p.type === "dungeon_patch") {
+      badgeClass = "edit"; badgeText = "副本";
+      topic = "推進進度";
+      contentHtml = `變更為: ${JSON.stringify(p.update)}`;
+    }
+
+    const card = document.createElement("div");
+    card.className = "proposal-card";
+    card.innerHTML = `
+      <div class="proposal-header">
+        <span class="proposal-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+        <span class="proposal-topic">${escapeHtml(topic)}</span>
+      </div>
+      <div class="proposal-content">${escapeHtml(contentHtml)}</div>
+      <div class="proposal-actions">
+        <button class="btn-accept" onclick="applySingleDebugAction('proposal', ${i}, this)">採用</button>
+        <button class="btn-reject" onclick="rejectSingleDebugAction(this)">忽略</button>
+      </div>
     `;
+    cardsContainer.appendChild(card);
   });
 
   _debugPendingDirectives.forEach((d, i) => {
     const text = d.instruction || "";
-    const shortText = text.length > 60 ? text.substring(0, 60) + "..." : text;
-    html += `
-      <label class="debug-option-item directive">
-        <input type="checkbox" class="debug-dir-cb" data-index="${i}" checked>
-        <span title="${escapeHtml(text)}">寫入劇情設定: ${escapeHtml(shortText)}</span>
-      </label>
+    const card = document.createElement("div");
+    card.className = "proposal-card";
+    card.innerHTML = `
+      <div class="proposal-header">
+        <span class="proposal-badge add">劇情</span>
+        <span class="proposal-topic">寫入設定</span>
+      </div>
+      <div class="proposal-content">${escapeHtml(text)}</div>
+      <div class="proposal-actions">
+        <button class="btn-accept" onclick="applySingleDebugAction('directive', ${i}, this)">採用</button>
+        <button class="btn-reject" onclick="rejectSingleDebugAction(this)">忽略</button>
+      </div>
     `;
+    cardsContainer.appendChild(card);
   });
 
-  container.innerHTML = html;
-  container.classList.remove("hidden");
+  container.appendChild(cardsContainer);
 }
+
+window.applySingleDebugAction = async function (type, index, btn) {
+  const card = btn.closest(".proposal-card");
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "套用中...";
+
+  let pList = [];
+  let dList = [];
+  if (type === 'proposal') {
+    pList.push(_debugPendingProposals[index]);
+  } else {
+    dList.push(_debugPendingDirectives[index]);
+  }
+
+  try {
+    const res = await API.debugApply(currentBranchId, pList, dList);
+    if (!res.ok) throw new Error(res.error);
+
+    card.classList.add("applied");
+    card.querySelector(".proposal-actions").innerHTML = `<span style="color:#4caf50;font-size:0.85em;font-weight:bold;">✔ 已採用</span>`;
+    showAlert(res.audit_summary || "變更套用成功！");
+    await loadMessages(currentBranchId);
+  } catch (e) {
+    showAlert("套用失敗: " + e.message);
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+};
+
+window.rejectSingleDebugAction = function (btn) {
+  const card = btn.closest(".proposal-card");
+  card.classList.add("rejected");
+  card.querySelector(".proposal-actions").innerHTML = `<span style="color:#888;font-size:0.85em;font-weight:bold;">❌ 已忽略</span>`;
+};
 
 async function _loadDebugSession(resetSuggestions = true) {
   const res = await API.debugSession(currentBranchId);
@@ -4609,7 +4656,6 @@ async function _loadDebugSession(resetSuggestions = true) {
     _debugPendingProposals = [];
     _debugPendingDirectives = [];
   }
-  _updateDebugApplyButton();
 }
 
 async function openDebugPanel() {
@@ -4679,55 +4725,36 @@ async function sendDebugChat() {
           }
           target.innerHTML = markdownToHtml(stripDebugTags(finalText));
         }
-        _debugPendingProposals = data.proposals || [];
+
+        const rawProposals = data.proposals || [];
+        const splitProposals = [];
+        rawProposals.forEach(p => {
+          if (p.type === "state_patch" && typeof p.update === "object") {
+            for (const [key, value] of Object.entries(p.update)) {
+              splitProposals.push({ type: "state_patch", update: { [key]: value } });
+            }
+          } else {
+            splitProposals.push(p);
+          }
+        });
+
+        _debugPendingProposals = splitProposals;
         _debugPendingDirectives = data.directives || [];
-        await _loadDebugSession(false);
+
+        if (target) {
+          _renderInlineProposalCards(target);
+        }
       },
       (errMsg) => {
         gmNode.remove();
         showAlert(errMsg || "debug chat 失敗");
-      },
+      }
     );
   } finally {
     sendBtn.disabled = false;
   }
 }
 
-async function applyDebugChanges() {
-  const result = document.getElementById("debug-apply-result");
-  if (!result) return;
-
-  const selectedProposals = [];
-  document.querySelectorAll(".debug-prop-cb:checked").forEach(cb => {
-    selectedProposals.push(_debugPendingProposals[parseInt(cb.dataset.index, 10)]);
-  });
-  const selectedDirectives = [];
-  document.querySelectorAll(".debug-dir-cb:checked").forEach(cb => {
-    selectedDirectives.push(_debugPendingDirectives[parseInt(cb.dataset.index, 10)]);
-  });
-
-  const total = selectedProposals.length + selectedDirectives.length;
-  if (total === 0) {
-    showAlert("請至少選擇一項修正！");
-    return;
-  }
-
-  try {
-    const res = await API.debugApply(currentBranchId, selectedProposals, selectedDirectives);
-    if (!res.ok) {
-      result.textContent = res.error || "套用失敗";
-      return;
-    }
-    const failed = (res.results || []).filter(x => !x.ok);
-    const failLines = failed.map(x => `- ${x.type}: ${x.error || "unknown error"}`);
-    result.textContent = [res.audit_summary || "", ...failLines].filter(Boolean).join("\n");
-    showAlert(res.audit_summary || `變更套用成功！已套用 ${total} 筆修正`);
-    await loadMessages(currentBranchId);
-    await _loadDebugSession();
-  } catch (e) {
-    result.textContent = e.message || "套用失敗";
-  }
-}
 
 async function undoDebugChanges() {
   const result = document.getElementById("debug-apply-result");
