@@ -1634,7 +1634,7 @@ body {
 .debug-panel-content {
   max-width: 1080px;
   width: 95%;
-  max-height: 92vh;
+  max-height: 96vh;
   /* Allow it to be taller than default */
   display: flex;
   flex-direction: column;
