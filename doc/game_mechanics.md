@@ -222,9 +222,11 @@
 - `POST /api/debug/apply` 採逐項執行：
   - action 失敗不會中斷其他 action
   - 全部跑完回傳逐項結果
+  - `actions` / `directives` payload 都有上限（預設 20）；directive 只保留最後一個有效 instruction
 - 套用前會先寫完整備份：`last_apply_backup.json`
   - 含 state / NPC / world_day / dungeon 完整快照
 - `POST /api/debug/undo` 僅回滾最近一次 apply（同 debug unit）
+  - 若 backup 的 `world_day` 無法解析，undo 直接失敗，不會 fallback 到當前值
 
 ### 9.3 劇情修正指令（Directive）
 

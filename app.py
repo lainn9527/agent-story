@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import logging.handlers
+import math
 import os
 import re
 import shutil
@@ -251,6 +252,7 @@ GM_PLAN_CHAR_LIMIT = max(120, _parse_env_int("GM_PLAN_CHAR_LIMIT", 500))
 DEBUG_CHAT_CONTEXT_COUNT = max(1, _parse_env_int("DEBUG_CHAT_CONTEXT_COUNT", 20))
 DEBUG_CHAT_MAX_USER_CHARS = max(200, _parse_env_int("DEBUG_CHAT_MAX_USER_CHARS", 4000))
 DEBUG_APPLY_MAX_ACTIONS = max(1, _parse_env_int("DEBUG_APPLY_MAX_ACTIONS", 20))
+DEBUG_APPLY_MAX_DIRECTIVES = max(1, _parse_env_int("DEBUG_APPLY_MAX_DIRECTIVES", 20))
 
 # Track in-flight async tag extraction jobs keyed by (story, branch, msg_index).
 _PENDING_EXTRACT_LOCK = threading.Lock()
@@ -2246,6 +2248,8 @@ def _build_debug_system_prompt(story_id: str, branch_id: str, recent_messages: l
     pending_directive = _load_debug_directive(story_id, branch_id)
     recent_text = _format_debug_recent_messages(recent_messages)
 
+    # V1 intentionally injects full JSON snapshots. Large stories can exceed
+    # model context here because this prompt path does not enforce a token budget.
     return (
         "你是 RPG Debug 診斷與修正助手。你的任務是：\n"
         "1. 協助檢查狀態/NPC/獎勵點/世界日/副本進度是否一致。\n"
@@ -3987,17 +3991,61 @@ def _next_timeline_index(story_id: str, branch_id: str, timeline: list[dict] | N
     """Return the next message index for appending in a branch timeline."""
     if timeline is None:
         timeline = get_full_timeline(story_id, branch_id)
-    max_index = -1
-    for msg in timeline:
-        idx = msg.get("index")
-        if isinstance(idx, str):
-            try:
-                idx = int(idx)
-            except ValueError:
-                continue
-        if isinstance(idx, int):
-            if idx > max_index:
-                max_index = idx
+    max_index = _max_message_index(timeline)
+    if max_index is None:
+        return 0
+    return max_index + 1
+
+
+def _coerce_message_index(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _max_message_index(messages: object) -> int | None:
+    if not isinstance(messages, list):
+        return None
+    max_index: int | None = None
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        idx = _coerce_message_index(msg.get("index"))
+        if idx is None:
+            continue
+        if max_index is None or idx > max_index:
+            max_index = idx
+    return max_index
+
+
+def _next_branch_message_index_fast(story_id: str, branch_id: str) -> int:
+    """Cheap next-index lookup for append-only debug audit messages."""
+    delta_max = _max_message_index(_load_branch_messages(story_id, branch_id))
+    tree = _load_tree(story_id)
+    branches = tree.get("branches", {})
+    branch = branches.get(branch_id, {})
+
+    if branch_id == "main" or branch.get("parent_branch_id") is None:
+        inherited_max = _max_message_index(_load_json(_story_parsed_path(story_id), []))
+    else:
+        branch_point_index = _coerce_message_index(branch.get("branch_point_index"))
+        if branch_point_index is not None:
+            inherited_max = branch_point_index
+        else:
+            inherited_max = _max_message_index(get_full_timeline(story_id, branch_id))
+
+    max_index = inherited_max
+    if delta_max is not None and (max_index is None or delta_max > max_index):
+        max_index = delta_max
+    if max_index is None:
+        return 0
     return max_index + 1
 
 
@@ -7368,15 +7416,14 @@ def api_lore_apply():
 def _pick_latest_debug_directive(directives: object) -> dict | None:
     if not isinstance(directives, list):
         return None
-    latest: dict | None = None
-    for item in directives:
+    for item in reversed(directives):
         if not isinstance(item, dict):
             continue
         instruction = str(item.get("instruction", "")).strip()
         if not instruction:
             continue
-        latest = {"instruction": instruction}
-    return latest
+        return {"instruction": instruction}
+    return None
 
 
 def _apply_debug_action(story_id: str, branch_id: str, action: dict) -> dict:
@@ -7493,6 +7540,19 @@ def _build_debug_apply_audit_summary(results: list[dict], directive_applied: int
     if directive_applied > 0:
         summary += "；已注入劇情指令"
     return summary
+
+
+def _append_debug_audit_message(story_id: str, branch_id: str, summary: str):
+    text = str(summary or "").strip()
+    if not text:
+        return
+    _upsert_branch_message(story_id, branch_id, {
+        "role": "system",
+        "message_type": "debug_audit",
+        "content": text,
+        "index": _next_branch_message_index_fast(story_id, branch_id),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
 
 @app.route("/api/debug/session")
@@ -7623,6 +7683,8 @@ def api_debug_apply():
         return jsonify({"ok": False, "error": "directives must be a list"}), 400
     if len(actions) > DEBUG_APPLY_MAX_ACTIONS:
         return jsonify({"ok": False, "error": f"too many actions (max {DEBUG_APPLY_MAX_ACTIONS})"}), 400
+    if len(directives) > DEBUG_APPLY_MAX_DIRECTIVES:
+        return jsonify({"ok": False, "error": f"too many directives (max {DEBUG_APPLY_MAX_DIRECTIVES})"}), 400
 
     debug_unit_id = _resolve_debug_unit_id(story_id, branch_id)
     backup = {
@@ -7667,6 +7729,10 @@ def api_debug_apply():
             directive_result = {"ok": False, "applied": 0, "error": str(e)}
 
     audit_summary = _build_debug_apply_audit_summary(results, directive_result.get("applied", 0))
+    try:
+        _append_debug_audit_message(story_id, branch_id, audit_summary)
+    except Exception as e:
+        log.warning("debug apply audit append failed: story=%s branch=%s error=%s", story_id, branch_id, e)
 
     return jsonify({
         "ok": True,
@@ -7704,21 +7770,35 @@ def api_debug_undo():
         return jsonify({"ok": False, "error": "backup npc snapshot invalid"}), 400
     if not isinstance(dungeon_snapshot, dict):
         return jsonify({"ok": False, "error": "backup dungeon snapshot invalid"}), 400
+    try:
+        restored_world_day = float(world_day)
+    except (TypeError, ValueError):
+        log.warning(
+            "debug undo rejected: invalid backup world_day story=%s branch=%s debug_unit=%s value=%r",
+            story_id, branch_id, debug_unit_id, world_day,
+        )
+        return jsonify({"ok": False, "error": "backup world_day invalid"}), 400
+    if not math.isfinite(restored_world_day) or restored_world_day < 0:
+        log.warning(
+            "debug undo rejected: non-finite backup world_day story=%s branch=%s debug_unit=%s value=%r",
+            story_id, branch_id, debug_unit_id, world_day,
+        )
+        return jsonify({"ok": False, "error": "backup world_day invalid"}), 400
 
     _save_json(_story_character_state_path(story_id, branch_id), state_snapshot)
     _save_json(_story_npcs_path(story_id, branch_id), npcs_snapshot)
     rebuild_state_db_from_json(story_id, branch_id, state=state_snapshot, npcs=npcs_snapshot)
-
-    try:
-        set_world_day(story_id, branch_id, float(world_day))
-    except (TypeError, ValueError):
-        set_world_day(story_id, branch_id, get_world_day(story_id, branch_id))
+    set_world_day(story_id, branch_id, restored_world_day)
 
     _save_json(_dungeon_progress_path(story_id, branch_id), dungeon_snapshot)
     _clear_debug_directive(story_id, branch_id)
     _clear_last_apply_backup(story_id, debug_unit_id)
 
     audit_summary = "已回滾 Debug 修正（還原至套用前）"
+    try:
+        _append_debug_audit_message(story_id, branch_id, audit_summary)
+    except Exception as e:
+        log.warning("debug undo audit append failed: story=%s branch=%s error=%s", story_id, branch_id, e)
     return jsonify({"ok": True, "restored": True, "audit_summary": audit_summary})
 
 

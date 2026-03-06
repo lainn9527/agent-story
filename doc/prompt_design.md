@@ -258,6 +258,7 @@
   - `gm_plan.json`
   - 當前 `debug_directive.json`（若存在）
 - Debug 對話歷史由 server 端管理（`debug_units/<unit>/chat.json`），送 LLM 時僅取最近 20 則。
+- V1 目前直接注入完整 state / NPC / dungeon JSON，尚未做獨立 token budget；大型故事有 context 爆量風險。
 
 ### Debug Tag 契約
 

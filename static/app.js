@@ -2073,6 +2073,11 @@ function renderMessages(messages) {
       }
     }
 
+    if (msg.message_type === "debug_audit") {
+      $messages.appendChild(createDebugAuditMessageElement(msg));
+      continue;
+    }
+
     const el = document.createElement("div");
     el.className = `message ${msg.role}`;
     if (msg.inherited) el.classList.add("inherited");

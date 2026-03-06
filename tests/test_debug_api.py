@@ -254,6 +254,24 @@ def test_debug_apply_partial_success_and_audit(client, setup_story):
     assert any(m.get("message_type") == "debug_audit" for m in messages)
 
 
+def test_debug_apply_rejects_too_many_directives(client, setup_story):
+    resp = client.post("/api/debug/apply", json={
+        "branch_id": "main",
+        "actions": [],
+        "directives": [
+            {"instruction": f"指令 {i}"}
+            for i in range(app_module.DEBUG_APPLY_MAX_DIRECTIVES + 1)
+        ],
+    })
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert data["error"] == f"too many directives (max {app_module.DEBUG_APPLY_MAX_DIRECTIVES})"
+
+    backup_path = setup_story / "debug_units" / "main" / "last_apply_backup.json"
+    assert not backup_path.exists()
+
+
 def test_debug_apply_infers_state_patch_when_type_missing(client, setup_story):
     resp = client.post("/api/debug/apply", json={
         "branch_id": "main",
@@ -318,3 +336,55 @@ def test_debug_undo_restores_snapshot_and_clears_directive(client, setup_story):
 
     directive_path = setup_story / "branches" / "main" / "debug_directive.json"
     assert not directive_path.exists()
+
+    messages = json.loads((setup_story / "branches" / "main" / "messages.json").read_text(encoding="utf-8"))
+    audits = [m for m in messages if m.get("message_type") == "debug_audit"]
+    assert len(audits) == 2
+    assert "已回滾 Debug 修正" in audits[-1]["content"]
+
+
+def test_debug_undo_rejects_invalid_backup_world_day_without_partial_restore(client, setup_story):
+    state_path = setup_story / "branches" / "main" / "character_state.json"
+    mutated_state = json.loads(state_path.read_text(encoding="utf-8"))
+    mutated_state["reward_points"] = 1337
+    state_path.write_text(json.dumps(mutated_state, ensure_ascii=False), encoding="utf-8")
+
+    directive_path = setup_story / "branches" / "main" / "debug_directive.json"
+    directive_path.write_text(json.dumps({
+        "instruction": "保留現有 directive",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    backup_path = setup_story / "debug_units" / "main" / "last_apply_backup.json"
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path.write_text(json.dumps({
+        "version": 1,
+        "created_at": "2026-03-07T00:00:00+00:00",
+        "debug_unit_id": "main",
+        "target_branch_id": "main",
+        "state_snapshot": {
+            "name": "測試者",
+            "current_phase": "主神空間",
+            "reward_points": 1000,
+            "inventory": {},
+            "relationships": {},
+            "current_status": "待命",
+        },
+        "npcs_snapshot": [],
+        "world_day": "oops",
+        "dungeon_progress_snapshot": {
+            "history": [],
+            "current_dungeon": None,
+            "total_dungeons_completed": 0,
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+
+    undo_resp = client.post("/api/debug/undo", json={"branch_id": "main"})
+    assert undo_resp.status_code == 400
+    undo = undo_resp.get_json()
+    assert undo["ok"] is False
+    assert undo["error"] == "backup world_day invalid"
+
+    current_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert current_state["reward_points"] == 1337
+    assert directive_path.exists()
+    assert backup_path.exists()
