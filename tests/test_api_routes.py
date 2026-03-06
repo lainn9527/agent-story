@@ -766,6 +766,17 @@ class TestBranchesAPI:
         data = resp.get_json()
         assert data["error"] == "no_change"
 
+    def test_edit_rejects_non_user_target(self, client, setup_story):
+        """Editing should fail if branch_point_index does not point to a user turn."""
+        resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 0,  # target index 1 is assistant in parsed conversation
+            "edited_message": "不合法的編輯",
+        })
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["error"] == "invalid_edit_target"
+
     def test_edit_changed_message_allowed(self, client, setup_story, monkeypatch):
         """Editing a message with different content should proceed (mock LLM)."""
         import app as app_module
@@ -830,6 +841,35 @@ class TestBranchesAPI:
         # The response is SSE; check that it contains the error
         data = resp.get_data(as_text=True)
         assert "no_change" in data
+
+    def test_edit_stream_rejects_non_user_target(self, client, setup_story):
+        """Streaming edit should fail if branch_point_index does not point to a user turn."""
+        resp = client.post("/api/branches/edit/stream", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 0,  # target index 1 is assistant in parsed conversation
+            "edited_message": "不合法的編輯",
+        })
+        data = resp.get_data(as_text=True)
+        assert "invalid_edit_target" in data
+
+    def test_regenerate_rejects_invalid_target(self, client, setup_story):
+        """Regenerate should fail if branch_point_index is not a user turn followed by GM."""
+        resp = client.post("/api/branches/regenerate", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,  # index 1 is assistant, not the user turn before a GM reply
+        })
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["error"] == "invalid_regenerate_target"
+
+    def test_regenerate_stream_rejects_invalid_target(self, client, setup_story):
+        """Streaming regenerate should fail if branch_point_index is not a user turn followed by GM."""
+        resp = client.post("/api/branches/regenerate/stream", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+        })
+        data = resp.get_data(as_text=True)
+        assert "invalid_regenerate_target" in data
 
     def test_branch_config_roundtrip(self, client, setup_story):
         # GET default config

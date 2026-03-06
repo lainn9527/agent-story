@@ -3622,6 +3622,23 @@ def _next_timeline_index(story_id: str, branch_id: str, timeline: list[dict] | N
     return max_index + 1
 
 
+def _find_timeline_message(
+    timeline: list[dict],
+    index: int,
+    role: str | tuple[str, ...] | None = None,
+) -> dict | None:
+    """Return the first timeline message matching an index and optional role."""
+    for msg in timeline:
+        if msg.get("index") != index:
+            continue
+        if role:
+            roles = (role,) if isinstance(role, str) else role
+            if msg.get("role") not in roles:
+                continue
+        return msg
+    return None
+
+
 def _resolve_sibling_parent(branches: dict, parent_branch_id: str, branch_point_index: int) -> str:
     """Walk up ancestor chain for sibling detection.
 
@@ -5246,11 +5263,9 @@ def api_branches_edit():
     # No-change guard: reject if edited message is identical to original
     edit_target_index = branch_point_index + 1
     timeline = get_full_timeline(story_id, source_branch_id)
-    original_msg = next(
-        (m for m in timeline
-         if m.get("index") == edit_target_index and m.get("role") == "user"),
-        None,
-    )
+    original_msg = _find_timeline_message(timeline, edit_target_index, role="user")
+    if not original_msg:
+        return jsonify({"ok": False, "error": "invalid_edit_target"}), 400
     if original_msg and original_msg.get("content", "").strip() == edited_message:
         return jsonify({"ok": False, "error": "no_change"}), 400
 
@@ -5421,11 +5436,10 @@ def api_branches_edit_stream():
     # No-change guard: reject if edited message is identical to original
     edit_target_index = branch_point_index + 1
     timeline = get_full_timeline(story_id, source_branch_id)
-    original_msg = next(
-        (m for m in timeline
-         if m.get("index") == edit_target_index and m.get("role") == "user"),
-        None,
-    )
+    original_msg = _find_timeline_message(timeline, edit_target_index, role="user")
+    if not original_msg:
+        return Response(_sse_event({"type": "error", "message": "invalid_edit_target"}),
+                        mimetype="text/event-stream")
     if original_msg and original_msg.get("content", "").strip() == edited_message:
         return Response(_sse_event({"type": "error", "message": "no_change"}),
                         mimetype="text/event-stream")
@@ -5610,16 +5624,16 @@ def api_branches_regenerate():
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
     source_branch_id = parent_branch_id  # preserve for branch-level config copy
+    source_timeline = get_full_timeline(story_id, source_branch_id)
+    user_msg = _find_timeline_message(source_timeline, branch_point_index, role="user")
+    gm_msg = _find_timeline_message(source_timeline, branch_point_index + 1, role=("gm", "assistant"))
+    if not user_msg or not gm_msg:
+        return jsonify({"ok": False, "error": "invalid_regenerate_target"}), 400
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return jsonify({"ok": False, "error": "parent branch not found"}), 404
 
-    parent_timeline = get_full_timeline(story_id, parent_branch_id)
-    user_msg_content = ""
-    for msg in parent_timeline:
-        if msg.get("index") == branch_point_index:
-            user_msg_content = msg.get("content", "")
-            break
+    user_msg_content = user_msg.get("content", "")
 
     log.info("/api/branches/regenerate START  idx=%s", branch_point_index)
 
@@ -5767,17 +5781,18 @@ def api_branches_regenerate_stream():
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
     source_branch_id = parent_branch_id  # preserve for branch-level config copy
+    source_timeline = get_full_timeline(story_id, source_branch_id)
+    user_msg = _find_timeline_message(source_timeline, branch_point_index, role="user")
+    gm_msg = _find_timeline_message(source_timeline, branch_point_index + 1, role=("gm", "assistant"))
+    if not user_msg or not gm_msg:
+        return Response(_sse_event({"type": "error", "message": "invalid_regenerate_target"}),
+                        mimetype="text/event-stream")
     parent_branch_id = _resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
         return Response(_sse_event({"type": "error", "message": "parent branch not found"}),
                         mimetype="text/event-stream")
 
-    parent_timeline = get_full_timeline(story_id, parent_branch_id)
-    user_msg_content = ""
-    for msg in parent_timeline:
-        if msg.get("index") == branch_point_index:
-            user_msg_content = msg.get("content", "")
-            break
+    user_msg_content = user_msg.get("content", "")
 
     log.info("/api/branches/regenerate/stream START  idx=%s", branch_point_index)
 
