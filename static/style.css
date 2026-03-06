@@ -1632,9 +1632,9 @@ body {
 
 /* ---------- Debug Panel Modal ---------- */
 .debug-panel-content {
-  max-width: 860px;
+  max-width: 1080px;
   width: 95%;
-  max-height: 90vh;
+  max-height: 92vh;
   /* Allow it to be taller than default */
   display: flex;
   flex-direction: column;
