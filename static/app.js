@@ -3806,13 +3806,13 @@ function renderSummaryTimeline(summaries) {
 const _imagePollers = {};
 const _seenImageWarnings = new Set();
 
-function handleImageWarning(filename, res) {
+function handleImageWarning(filename, res, storyId = "") {
   const warning = res?.warning;
   if (!warning || typeof warning !== "object") return;
   const code = typeof warning.code === "string" && warning.code.trim()
     ? warning.code.trim()
     : "generic";
-  const key = `${filename}:${code}`;
+  const key = `${storyId || "story"}:${filename}:${code}`;
   if (_seenImageWarnings.has(key)) return;
   _seenImageWarnings.add(key);
   const message = typeof warning.message === "string" && warning.message.trim()
@@ -3836,7 +3836,7 @@ function startImagePolling(storyId, filename, imgEl) {
     }
     try {
       const res = await API.imageStatus(filename);
-      handleImageWarning(filename, res);
+      handleImageWarning(filename, res, storyId);
       if (res.ready) {
         delete _imagePollers[filename];
         imgEl.src = `/api/stories/${storyId}/images/${filename}`;
@@ -3872,7 +3872,7 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
     } else {
       // Page load — check once, don't endlessly poll
       API.imageStatus(msg.image.filename).then(res => {
-        handleImageWarning(msg.image.filename, res);
+        handleImageWarning(msg.image.filename, res, storyId);
         if (res.ready) {
           img.src = `/api/stories/${storyId}/images/${msg.image.filename}`;
           img.style.display = "";

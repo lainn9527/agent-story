@@ -74,6 +74,7 @@ def test_extract_gemini_image_bytes_missing_inline_returns_none():
 def test_is_key_error_400_only_for_specific_markers():
     assert image_gen._is_key_error(400, "API key not valid. Please pass a valid API key.") is True
     assert image_gen._is_key_error(400, "Invalid argument: responseModalities not supported") is False
+    assert image_gen._is_key_error(429, "Too Many Requests") is False
 
 
 def test_is_quota_exhausted_error_markers():
@@ -392,5 +393,91 @@ def test_download_via_gemini_sets_free_quota_warning(monkeypatch, tmp_path):
     assert ok is True
     assert dest.read_bytes() == raw
     assert calls == ["free-key", "paid-key"]
+    assert status["warning"]["code"] == image_gen.FREE_QUOTA_WARNING_CODE
+    assert status["warning"]["message"] == image_gen.FREE_QUOTA_WARNING_MESSAGE
+
+
+def test_download_via_gemini_429_treated_as_quota_error(monkeypatch, tmp_path):
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    raw = b"quota-swap-image"
+    encoded = base64.b64encode(raw).decode("ascii")
+    calls = []
+    marked = []
+
+    def _fake_urlopen(req, timeout=90, context=None):
+        headers = dict(req.header_items())
+        key = headers.get("X-goog-api-key")
+        calls.append(key)
+        if len(calls) == 1:
+            body = {
+                "error": {
+                    "code": 429,
+                    "message": "Too Many Requests",
+                    "status": "RESOURCE_EXHAUSTED",
+                }
+            }
+            raise urllib.error.HTTPError(
+                req.full_url,
+                429,
+                "Too Many Requests",
+                hdrs=None,
+                fp=io.BytesIO(json.dumps(body).encode("utf-8")),
+            )
+        return _Resp(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"inline_data": {"data": encoded, "mime_type": "image/png"}}
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(image_gen, "_load_gemini_cfg", lambda: {})
+    monkeypatch.setattr(
+        image_gen,
+        "get_available_keys",
+        lambda cfg: [
+            {"key": "free-key", "tier": "free"},
+            {"key": "paid-key", "tier": "paid"},
+        ],
+    )
+    monkeypatch.setattr(image_gen, "mark_rate_limited", lambda key: marked.append(key))
+    monkeypatch.setattr(image_gen.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(image_gen, "STORIES_DIR", str(tmp_path / "stories"))
+
+    story_id = "story-429"
+    filename = "img-429.png"
+
+    dest = tmp_path / "img.png"
+    ok = image_gen._download_via_gemini(
+        str(dest),
+        "scene prompt",
+        model_override="gemini-2.5-flash-image",
+        story_id=story_id,
+        filename=filename,
+    )
+    status = image_gen.get_image_status(story_id, filename)
+
+    assert ok is True
+    assert dest.read_bytes() == raw
+    assert calls == ["free-key", "paid-key"]
+    assert marked == ["free-key"]
     assert status["warning"]["code"] == image_gen.FREE_QUOTA_WARNING_CODE
     assert status["warning"]["message"] == image_gen.FREE_QUOTA_WARNING_MESSAGE

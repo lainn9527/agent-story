@@ -72,7 +72,7 @@ def _load_gemini_cfg() -> dict:
 
 
 def _is_key_error(http_code: int, body_text: str) -> bool:
-    if http_code in (401, 403, 429):
+    if http_code in (401, 403):
         return True
     if http_code != 400:
         return False
@@ -258,10 +258,6 @@ def _download_via_gemini(
             return True
         except urllib.error.HTTPError as e:
             body_text = e.read().decode("utf-8", errors="replace")[:300]
-            if _is_key_error(e.code, body_text):
-                mark_rate_limited(api_key)
-                log.info("    image_gen: Gemini key error HTTP %d on ...%s, trying next key", e.code, api_key[-6:])
-                continue
             if _is_quota_exhausted_error(e.code, body_text):
                 mark_rate_limited(api_key)
                 if key_info.get("tier") == "free":
@@ -272,6 +268,10 @@ def _download_via_gemini(
                         FREE_QUOTA_WARNING_MESSAGE,
                     )
                 log.info("    image_gen: Gemini quota exhausted HTTP %d on ...%s, trying next key", e.code, api_key[-6:])
+                continue
+            if _is_key_error(e.code, body_text):
+                mark_rate_limited(api_key)
+                log.info("    image_gen: Gemini key error HTTP %d on ...%s, trying next key", e.code, api_key[-6:])
                 continue
             if _is_retryable_http_error(e.code):
                 log.warning(
