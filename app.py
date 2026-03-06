@@ -95,7 +95,7 @@ from dungeon_system import (
     ensure_dungeon_templates, initialize_dungeon_progress, archive_current_dungeon,
     update_dungeon_progress, update_dungeon_area, validate_dungeon_progression,
     build_dungeon_context, copy_dungeon_progress, get_dungeon_progress_snapshot,
-    reconcile_dungeon_entry, reconcile_dungeon_exit,
+    get_current_run_context, reconcile_dungeon_entry, reconcile_dungeon_exit,
     _load_dungeon_templates, _load_dungeon_template, _load_dungeon_progress,
     _parse_rank,
 )
@@ -903,14 +903,26 @@ _NPC_TIER_TRANSLATION = str.maketrans({
     "ー": "-",
     "＋": "+",
 })
-_NPC_ARCHIVE_KEYWORDS = (
+_NPC_ARCHIVE_KIND_OFFSTAGE = "offstage"
+_NPC_ARCHIVE_KIND_TERMINAL = "terminal"
+_NPC_ARCHIVE_KINDS = {
+    _NPC_ARCHIVE_KIND_OFFSTAGE,
+    _NPC_ARCHIVE_KIND_TERMINAL,
+}
+_NPC_ARCHIVE_KEYWORDS_TERMINAL = (
     "已損毀",
     "威脅解除",
-    "已退場",
     "已失效",
     "已封印",
     "已消散",
+)
+_NPC_ARCHIVE_KEYWORDS_OFFSTAGE = (
+    "已退場",
     "已離隊",
+)
+_NPC_ARCHIVE_KEYWORDS = (
+    *_NPC_ARCHIVE_KEYWORDS_TERMINAL,
+    *_NPC_ARCHIVE_KEYWORDS_OFFSTAGE,
 )
 _NPC_UNARCHIVE_KEYWORDS = (
     "修復",
@@ -971,22 +983,32 @@ def _normalize_npc_lifecycle_status(raw_status: object) -> str | None:
     return parse_npc_lifecycle_status(raw_status)
 
 
+def _normalize_npc_archive_kind(raw_kind: object) -> str | None:
+    if not isinstance(raw_kind, str):
+        return None
+    kind = raw_kind.strip().lower()
+    return kind if kind in _NPC_ARCHIVE_KINDS else None
+
+
 def _derive_npc_lifecycle_from_current_status(
     current_status: object,
     existing_status: object,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, str | None]:
     """Derive lifecycle from current_status only; fallback to existing lifecycle."""
     existing = _normalize_npc_lifecycle_status(existing_status) or "active"
     status_text = str(current_status or "").strip()
     if not status_text:
-        return existing, None
+        return existing, None, None
     for kw in _NPC_UNARCHIVE_KEYWORDS:
         if kw in status_text:
-            return "active", kw
-    for kw in _NPC_ARCHIVE_KEYWORDS:
+            return "active", kw, None
+    for kw in _NPC_ARCHIVE_KEYWORDS_TERMINAL:
         if kw in status_text:
-            return "archived", kw
-    return existing, None
+            return "archived", kw, _NPC_ARCHIVE_KIND_TERMINAL
+    for kw in _NPC_ARCHIVE_KEYWORDS_OFFSTAGE:
+        if kw in status_text:
+            return "archived", kw, _NPC_ARCHIVE_KIND_OFFSTAGE
+    return existing, None, None
 
 
 def _classify_npc(npc: dict, rels: dict) -> str:
@@ -1260,6 +1282,20 @@ def _sync_state_db_from_state(story_id: str, branch_id: str, state: dict):
         )
     except Exception:
         log.warning("state_db sync failed for %s/%s", story_id, branch_id, exc_info=True)
+
+
+def _clean_relationship_archive_note(story_id: str, branch_id: str, npc_name: str):
+    """Remove archive note suffix from an NPC relationship when the NPC returns."""
+    state = _load_character_state(story_id, branch_id)
+    rels = state.get("relationships")
+    if not isinstance(rels, dict):
+        return
+    value = rels.get(npc_name)
+    if not isinstance(value, str) or " (已歸檔)" not in value:
+        return
+    rels[npc_name] = value.replace(" (已歸檔)", "")
+    _save_json(_story_character_state_path(story_id, branch_id), state)
+    _sync_state_db_from_state(story_id, branch_id, state)
 
 
 def _extract_state_must_include_keys(
@@ -1710,7 +1746,14 @@ def _load_npcs(story_id: str, branch_id: str = "main", include_archived: bool = 
     return active_npcs
 
 
-def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
+def _save_npc(
+    story_id: str,
+    npc_data: dict,
+    branch_id: str = "main",
+    origin_dungeon_id: str | None = None,
+    origin_run_id: str | None = None,
+    archive_kind: str | None = None,
+):
     """Save or update an NPC entry. Matches by 'name' field."""
     npcs = _load_npcs(story_id, branch_id, include_archived=True)
     npc_data = dict(npc_data)  # Shallow copy: normalization below must not mutate caller data.
@@ -1739,15 +1782,35 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
             existing_npc = existing
             break
 
+    existing_origin_dungeon_id = str((existing_npc or {}).get("origin_dungeon_id") or "").strip()
+    existing_origin_run_id = str((existing_npc or {}).get("origin_run_id") or "").strip()
+    if origin_dungeon_id and not existing_origin_dungeon_id:
+        npc_data["origin_dungeon_id"] = origin_dungeon_id
+    if origin_run_id and not existing_origin_run_id:
+        npc_data["origin_run_id"] = origin_run_id
+
     explicit_lifecycle = _normalize_npc_lifecycle_status(npc_data.get("lifecycle_status"))
     existing_lifecycle = _normalize_npc_lifecycle_status(
         existing_npc.get("lifecycle_status") if existing_npc else None
     )
+    existing_archive_kind = _normalize_npc_archive_kind(
+        existing_npc.get("archive_kind") if existing_npc else None
+    )
+    normalized_archive_kind = _normalize_npc_archive_kind(archive_kind)
+    if normalized_archive_kind is None:
+        normalized_archive_kind = _normalize_npc_archive_kind(npc_data.get("archive_kind"))
+    incoming_archive_requested = explicit_lifecycle == "archived"
     if explicit_lifecycle:
         npc_data["lifecycle_status"] = explicit_lifecycle
         if explicit_lifecycle == "active":
             npc_data["archived_reason"] = None
+            npc_data["archive_kind"] = None
         else:
+            npc_data["archive_kind"] = (
+                normalized_archive_kind
+                or existing_archive_kind
+                or _NPC_ARCHIVE_KIND_TERMINAL
+            )
             explicit_reason = str(npc_data.get("archived_reason") or "").strip()
             if explicit_reason:
                 npc_data["archived_reason"] = explicit_reason
@@ -1756,12 +1819,20 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
             else:
                 npc_data["archived_reason"] = "explicit"
     else:
-        derived_lifecycle, matched_kw = _derive_npc_lifecycle_from_current_status(
+        derived_lifecycle, matched_kw, derived_archive_kind = _derive_npc_lifecycle_from_current_status(
             npc_data.get("current_status"),
             existing_lifecycle,
         )
+        if derived_lifecycle == "archived" and matched_kw:
+            incoming_archive_requested = True
         npc_data["lifecycle_status"] = derived_lifecycle
         if derived_lifecycle == "archived":
+            npc_data["archive_kind"] = (
+                derived_archive_kind
+                or normalized_archive_kind
+                or existing_archive_kind
+                or _NPC_ARCHIVE_KIND_TERMINAL
+            )
             if matched_kw:
                 npc_data["archived_reason"] = f"current_status:{matched_kw}"
             elif existing_npc and existing_npc.get("archived_reason"):
@@ -1770,6 +1841,25 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
                 npc_data["archived_reason"] = "current_status"
         else:
             npc_data["archived_reason"] = None
+            npc_data["archive_kind"] = None
+
+    reactivated = False
+    if (
+        existing_npc
+        and existing_lifecycle == "archived"
+        and existing_archive_kind == _NPC_ARCHIVE_KIND_OFFSTAGE
+        and origin_run_id
+        and existing_origin_run_id == origin_run_id
+        and not incoming_archive_requested
+    ):
+        npc_data["lifecycle_status"] = "active"
+        npc_data["archive_kind"] = None
+        npc_data["archived_reason"] = None
+        reactivated = True
+    elif existing_npc and existing_lifecycle == "archived" and npc_data.get("lifecycle_status") == "active":
+        reactivated = True
+    if reactivated and "current_status" not in npc_data:
+        npc_data["current_status"] = ""
 
     # Generate id if not present
     if "id" not in npc_data:
@@ -1784,11 +1874,15 @@ def _save_npc(story_id: str, npc_data: dict, branch_id: str = "main"):
         npcs[existing_index] = merged
         _save_json(_story_npcs_path(story_id, branch_id), npcs)
         _sync_state_db_npc_entry(story_id, branch_id, merged)
+        if reactivated:
+            _clean_relationship_archive_note(story_id, branch_id, name)
         return
 
     npcs.append(npc_data)
     _save_json(_story_npcs_path(story_id, branch_id), npcs)
     _sync_state_db_npc_entry(story_id, branch_id, npc_data)
+    if reactivated:
+        _clean_relationship_archive_note(story_id, branch_id, name)
 
 
 def _copy_npcs_to_branch(story_id: str, from_branch_id: str, to_branch_id: str):
@@ -3367,6 +3461,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
         return
 
     _mark_extract_pending(story_id, branch_id, msg_index)
+    run_ctx = get_current_run_context(story_id, branch_id)
 
     def _do_extract():
         from llm_bridge import call_oneshot
@@ -3727,7 +3822,13 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
             # NPCs — _save_npc has built-in merge by name
             for npc in data.get("npcs", []):
                 if npc.get("name", "").strip():
-                    _save_npc(story_id, npc, branch_id)
+                    _save_npc(
+                        story_id,
+                        npc,
+                        branch_id,
+                        origin_dungeon_id=run_ctx["dungeon_id"] if run_ctx else None,
+                        origin_run_id=run_ctx["run_id"] if run_ctx else None,
+                    )
                     saved_counts["npcs"] += 1
 
             # State — prefer state_ops, fallback to legacy state (skip if regex handled STATE tag)
@@ -4922,8 +5023,15 @@ def _process_gm_response(
         _save_branch_lore_entry(story_id, branch_id, lore_entry)
 
     gm_response, npc_updates = _extract_npc_tag(gm_response)
+    run_ctx = get_current_run_context(story_id, branch_id)
     for npc_update in npc_updates:
-        _save_npc(story_id, npc_update, branch_id)
+        _save_npc(
+            story_id,
+            npc_update,
+            branch_id,
+            origin_dungeon_id=run_ctx["dungeon_id"] if run_ctx else None,
+            origin_run_id=run_ctx["run_id"] if run_ctx else None,
+        )
 
     gm_response, event_list = _extract_event_tag(gm_response)
     for event_data in event_list:

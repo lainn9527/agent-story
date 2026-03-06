@@ -105,7 +105,7 @@ def test_apply_cleanup_archive_npcs(branch_dir):
     (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     ops = {
-        "archive_npcs": [{"name": "猿飛日斬", "reason": "副本已結束"}],
+        "archive_npcs": [{"name": "猿飛日斬", "archive_kind": "offstage", "reason": "副本已結束"}],
         "merge_npcs": [],
         "resolve_events": [],
         "remove_inventory": [],
@@ -117,6 +117,7 @@ def test_apply_cleanup_archive_npcs(branch_dir):
     loaded = json.loads((branch_dir / "npcs.json").read_text(encoding="utf-8"))
     by_name = {n["name"]: n for n in loaded}
     assert by_name["猿飛日斬"].get("lifecycle_status") == "archived"
+    assert by_name["猿飛日斬"].get("archive_kind") == "offstage"
     assert by_name["小琳"].get("lifecycle_status") != "archived"
 
 
@@ -143,6 +144,28 @@ def test_apply_cleanup_merge_npcs(branch_dir):
     by_name = {n["name"]: n for n in loaded}
     assert "旗木卡卡西" in by_name
     assert by_name["卡卡西"].get("lifecycle_status") == "archived"
+    assert by_name["卡卡西"].get("archive_kind") == "terminal"
+
+
+def test_apply_cleanup_invalid_archive_kind_defaults_to_terminal(branch_dir):
+    npcs = [
+        {"name": "阿喪", "id": "npc_1", "role": "隊友", "current_status": "副本已結束"},
+    ]
+    (branch_dir / "npcs.json").write_text(json.dumps(npcs, ensure_ascii=False, indent=2), encoding="utf-8")
+    state = {"current_phase": "主神空間", "inventory": {}, "relationships": {}}
+    (branch_dir / "character_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ops = {
+        "archive_npcs": [{"name": "阿喪", "archive_kind": "oops", "reason": "cleanup"}],
+        "merge_npcs": [],
+        "resolve_events": [],
+        "remove_inventory": [],
+        "clean_relationships": [],
+    }
+    state_cleanup._apply_cleanup_operations(STORY_ID, BRANCH_ID, ops)
+
+    loaded = json.loads((branch_dir / "npcs.json").read_text(encoding="utf-8"))
+    assert loaded[0]["archive_kind"] == "terminal"
 
 
 def test_apply_cleanup_resolve_events(branch_dir):

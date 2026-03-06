@@ -221,6 +221,24 @@ def test_reconcile_entry_uses_pre_transition_baseline(tmp_path):
     assert current["reward_points_on_enter"] == 100
 
 
+def test_get_current_run_context_returns_none_without_active_dungeon(tmp_path):
+    _write_json(_branch_dir(tmp_path) / "character_state.json", _base_state())
+
+    assert dungeon_system.get_current_run_context(STORY_ID, BRANCH_ID) is None
+
+
+def test_get_current_run_context_returns_dungeon_id_and_run_id(tmp_path):
+    _write_json(_branch_dir(tmp_path) / "character_state.json", _base_state(current_dungeon="異形"))
+    _write_json(_branch_dir(tmp_path) / "dungeon_progress.json", _active_progress())
+
+    run_ctx = dungeon_system.get_current_run_context(STORY_ID, BRANCH_ID)
+
+    assert run_ctx == {
+        "dungeon_id": "alien",
+        "run_id": "2026-03-07T00:00:00+00:00",
+    }
+
+
 def test_reconcile_exit_archives_with_new_state_and_initializes_switch(tmp_path):
     _write_json(_branch_dir(tmp_path) / "character_state.json", _base_state(current_dungeon="異形"))
     _write_json(_branch_dir(tmp_path) / "dungeon_progress.json", _active_progress())
