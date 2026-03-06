@@ -1050,7 +1050,7 @@ function _btFindDeepestLeaf(startId, childrenOf) {
     const kids = (childrenOf[id] || []).filter(k => !k.deleted && !k.merged && !k.pruned);
     if (!kids.length) {
       if (depth > bestDepth || (depth === bestDepth && best &&
-          (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
+        (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
         best = id; bestDepth = depth;
       }
       return;
@@ -1546,79 +1546,79 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
   try {
 
-  const switchRes = await API.switchBranch(branchId);
-  if (!switchRes.ok) {
-    showAlert(switchRes.error || "切換分支失敗");
-    return;
-  }
-  currentBranchId = branchId;
-  updateBranchIndicator();
-  renderBranchList();
+    const switchRes = await API.switchBranch(branchId);
+    if (!switchRes.ok) {
+      showAlert(switchRes.error || "切換分支失敗");
+      return;
+    }
+    currentBranchId = branchId;
+    updateBranchIndicator();
+    renderBranchList();
 
-  if (scrollToIndex != null || preserveScroll) {
-    $messages.style.minHeight = $messages.scrollHeight + "px";
-  }
+    if (scrollToIndex != null || preserveScroll) {
+      $messages.style.minHeight = $messages.scrollHeight + "px";
+    }
 
-  if (isAutoBranch(branchId)) {
-    await loadMessages(branchId, { tail: 100 });
-  } else {
-    await loadMessages(branchId);
-  }
-  const status = await API.status(branchId);
-  renderCharacterStatus(status);
-  loadNpcs();
-  loadEvents();
-  loadDungeonProgress();
-  loadSummaries();
-  loadFateModeStatus();
-  loadDiceCheatStatus();
-  loadPistolModeStatus();
-  loadImageGenAddonState();
-
-  // Show/hide "load earlier" button for auto branches with truncated messages
-  if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
-    $loadBtn.style.display = "";
-    $loadBtn.onclick = async () => {
-      $loadBtn.style.display = "none";
-      await loadMessages(branchId);
-      scrollToBottom();
-    };
-  } else {
-    $loadBtn.style.display = "none";
-  }
-
-  if (isAutoBranch(branchId)) {
-    startLivePolling(branchId);
-  } else {
-    stopLivePolling();
-  }
-
-  if (forcePreserve) {
-    // Keep current scroll position — user may have scrolled during streaming
-    const currentScroll = container.scrollTop;
-    requestAnimationFrame(() => {
-      container.scrollTop = currentScroll;
-      $messages.style.minHeight = "";
-      fadeIn();
-    });
-    return;
-  }
-
-  if (preserveScroll) {
-    if (isAtBottom) {
-      scrollToBottom();
-      $messages.style.minHeight = "";
-      requestAnimationFrame(() => { fadeIn(); });
+    if (isAutoBranch(branchId)) {
+      await loadMessages(branchId, { tail: 100 });
     } else {
-      container.scrollTop = savedScrollTop;
+      await loadMessages(branchId);
+    }
+    const status = await API.status(branchId);
+    renderCharacterStatus(status);
+    loadNpcs();
+    loadEvents();
+    loadDungeonProgress();
+    loadSummaries();
+    loadFateModeStatus();
+    loadDiceCheatStatus();
+    loadPistolModeStatus();
+    loadImageGenAddonState();
+
+    // Show/hide "load earlier" button for auto branches with truncated messages
+    if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
+      $loadBtn.style.display = "";
+      $loadBtn.onclick = async () => {
+        $loadBtn.style.display = "none";
+        await loadMessages(branchId);
+        scrollToBottom();
+      };
+    } else {
+      $loadBtn.style.display = "none";
+    }
+
+    if (isAutoBranch(branchId)) {
+      startLivePolling(branchId);
+    } else {
+      stopLivePolling();
+    }
+
+    if (forcePreserve) {
+      // Keep current scroll position — user may have scrolled during streaming
+      const currentScroll = container.scrollTop;
       requestAnimationFrame(() => {
-        container.scrollTop = savedScrollTop;
+        container.scrollTop = currentScroll;
         $messages.style.minHeight = "";
         fadeIn();
       });
+      return;
     }
-    return;
-  }
+
+    if (preserveScroll) {
+      if (isAtBottom) {
+        scrollToBottom();
+        $messages.style.minHeight = "";
+        requestAnimationFrame(() => { fadeIn(); });
+      } else {
+        container.scrollTop = savedScrollTop;
+        requestAnimationFrame(() => {
+          container.scrollTop = savedScrollTop;
+          $messages.style.minHeight = "";
+          fadeIn();
+        });
+      }
+      return;
+    }
 
   } catch (err) {
     fadeIn();
@@ -1852,22 +1852,47 @@ async function submitEdit(msg, newText) {
 async function regenerateGmMessage(msg, msgEl) {
 
   const parentBranchId = msg.owner_branch_id || currentBranchId;
-  const branchPointIndex = msg.index - 1;
-
-  const contentEl = msgEl.querySelector(".content");
-  const actionBtn = msgEl.querySelector(".msg-action-btn");
-  if (contentEl) {
-    contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
-  }
-  if (actionBtn) actionBtn.style.display = "none";
-  $sendBtn.disabled = true;
+  const branchPointIndex = (msg.role === 'user') ? msg.index : msg.index - 1;
 
   // Truncate subsequent messages in DOM
-  while (msgEl.nextSibling) {
-    msgEl.nextSibling.remove();
+  let sibling = msgEl.nextSibling;
+  while (sibling) {
+    let next = sibling.nextSibling;
+    sibling.remove();
+    sibling = next;
   }
 
-  showPlaceholderSwitcher(msgEl, msg.index);
+  let contentEl, actionBtn, targetMsgEl;
+  if (msg.role === 'user') {
+    // Create NEW GM bubble for results — never write into user's message
+    const gmIndex = msg.index + 1;
+    targetMsgEl = document.createElement("div");
+    targetMsgEl.className = "message gm";
+    targetMsgEl.dataset.index = gmIndex;
+    targetMsgEl.innerHTML = `
+      <div class="role-tag">GM</div>
+      <span class="msg-index">#${gmIndex}</span>
+      <div class="content">
+        <span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>
+      </div>
+    `;
+    $messages.appendChild(targetMsgEl);
+    contentEl = targetMsgEl.querySelector(".content");
+    actionBtn = null; // no action btn on fresh bubble
+  } else {
+    // Standard behavior for existing GM message
+    targetMsgEl = msgEl;
+    contentEl = msgEl.querySelector(".content");
+    actionBtn = msgEl.querySelector(".msg-action-btn");
+    if (contentEl) {
+      contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
+    }
+    if (actionBtn) actionBtn.style.display = "none";
+  }
+
+  $sendBtn.disabled = true;
+
+  showPlaceholderSwitcher(targetMsgEl, branchPointIndex + 1);
 
   if (activeStreamController) {
     activeStreamController.abort();
@@ -1883,7 +1908,7 @@ async function regenerateGmMessage(msg, msgEl) {
         parent_branch_id: parentBranchId,
         branch_point_index: branchPointIndex,
       },
-      // onChunk — stream directly into existing bubble
+      // onChunk — stream into GM bubble (never user bubble)
       (chunk) => {
         streamedText += chunk;
         if (contentEl) contentEl.innerHTML = markdownToHtml(stripHiddenTags(streamedText));
@@ -2022,6 +2047,9 @@ function renderMessages(messages) {
       makeGmOptionsClickable(content);
     }
 
+    const actionsContainer = document.createElement("div");
+    actionsContainer.className = "msg-actions";
+
     const actionBtn = document.createElement("button");
     actionBtn.className = "msg-action-btn";
     if (msg.role === "user") {
@@ -2032,6 +2060,21 @@ function renderMessages(messages) {
         haptic();
         startEditing(el, msg);
       });
+      actionsContainer.appendChild(actionBtn);
+
+      // Add Regen/Retry button if it's the last user message (recovery from generation failure)
+      if (msg === messages[messages.length - 1]) {
+        const retryBtn = document.createElement("button");
+        retryBtn.className = "msg-action-btn msg-regen-btn";
+        retryBtn.textContent = "\u21BB";
+        retryBtn.title = "重新生成 (補發)";
+        retryBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          haptic();
+          regenerateGmMessage(msg, el);
+        });
+        actionsContainer.appendChild(retryBtn);
+      }
     } else {
       actionBtn.textContent = "\u21BB";
       actionBtn.title = "重新生成";
@@ -2040,6 +2083,7 @@ function renderMessages(messages) {
         haptic();
         regenerateGmMessage(msg, el);
       });
+      actionsContainer.appendChild(actionBtn);
     }
 
     // Bug report button (#6)
@@ -2051,6 +2095,7 @@ function renderMessages(messages) {
       e.stopPropagation();
       showReportModal(msg);
     });
+    actionsContainer.appendChild(reportBtn);
 
     el.appendChild(roleTag);
     el.appendChild(indexLabel);
@@ -2061,8 +2106,7 @@ function renderMessages(messages) {
       renderMessageImage(el, msg, currentStoryId);
     }
 
-    el.appendChild(actionBtn);
-    el.appendChild(reportBtn);
+    el.appendChild(actionsContainer);
 
     if (hasSwitcher) {
       const group = siblingGroups[sibKey];
@@ -3640,7 +3684,7 @@ async function savePistolPrefs() {
     const prev = await fetch("/api/nsfw-preferences");
     const prevData = await prev.json();
     chipCounts = prevData.chip_counts || {};
-  } catch (_) {}
+  } catch (_) { }
   for (const c of chipsFlat) {
     chipCounts[c] = (chipCounts[c] || 0) + 1;
   }
@@ -4107,12 +4151,14 @@ async function sendMessage() {
         container.removeEventListener('scroll', scrollHandler);
         gmEl.remove();
         appendSystemError(msg || "未知錯誤");
+        _addRetryButtonToLastUserMessage();
       }
     );
   } catch (err) {
     container.removeEventListener('scroll', scrollHandler);
     gmEl.remove();
     appendSystemError("網路錯誤：" + err.message);
+    _addRetryButtonToLastUserMessage();
   }
 
   isSending = false;
@@ -4156,6 +4202,9 @@ function appendMessage(msg) {
     makeGmOptionsClickable(content);
   }
 
+  const actionsContainer = document.createElement("div");
+  actionsContainer.className = "msg-actions";
+
   const actionBtn = document.createElement("button");
   actionBtn.className = "msg-action-btn";
   if (msg.role === "user") {
@@ -4165,6 +4214,7 @@ function appendMessage(msg) {
       e.stopPropagation();
       startEditing(el, msg);
     });
+    actionsContainer.appendChild(actionBtn);
   } else {
     actionBtn.textContent = "\u21BB";
     actionBtn.title = "重新生成";
@@ -4172,6 +4222,7 @@ function appendMessage(msg) {
       e.stopPropagation();
       regenerateGmMessage(msg, el);
     });
+    actionsContainer.appendChild(actionBtn);
   }
 
   const reportBtn = document.createElement("button");
@@ -4182,6 +4233,7 @@ function appendMessage(msg) {
     e.stopPropagation();
     showReportModal(msg);
   });
+  actionsContainer.appendChild(reportBtn);
 
   el.appendChild(roleTag);
   el.appendChild(indexLabel);
@@ -4192,8 +4244,7 @@ function appendMessage(msg) {
     renderMessageImage(el, msg, currentStoryId);
   }
 
-  el.appendChild(actionBtn);
-  el.appendChild(reportBtn);
+  el.appendChild(actionsContainer);
   $messages.appendChild(el);
   return el;
 }
@@ -4204,6 +4255,31 @@ function appendSystemError(text) {
   el.innerHTML = `<div class="role-tag">系統</div><div class="content"><span class="god-hint">【系統錯誤】</span> ${escapeHtml(text)}</div>`;
   $messages.appendChild(el);
   scrollToBottom();
+}
+
+function _addRetryButtonToLastUserMessage() {
+  const lastMsg = allMessages[allMessages.length - 1];
+  if (!lastMsg || lastMsg.role !== 'user') return;
+
+  const lastEl = $messages.querySelector(`.message[data-index="${lastMsg.index}"]`);
+  if (!lastEl) return;
+
+  const actionsContainer = lastEl.querySelector(".msg-actions");
+  if (!actionsContainer) return;
+
+  // Don't add if already exists
+  if (actionsContainer.querySelector(".msg-regen-btn")) return;
+
+  const retryBtn = document.createElement("button");
+  retryBtn.className = "msg-action-btn msg-regen-btn";
+  retryBtn.textContent = "\u21BB";
+  retryBtn.title = "重新生成 (補發)";
+  retryBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    haptic();
+    regenerateGmMessage(lastMsg, lastEl);
+  });
+  actionsContainer.appendChild(retryBtn);
 }
 
 // ---------------------------------------------------------------------------
