@@ -1710,6 +1710,17 @@ body {
   margin-bottom: 4px;
 }
 
+.debug-chat-msg ul,
+.debug-chat-msg ol {
+  padding-left: 24px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.debug-chat-msg li {
+  margin-bottom: 4px;
+}
+
 .debug-thinking {
   font-style: italic;
   color: var(--text-dim);

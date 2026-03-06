@@ -4590,7 +4590,7 @@ function _renderInlineProposalCards(container) {
   });
 
   _debugPendingDirectives.forEach((d, i) => {
-    const text = d.instruction || "";
+    const text = (d.instruction || "").trim();
     const card = document.createElement("div");
     card.className = "proposal-card";
     card.innerHTML = `
