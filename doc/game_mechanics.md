@@ -107,6 +107,8 @@
 
 `_apply_state_update()` 內會呼叫 `validate_dungeon_progression()`：
 
+- 若 `current_dungeon` 是透過敘事/state 路徑被寫入，而不是 `/api/dungeon/enter`，系統會先做 reconciliation，自動補齊 `dungeon_progress.json`
+- 進入副本的 reconciliation 發生在 validation 前；離開/切換副本的 archive 發生在 validation 後
 - 限制每副本可提升的 rank / gene lock budget
 - 超限會被 cap 並回寫
 
@@ -291,6 +293,15 @@
 - `60% ~ 99%`：可提前回歸，獎勵 50%
 - `100%`：正常回歸
 - 最終獎勵會套 difficulty scaling
+
+### 11.4 Narrative Path Reconciliation
+
+- 顯式 API 路徑（`/api/dungeon/enter` / `/api/dungeon/return`）仍是主路徑
+- safety net 會監看 `character_state.current_dungeon` 的轉場：
+  - `"" -> "副本名"`：若 progress 尚未 active，依模板名稱對照自動初始化
+  - `"副本名" -> ""`：在 final-turn validation 後自動 archive
+  - `"副本A" -> "副本B"`：先 archive 舊副本，再初始化新副本
+- 如果副本名稱找不到 template，reconciliation 只記 log，不會憑空建立進度
 
 ---
 

@@ -80,6 +80,18 @@ def _load_dungeon_template(story_id: str, dungeon_id: str) -> Optional[dict]:
     return None
 
 
+def resolve_dungeon_id_by_name(story_id: str, display_name: str) -> Optional[str]:
+    """Resolve a dungeon display name (e.g. 火影忍者) to template id (e.g. naruto)."""
+    target = (display_name or "").strip()
+    if not target:
+        return None
+    templates = _load_dungeon_templates(story_id)
+    for dungeon in templates.get("dungeons", []):
+        if (dungeon.get("name") or "").strip() == target:
+            return dungeon.get("id")
+    return None
+
+
 def _load_dungeon_progress(story_id: str, branch_id: str) -> Optional[dict]:
     """Load dungeon progress for a branch."""
     path = os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
@@ -160,13 +172,28 @@ def _format_gene_lock(percentage: int) -> str:
 
 # ========== Dungeon Lifecycle ==========
 
-def initialize_dungeon_progress(story_id: str, branch_id: str, dungeon_id: str):
+def _copy_state_override(state_override: Optional[dict]) -> Optional[dict]:
+    if isinstance(state_override, dict):
+        return copy.deepcopy(state_override)
+    return None
+
+
+def _current_dungeon_name(state: Optional[dict]) -> str:
+    return str((state or {}).get("current_dungeon") or "").strip()
+
+
+def initialize_dungeon_progress(
+    story_id: str,
+    branch_id: str,
+    dungeon_id: str,
+    state_override: Optional[dict] = None,
+):
     """Initialize dungeon progress when entering a dungeon."""
     template = _load_dungeon_template(story_id, dungeon_id)
     if not template:
         raise ValueError(f"Dungeon template not found: {dungeon_id}")
 
-    state = _load_character_state(story_id, branch_id)
+    state = _copy_state_override(state_override) or _load_character_state(story_id, branch_id)
 
     # Find initial areas (status = "discovered")
     initial_areas = [a["id"] for a in template.get("areas", []) if a.get("initial_status") == "discovered"]
@@ -209,7 +236,12 @@ def initialize_dungeon_progress(story_id: str, branch_id: str, dungeon_id: str):
     log.info(f"Initialized dungeon progress: {story_id}/{branch_id} → {dungeon_id}")
 
 
-def archive_current_dungeon(story_id: str, branch_id: str, exit_reason: str = "normal"):
+def archive_current_dungeon(
+    story_id: str,
+    branch_id: str,
+    exit_reason: str = "normal",
+    state_override: Optional[dict] = None,
+):
     """Archive current dungeon to history when returning to Main God Space."""
     progress = _load_dungeon_progress(story_id, branch_id)
     if not progress or not progress.get("current_dungeon"):
@@ -217,7 +249,7 @@ def archive_current_dungeon(story_id: str, branch_id: str, exit_reason: str = "n
         return
 
     current = progress.pop("current_dungeon")
-    state = _load_character_state(story_id, branch_id)
+    state = _copy_state_override(state_override) or _load_character_state(story_id, branch_id)
 
     history_entry = {
         "dungeon_id": current["dungeon_id"],
@@ -238,6 +270,69 @@ def archive_current_dungeon(story_id: str, branch_id: str, exit_reason: str = "n
     progress["total_dungeons_completed"] = len(progress["history"])
     _save_dungeon_progress(story_id, branch_id, progress)
     log.info(f"Archived dungeon: {current['dungeon_id']} (reason: {exit_reason})")
+
+
+def reconcile_dungeon_entry(story_id: str, branch_id: str, old_state: dict, new_state: dict):
+    """Initialize progress when state transitions into a dungeon outside explicit APIs."""
+    old_dungeon = _current_dungeon_name(old_state)
+    new_dungeon = _current_dungeon_name(new_state)
+    if not new_dungeon or new_dungeon == old_dungeon:
+        return
+
+    progress = _load_dungeon_progress(story_id, branch_id)
+    if progress and progress.get("current_dungeon"):
+        return
+
+    dungeon_id = resolve_dungeon_id_by_name(story_id, new_dungeon)
+    if not dungeon_id:
+        log.info("reconcile_entry: no template for %r, skipping", new_dungeon)
+        return
+
+    try:
+        initialize_dungeon_progress(
+            story_id,
+            branch_id,
+            dungeon_id,
+            state_override=old_state,
+        )
+    except Exception:
+        log.warning("reconcile_entry: failed to init %s", dungeon_id, exc_info=True)
+
+
+def reconcile_dungeon_exit(story_id: str, branch_id: str, old_state: dict, new_state: dict):
+    """Archive old progress after validation and initialize the new dungeon on switch."""
+    old_dungeon = _current_dungeon_name(old_state)
+    new_dungeon = _current_dungeon_name(new_state)
+    if old_dungeon == new_dungeon:
+        return
+
+    if old_dungeon:
+        progress = _load_dungeon_progress(story_id, branch_id)
+        if progress and progress.get("current_dungeon"):
+            archive_current_dungeon(
+                story_id,
+                branch_id,
+                exit_reason="narrative",
+                state_override=new_state,
+            )
+
+    if new_dungeon:
+        progress = _load_dungeon_progress(story_id, branch_id)
+        if progress and progress.get("current_dungeon"):
+            return
+        dungeon_id = resolve_dungeon_id_by_name(story_id, new_dungeon)
+        if not dungeon_id:
+            log.info("reconcile_exit: no template for %r, skipping", new_dungeon)
+            return
+        try:
+            initialize_dungeon_progress(
+                story_id,
+                branch_id,
+                dungeon_id,
+                state_override=new_state,
+            )
+        except Exception:
+            log.warning("reconcile_exit: failed to init %s", dungeon_id, exc_info=True)
 
 
 # ========== Progress Updates (called by async tag extraction) ==========

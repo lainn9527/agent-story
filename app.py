@@ -95,6 +95,7 @@ from dungeon_system import (
     ensure_dungeon_templates, initialize_dungeon_progress, archive_current_dungeon,
     update_dungeon_progress, update_dungeon_area, validate_dungeon_progression,
     build_dungeon_context, copy_dungeon_progress, get_dungeon_progress_snapshot,
+    reconcile_dungeon_entry, reconcile_dungeon_exit,
     _load_dungeon_templates, _load_dungeon_template, _load_dungeon_progress,
     _parse_rank,
 )
@@ -3343,12 +3344,16 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
                 return
             log.info("    state_normalize: remapped %d unknown keys, re-applying", len(unknown))
             norm_schema = _load_character_schema(story_id)
+            pre_state = _load_character_state(story_id, branch_id)
             normalized = _run_state_gate(
                 normalized, norm_schema,
-                _load_character_state(story_id, branch_id),
+                pre_state,
                 label="state_gate(normalize)", allow_llm=False,
                 story_id=story_id, branch_id=branch_id)
             _apply_state_update_inner(story_id, branch_id, normalized, norm_schema)
+            post_state = _load_character_state(story_id, branch_id)
+            reconcile_dungeon_entry(story_id, branch_id, pre_state, post_state)
+            reconcile_dungeon_exit(story_id, branch_id, pre_state, post_state)
         except Exception as e:
             log.info("    state_normalize: failed (%s), skipping", e)
 
@@ -4157,8 +4162,9 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
 
     1. Runs deterministic validation gate (if enabled)
     2. Immediately applies the (possibly sanitized) update
-    3. Validates dungeon growth constraints (hard cap)
-    4. Kicks off background LLM normalization for non-standard fields
+    3. Reconciles dungeon entry/exit for narrative-path transitions
+    4. Validates dungeon growth constraints (hard cap)
+    5. Kicks off background LLM normalization for non-standard fields
     """
     schema = _load_character_schema(story_id)
 
@@ -4175,10 +4181,19 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     # Apply immediately
     _apply_state_update_inner(story_id, branch_id, update, schema)
 
-    # Hard constraint validation (dungeon system)
     new_state = _load_character_state(story_id, branch_id)
+
+    # Initialize dungeon progress before validation so entry turns see the budget.
+    reconcile_dungeon_entry(story_id, branch_id, old_state, new_state)
+
+    # Hard constraint validation (dungeon system)
     validate_dungeon_progression(story_id, branch_id, new_state, old_state)
+
+    # Archive old dungeon after validation so exit turns record capped growth.
+    reconcile_dungeon_exit(story_id, branch_id, old_state, new_state)
+
     _save_json(_story_character_state_path(story_id, branch_id), new_state)
+    _sync_state_db_from_state(story_id, branch_id, new_state)
 
     # Background: normalize non-standard fields and re-apply
     _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))

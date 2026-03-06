@@ -129,6 +129,7 @@ Browser (static/app.js, templates/index.html)
 - 直接從 GM 回覆內的顯式 tag 解析並套用。
 - 優先保證即時可見狀態。
 - `_apply_state_update_inner()` 套用 canonical `character_state.json` 後，會同步 `replace_categories_batch(...)` 更新 `state.db`（inventory/ability/relationship/mission/system）。
+- wrapper `_apply_state_update()` 會額外處理 `current_dungeon` reconciliation：把 narrative/state 路徑的副本轉場收斂到 `dungeon_progress.json`，並在 growth cap 後重新同步 state.db。
 - `_save_npc()` 與 `/api/npcs/<id> DELETE` 會同步 upsert/delete `state.db` 的 npc 類別，確保索引與 `npcs.json` 一致。
 
 ### 非同步抽取（背景）
