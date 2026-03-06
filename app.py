@@ -7590,8 +7590,8 @@ def api_debug_chat_stream():
                     display_text, proposals = _extract_debug_action_tags(response_raw)
                     display_text, directives = _extract_debug_directive_tags(display_text)
                     display_text = display_text.strip()
-                    if display_text:
-                        _append_debug_chat_message(story_id, debug_unit_id, "assistant", display_text)
+                    if response_raw:
+                        _append_debug_chat_message(story_id, debug_unit_id, "assistant", response_raw)
                     done_payload = {
                         "type": "done",
                         "response": display_text,

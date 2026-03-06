@@ -4509,12 +4509,46 @@ init();
 // Debug Panel Layout
 // ==========================================
 
+function _parseDebugContent(text) {
+  if (!text) return { cleanText: "", proposals: [], directives: [] };
+  const proposals = [];
+  const directives = [];
+
+  // Extract actions
+  let cleanText = text.replace(/<!--DEBUG_ACTION\s+([\s\S]*?)\s+DEBUG_ACTION-->/g, (match, jsonStr) => {
+    try {
+      const p = JSON.parse(jsonStr);
+      if (p.type === "state_patch" && typeof p.update === "object") {
+        for (const [key, value] of Object.entries(p.update)) {
+          proposals.push({ type: "state_patch", update: { [key]: value } });
+        }
+      } else {
+        proposals.push(p);
+      }
+    } catch (e) {
+      console.warn("Failed to parse debug action:", e);
+    }
+    return "";
+  });
+
+  // Extract directives
+  cleanText = cleanText.replace(/<!--DEBUG_DIRECTIVE\s+([\s\S]*?)\s+DEBUG_DIRECTIVE-->/g, (match, jsonStr) => {
+    try {
+      const d = JSON.parse(jsonStr);
+      if (d.instruction) {
+        directives.push({ instruction: d.instruction.trim() });
+      }
+    } catch (e) {
+      console.warn("Failed to parse debug directive:", e);
+    }
+    return "";
+  });
+
+  return { cleanText: cleanText.trim(), proposals, directives };
+}
+
 function stripDebugTags(text) {
-  if (!text) return "";
-  return text
-    .replace(/<!--DEBUG_ACTION[\s\S]*?DEBUG_ACTION-->/g, "")
-    .replace(/<!--DEBUG_DIRECTIVE[\s\S]*?DEBUG_DIRECTIVE-->/g, "")
-    .trim();
+  return _parseDebugContent(text).cleanText;
 }
 
 function _renderDebugChatMessages(messages) {
@@ -4528,23 +4562,33 @@ function _renderDebugChatMessages(messages) {
     role.className = "debug-chat-role";
     role.textContent = msg.role === "user" ? "玩家" : "Debug GM";
     const content = document.createElement("div");
-    const cleanContent = msg.role === "assistant" ? stripDebugTags(msg.content) : msg.content;
-    content.innerHTML = markdownToHtml(cleanContent || "");
-    node.appendChild(role);
-    node.appendChild(content);
+
+    if (msg.role === "assistant") {
+      const parsed = _parseDebugContent(msg.content);
+      content.innerHTML = markdownToHtml(parsed.cleanText || "");
+      node.appendChild(role);
+      node.appendChild(content);
+      _renderInlineProposalCards(node, parsed.proposals, parsed.directives);
+    } else {
+      content.innerHTML = markdownToHtml(msg.content || "");
+      node.appendChild(role);
+      node.appendChild(content);
+    }
     box.appendChild(node);
   }
   box.scrollTop = box.scrollHeight;
 }
 
-function _renderInlineProposalCards(container) {
-  const count = _debugPendingProposals.length + _debugPendingDirectives.length;
+function _renderInlineProposalCards(container, proposals, directives) {
+  proposals = proposals || _debugPendingProposals;
+  directives = directives || _debugPendingDirectives;
+  const count = proposals.length + directives.length;
   if (count === 0) return;
 
   const cardsContainer = document.createElement("div");
   cardsContainer.className = "proposal-cards";
 
-  _debugPendingProposals.forEach((p, i) => {
+  proposals.forEach((p, i) => {
     let badgeClass = "edit";
     let badgeText = "狀態";
     let topic = p.type;
@@ -4575,6 +4619,7 @@ function _renderInlineProposalCards(container) {
 
     const card = document.createElement("div");
     card.className = "proposal-card";
+    const dataPayload = encodeURIComponent(JSON.stringify(p));
     card.innerHTML = `
       <div class="proposal-header">
         <span class="proposal-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
@@ -4582,15 +4627,16 @@ function _renderInlineProposalCards(container) {
       </div>
       <div class="proposal-content">${escapeHtml(contentHtml)}</div>
       <div class="proposal-actions">
-        <button class="btn-accept" onclick="applySingleDebugAction('proposal', ${i}, this)">採用</button>
+        <button class="btn-accept" onclick="applySingleDebugAction('proposal', '${dataPayload}', this)">採用</button>
         <button class="btn-reject" onclick="rejectSingleDebugAction(this)">忽略</button>
       </div>
     `;
     cardsContainer.appendChild(card);
   });
 
-  _debugPendingDirectives.forEach((d, i) => {
+  directives.forEach((d, i) => {
     const text = (d.instruction || "").trim();
+    const dataPayload = encodeURIComponent(JSON.stringify(d));
     const card = document.createElement("div");
     card.className = "proposal-card";
     card.innerHTML = `
@@ -4600,7 +4646,7 @@ function _renderInlineProposalCards(container) {
       </div>
       <div class="proposal-content">${escapeHtml(text)}</div>
       <div class="proposal-actions">
-        <button class="btn-accept" onclick="applySingleDebugAction('directive', ${i}, this)">採用</button>
+        <button class="btn-accept" onclick="applySingleDebugAction('directive', '${dataPayload}', this)">採用</button>
         <button class="btn-reject" onclick="rejectSingleDebugAction(this)">忽略</button>
       </div>
     `;
@@ -4610,7 +4656,7 @@ function _renderInlineProposalCards(container) {
   container.appendChild(cardsContainer);
 }
 
-window.applySingleDebugAction = async function (type, index, btn) {
+window.applySingleDebugAction = async function (type, payloadStr, btn) {
   const card = btn.closest(".proposal-card");
   btn.disabled = true;
   const originalText = btn.textContent;
@@ -4618,13 +4664,14 @@ window.applySingleDebugAction = async function (type, index, btn) {
 
   let pList = [];
   let dList = [];
-  if (type === 'proposal') {
-    pList.push(_debugPendingProposals[index]);
-  } else {
-    dList.push(_debugPendingDirectives[index]);
-  }
-
   try {
+    const payload = JSON.parse(decodeURIComponent(payloadStr));
+    if (type === 'proposal') {
+      pList.push(payload);
+    } else {
+      dList.push(payload);
+    }
+
     const res = await API.debugApply(currentBranchId, pList, dList);
     if (!res.ok) throw new Error(res.error);
 
@@ -4740,8 +4787,8 @@ async function sendDebugChat() {
         _debugPendingProposals = splitProposals;
         _debugPendingDirectives = data.directives || [];
 
-        if (target) {
-          _renderInlineProposalCards(target);
+        if (gmNode) {
+          _renderInlineProposalCards(gmNode, splitProposals, data.directives || []);
         }
       },
       (errMsg) => {
