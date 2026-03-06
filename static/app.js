@@ -4550,30 +4550,52 @@ function _updateDebugApplyButton() {
     btn.classList.remove("pulse-ready");
     btn.disabled = true;
   }
+  _renderDebugPendingOptions();
 }
 
-function _buildPendingSummary() {
-  const parts = [];
-  for (const p of _debugPendingProposals) {
-    if (p.type === "state_patch") {
-      parts.push(`- 狀態修改: ${JSON.stringify(p.update)}`);
-    } else if (p.type === "npc_upsert") {
-      parts.push(`- 新增/覆寫 NPC: ${p.npc_id}`);
-    } else if (p.type === "npc_delete") {
-      parts.push(`- 刪除 NPC: ${p.npc_id}`);
-    } else if (p.type === "world_day_set") {
-      parts.push(`- 修改天數為: ${p.day}`);
-    } else if (p.type === "dungeon_patch") {
-      parts.push(`- 副本進度: ${JSON.stringify(p.update)}`);
-    } else {
-      parts.push(`- 其他修改: ${p.type}`);
-    }
+function _renderDebugPendingOptions() {
+  const container = document.getElementById("debug-pending-options-container");
+  if (!container) return;
+
+  const count = _debugPendingProposals.length + _debugPendingDirectives.length;
+  if (count === 0) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
   }
-  for (const d of _debugPendingDirectives) {
+
+  let html = `<div class="debug-options-header">準備套用的修正列表 (${count})：</div>`;
+
+  _debugPendingProposals.forEach((p, i) => {
+    let text = "";
+    if (p.type === "state_patch") text = `狀態修改: ${JSON.stringify(p.update)}`;
+    else if (p.type === "npc_upsert") text = `新增/覆寫 NPC: ${p.npc_id}`;
+    else if (p.type === "npc_delete") text = `刪除 NPC: ${p.npc_id}`;
+    else if (p.type === "world_day_set") text = `修改天數為: ${p.day}`;
+    else if (p.type === "dungeon_patch") text = `副本進度: ${JSON.stringify(p.update)}`;
+    else text = `其他修改: ${p.type}`;
+
+    html += `
+      <label class="debug-option-item">
+        <input type="checkbox" class="debug-prop-cb" data-index="${i}" checked>
+        <span>${escapeHtml(text)}</span>
+      </label>
+    `;
+  });
+
+  _debugPendingDirectives.forEach((d, i) => {
     const text = d.instruction || "";
-    parts.push(`- 寫入劇情設定: ${text.length > 50 ? text.substring(0, 50) + "..." : text}`);
-  }
-  return parts.join("\n");
+    const shortText = text.length > 60 ? text.substring(0, 60) + "..." : text;
+    html += `
+      <label class="debug-option-item directive">
+        <input type="checkbox" class="debug-dir-cb" data-index="${i}" checked>
+        <span title="${escapeHtml(text)}">寫入劇情設定: ${escapeHtml(shortText)}</span>
+      </label>
+    `;
+  });
+
+  container.innerHTML = html;
+  container.classList.remove("hidden");
 }
 
 async function _loadDebugSession(resetSuggestions = true) {
@@ -4675,16 +4697,23 @@ async function applyDebugChanges() {
   const result = document.getElementById("debug-apply-result");
   if (!result) return;
 
-  const total = _debugPendingProposals.length + _debugPendingDirectives.length;
-  if (total === 0) return;
+  const selectedProposals = [];
+  document.querySelectorAll(".debug-prop-cb:checked").forEach(cb => {
+    selectedProposals.push(_debugPendingProposals[parseInt(cb.dataset.index, 10)]);
+  });
+  const selectedDirectives = [];
+  document.querySelectorAll(".debug-dir-cb:checked").forEach(cb => {
+    selectedDirectives.push(_debugPendingDirectives[parseInt(cb.dataset.index, 10)]);
+  });
 
-  const summary = _buildPendingSummary();
-  if (!await showConfirm(`AI 準備了 ${total} 項內部修改，確定要套用嗎？\n\n${summary}`)) {
+  const total = selectedProposals.length + selectedDirectives.length;
+  if (total === 0) {
+    showAlert("請至少選擇一項修正！");
     return;
   }
 
   try {
-    const res = await API.debugApply(currentBranchId, _debugPendingProposals, _debugPendingDirectives);
+    const res = await API.debugApply(currentBranchId, selectedProposals, selectedDirectives);
     if (!res.ok) {
       result.textContent = res.error || "套用失敗";
       return;
