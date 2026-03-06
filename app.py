@@ -663,21 +663,6 @@ def _copy_debug_directive(story_id: str, from_bid: str, to_bid: str):
         _clear_debug_directive(story_id, to_bid)
 
 
-def _append_debug_audit_message(story_id: str, branch_id: str, content: str) -> dict:
-    text = str(content or "").strip()
-    if not text:
-        text = "Debug 修正流程已執行。"
-    msg = {
-        "role": "system",
-        "message_type": "debug_audit",
-        "content": text,
-        "index": len(get_full_timeline(story_id, branch_id)),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _upsert_branch_message(story_id, branch_id, msg)
-    return msg
-
-
 def _clear_loaded_save_preview(tree: dict) -> bool:
     """Clear loaded-save status preview metadata from timeline tree."""
     changed = False
@@ -7682,7 +7667,6 @@ def api_debug_apply():
             directive_result = {"ok": False, "applied": 0, "error": str(e)}
 
     audit_summary = _build_debug_apply_audit_summary(results, directive_result.get("applied", 0))
-    _append_debug_audit_message(story_id, branch_id, audit_summary)
 
     return jsonify({
         "ok": True,
@@ -7735,7 +7719,6 @@ def api_debug_undo():
     _clear_last_apply_backup(story_id, debug_unit_id)
 
     audit_summary = "已回滾 Debug 修正（還原至套用前）"
-    _append_debug_audit_message(story_id, branch_id, audit_summary)
     return jsonify({"ok": True, "restored": True, "audit_summary": audit_summary})
 
 @app.route("/api/debug/clear", methods=["POST"])
