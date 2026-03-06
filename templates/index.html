@@ -366,16 +366,16 @@
           <span id="debug-unit-id">unit: -</span>
         </div>
         <div id="debug-chat-messages" class="debug-chat-messages"></div>
-        <div class="debug-panel-actions">
-          <input type="text" id="debug-chat-input" placeholder="告訴 GM 你想修改什麼 (例如: 給我 100 塊)..." />
-          <button id="debug-chat-send" class="primary">送出</button>
+        <div class="debug-chat-input-row">
+          <textarea id="debug-chat-input" rows="2" placeholder="告訴 GM 你想修改什麼 (例如: 給我 100 塊)..."></textarea>
+          <button id="debug-chat-send" class="modal-create-btn">送出</button>
         </div>
-        <div class="debug-panel-tools">
-          <button id="debug-undo-btn" class="cheat-toggle danger">復原 (Undo)</button>
-          <button id="debug-clear-btn" class="cheat-toggle">清空紀錄</button>
-        </div>
-        <div id="debug-apply-result" class="debug-result-text"></div>
       </div>
+      <div class="debug-panel-actions">
+        <button id="debug-undo-btn" class="modal-cancel-btn">Undo</button>
+        <button id="debug-clear-btn" class="modal-danger-btn" style="margin-left: auto;">清空對話紀錄</button>
+      </div>
+      <div id="debug-apply-result" class="debug-apply-result"></div>
     </div>
 
     <!-- Pistol Prefs Modal -->
