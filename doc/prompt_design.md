@@ -135,6 +135,7 @@
 ### 3.4 State Index 同步點
 
 - canonical state 寫入最終匯集點是 `_apply_state_update_inner()`；套用後會同步 state.db 非 NPC 類別。
+- `_apply_state_update()` 若偵測到 `current_dungeon` 轉場，會額外 reconciliation `dungeon_progress.json`；validation 後的最終 state 也會再同步一次 state.db，避免 growth cap 後索引殘留舊值。
 - NPC 寫入透過 `_save_npc()` 同步 state.db（含 `lifecycle_status` / `archived_reason` 與 `NPC|ARCHIVED` tag）；手動刪除 NPC（`DELETE /api/npcs/<id>`）也會同步刪除索引。
 - fork/edit/regen/blank/merge 分支操作會用 snapshot 對應的 state/npcs 重建 state.db，避免「分支時間點」與「索引內容」不一致。
 
@@ -158,6 +159,7 @@
 - plan 會注入「上一輪 gm_plan 摘要」讓模型可延續或重寫；`must_payoff` 會依 `event_title` relink 到當前分支 active events
 - NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
 - state 優先走 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove），fallback 才用 legacy `state`
+- async state / normalize / cleanup 若把 `current_dungeon` 寫進 canonical state，也會透過 reconciliation 自動補齊或歸檔 `dungeon_progress.json`
 - time 有上限（單次最多 30 天）
 - dungeon 進度提取時會給 node id 對照
 

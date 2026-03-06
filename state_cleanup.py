@@ -11,6 +11,7 @@ import threading
 import time
 
 from compaction import get_recap_text
+from dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit
 from event_db import get_active_events, get_event_title_map, update_event_status
 
 log = logging.getLogger("rpg")
@@ -410,7 +411,11 @@ def _run_cleanup_core(story_id: str, branch_id: str) -> dict:
                 "removed_inventory": 0, "removed_abilities": 0, "added_abilities": 0,
                 "updated_systems": 0, "clean_relationships": 0}
 
+    pre_cleanup_state = app_module._load_character_state(story_id, branch_id)
     summary = _apply_cleanup_operations(story_id, branch_id, ops)
+    post_cleanup_state = app_module._load_character_state(story_id, branch_id)
+    reconcile_dungeon_entry(story_id, branch_id, pre_cleanup_state, post_cleanup_state)
+    reconcile_dungeon_exit(story_id, branch_id, pre_cleanup_state, post_cleanup_state)
     log.info(
         "state_cleanup: applied archived=%d merged=%d resolved=%d"
         " removed_inv=%d removed_abilities=%d added_abilities=%d"
