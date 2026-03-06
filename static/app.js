@@ -179,6 +179,12 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch_id: branchId || "main" }),
     }).then(r => r.json()),
+  debugDirectiveClear: (branchId) =>
+    fetch("/api/debug/directive/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: branchId || "main" }),
+    }).then(r => r.json()),
 
   switchBranch: (branchId) =>
     fetch("/api/branches/switch", {
@@ -1880,22 +1886,48 @@ async function submitEdit(msg, newText) {
 async function regenerateGmMessage(msg, msgEl) {
 
   const parentBranchId = msg.owner_branch_id || currentBranchId;
-  const branchPointIndex = msg.index - 1;
-
-  const contentEl = msgEl.querySelector(".content");
-  const actionBtn = msgEl.querySelector(".msg-action-btn");
-  if (contentEl) {
-    contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
-  }
-  if (actionBtn) actionBtn.style.display = "none";
-  $sendBtn.disabled = true;
+  const branchPointIndex = (msg.role === 'user') ? msg.index : msg.index - 1;
 
   // Truncate subsequent messages in DOM
-  while (msgEl.nextSibling) {
-    msgEl.nextSibling.remove();
+  let sibling = msgEl.nextSibling;
+  while (sibling) {
+    let next = sibling.nextSibling;
+    sibling.remove();
+    sibling = next;
   }
 
-  showPlaceholderSwitcher(msgEl, msg.index);
+  let contentEl, actionsEl, targetMsgEl;
+  if (msg.role === 'user') {
+    // Create NEW GM bubble for results
+    const gmIndex = msg.index + 1;
+    targetMsgEl = document.createElement("div");
+    targetMsgEl.className = "message gm";
+    targetMsgEl.dataset.index = gmIndex;
+    targetMsgEl.innerHTML = `
+      <div class="role-tag">GM</div>
+      <span class="msg-index">#${gmIndex}</span>
+      <div class="content">
+        <span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>
+      </div>
+      <div class="msg-actions" style="display:none"></div>
+    `;
+    $messages.appendChild(targetMsgEl);
+    contentEl = targetMsgEl.querySelector(".content");
+    actionsEl = targetMsgEl.querySelector(".msg-actions");
+  } else {
+    // Standard behavior for existing GM message
+    targetMsgEl = msgEl;
+    contentEl = msgEl.querySelector(".content");
+    actionsEl = msgEl.querySelector(".msg-actions");
+    if (contentEl) {
+      contentEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.9rem">主神系統處理中<span class="typing-dots"><span></span><span></span><span></span></span></span>';
+    }
+    if (actionsEl) actionsEl.style.display = "none";
+  }
+
+  $sendBtn.disabled = true;
+
+  showPlaceholderSwitcher(targetMsgEl, branchPointIndex + 1);
 
   if (activeStreamController) {
     activeStreamController.abort();
@@ -1931,7 +1963,7 @@ async function regenerateGmMessage(msg, msgEl) {
       (errMsg) => {
         if (errMsg !== "AbortError") {
           if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
-          if (actionBtn) actionBtn.style.display = "";
+          if (actionsEl) actionsEl.style.display = "";
           loadBranches().then(() => renderBranchList());
           showAlert(errMsg || "重新生成失敗");
         }
@@ -1942,7 +1974,7 @@ async function regenerateGmMessage(msg, msgEl) {
   } catch (err) {
     if (err.name === 'AbortError') return;
     if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
-    if (actionBtn) actionBtn.style.display = "";
+    if (actionsEl) actionsEl.style.display = "";
     showAlert("網路錯誤：" + err.message);
   }
 
@@ -2073,6 +2105,9 @@ function renderMessages(messages) {
       makeGmOptionsClickable(content);
     }
 
+    const actionsContainer = document.createElement("div");
+    actionsContainer.className = "msg-actions";
+
     const actionBtn = document.createElement("button");
     actionBtn.className = "msg-action-btn";
     if (msg.role === "user") {
@@ -2083,6 +2118,21 @@ function renderMessages(messages) {
         haptic();
         startEditing(el, msg);
       });
+      actionsContainer.appendChild(actionBtn);
+
+      // Add Regen/Retry button if it's the last user message (recovery from generation failure)
+      if (msg === messages[messages.length - 1]) {
+        const retryBtn = document.createElement("button");
+        retryBtn.className = "msg-action-btn msg-regen-btn";
+        retryBtn.textContent = "\u21BB";
+        retryBtn.title = "重新生成 (補發)";
+        retryBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          haptic();
+          regenerateGmMessage(msg, el);
+        });
+        actionsContainer.appendChild(retryBtn);
+      }
     } else {
       actionBtn.textContent = "\u21BB";
       actionBtn.title = "重新生成";
@@ -2091,6 +2141,7 @@ function renderMessages(messages) {
         haptic();
         regenerateGmMessage(msg, el);
       });
+      actionsContainer.appendChild(actionBtn);
     }
 
     // Bug report button (#6)
@@ -2102,6 +2153,7 @@ function renderMessages(messages) {
       e.stopPropagation();
       showReportModal(msg);
     });
+    actionsContainer.appendChild(reportBtn);
 
     el.appendChild(roleTag);
     el.appendChild(indexLabel);
@@ -2112,8 +2164,7 @@ function renderMessages(messages) {
       renderMessageImage(el, msg, currentStoryId);
     }
 
-    el.appendChild(actionBtn);
-    el.appendChild(reportBtn);
+    el.appendChild(actionsContainer);
 
     if (hasSwitcher) {
       const group = siblingGroups[sibKey];
@@ -2951,6 +3002,19 @@ function renderDungeonPanel(data) {
   const exitBtn = document.getElementById("dungeon-exit-btn");
 
   if (!data.in_dungeon) {
+    // Check if we are in "Preparation" phase for a dungeon
+    const status = branches[currentBranchId]?.status_summary || "";
+    if (status.includes("準備") || status.includes("前往") || status.includes("備戰")) {
+      section.style.display = "block";
+      section.innerHTML = `
+        <div class="dungeon-overview preparation-mode">
+          <div class="dungeon-metric-label">🗺️ 任務狀態</div>
+          <div class="dungeon-metric-value">${escapeHtml(status)}</div>
+          <div class="dungeon-prep-hint">系統正在安排副本切換，請等待劇情推進。</div>
+        </div>
+      `;
+      return;
+    }
     section.style.display = "none";
     return;
   }
@@ -3299,6 +3363,20 @@ function initAddonPanel() {
   document.getElementById("debug-apply-btn")?.addEventListener("click", applyDebugChanges);
   document.getElementById("debug-undo-btn")?.addEventListener("click", undoDebugChanges);
   document.getElementById("debug-clear-btn")?.addEventListener("click", clearDebugSession);
+
+  // Toggle for pending directive
+  document.getElementById("debug-pending-directive-header")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const container = document.getElementById("debug-pending-directive-container");
+    if (container) {
+      container.classList.toggle("expanded");
+    }
+  });
+
+  document.getElementById("debug-pending-directive-cancel")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    cancelPendingDirective();
+  });
   if (!btn || !panel) return;
 
   btn.addEventListener("click", (e) => {
@@ -4081,6 +4159,9 @@ async function sendMessage() {
           renderMessageImage(gmEl, gmMsg, currentStoryId, { fresh: true });
         }
 
+        const actionsContainer = document.createElement("div");
+        actionsContainer.className = "msg-actions";
+
         // Add regen button
         const actionBtn = document.createElement("button");
         actionBtn.className = "msg-action-btn";
@@ -4090,7 +4171,7 @@ async function sendMessage() {
           e.stopPropagation();
           regenerateGmMessage(gmMsg, gmEl);
         });
-        gmEl.appendChild(actionBtn);
+        actionsContainer.appendChild(actionBtn);
 
         // Add report button
         const reportBtn = document.createElement("button");
@@ -4101,7 +4182,9 @@ async function sendMessage() {
           e.stopPropagation();
           showReportModal(gmMsg);
         });
-        gmEl.appendChild(reportBtn);
+        actionsContainer.appendChild(reportBtn);
+
+        gmEl.appendChild(actionsContainer);
 
         // Only auto-scroll at the end if user was following along
         if (wasAtBottom && !userScrolledDuringStream) {
@@ -4163,12 +4246,14 @@ async function sendMessage() {
         container.removeEventListener('scroll', scrollHandler);
         gmEl.remove();
         appendSystemError(msg || "未知錯誤");
+        _addRetryButtonToLastUserMessage();
       }
     );
   } catch (err) {
     container.removeEventListener('scroll', scrollHandler);
     gmEl.remove();
     appendSystemError("網路錯誤：" + err.message);
+    _addRetryButtonToLastUserMessage();
   }
 
   isSending = false;
@@ -4212,6 +4297,9 @@ function appendMessage(msg) {
     makeGmOptionsClickable(content);
   }
 
+  const actionsContainer = document.createElement("div");
+  actionsContainer.className = "msg-actions";
+
   const actionBtn = document.createElement("button");
   actionBtn.className = "msg-action-btn";
   if (msg.role === "user") {
@@ -4221,6 +4309,7 @@ function appendMessage(msg) {
       e.stopPropagation();
       startEditing(el, msg);
     });
+    actionsContainer.appendChild(actionBtn);
   } else {
     actionBtn.textContent = "\u21BB";
     actionBtn.title = "重新生成";
@@ -4228,6 +4317,7 @@ function appendMessage(msg) {
       e.stopPropagation();
       regenerateGmMessage(msg, el);
     });
+    actionsContainer.appendChild(actionBtn);
   }
 
   const reportBtn = document.createElement("button");
@@ -4238,6 +4328,7 @@ function appendMessage(msg) {
     e.stopPropagation();
     showReportModal(msg);
   });
+  actionsContainer.appendChild(reportBtn);
 
   el.appendChild(roleTag);
   el.appendChild(indexLabel);
@@ -4248,9 +4339,33 @@ function appendMessage(msg) {
     renderMessageImage(el, msg, currentStoryId);
   }
 
-  el.appendChild(actionBtn);
-  el.appendChild(reportBtn);
+  el.appendChild(actionsContainer);
   $messages.appendChild(el);
+}
+
+function _addRetryButtonToLastUserMessage() {
+  const lastMsg = allMessages[allMessages.length - 1];
+  if (!lastMsg || lastMsg.role !== 'user') return;
+
+  const lastEl = $messages.querySelector(`.message[data-index="${lastMsg.index}"]`);
+  if (!lastEl) return;
+
+  const actionsContainer = lastEl.querySelector(".msg-actions");
+  if (!actionsContainer) return;
+
+  // Don't add if already exists
+  if (actionsContainer.querySelector(".msg-regen-btn")) return;
+
+  const retryBtn = document.createElement("button");
+  retryBtn.className = "msg-action-btn msg-regen-btn";
+  retryBtn.textContent = "\u21BB";
+  retryBtn.title = "重新生成 (補發)";
+  retryBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    haptic();
+    regenerateGmMessage(lastMsg, lastEl);
+  });
+  actionsContainer.appendChild(retryBtn);
 }
 
 function appendSystemError(text) {
@@ -4518,9 +4633,13 @@ function _parseDebugContent(text) {
   let cleanText = text.replace(/<!--DEBUG_ACTION\s+([\s\S]*?)\s+DEBUG_ACTION-->/g, (match, jsonStr) => {
     try {
       const p = JSON.parse(jsonStr);
-      if (p.type === "state_patch" && typeof p.update === "object") {
-        for (const [key, value] of Object.entries(p.update)) {
-          proposals.push({ type: "state_patch", update: { [key]: value } });
+      // Support both 'update' and 'patch' keys for state_patch
+      if (p.type === "state_patch") {
+        const updateObj = p.update || p.patch;
+        if (updateObj && typeof updateObj === "object") {
+          for (const [key, value] of Object.entries(updateObj)) {
+            proposals.push({ type: "state_patch", update: { [key]: value } });
+          }
         }
       } else {
         proposals.push(p);
@@ -4595,10 +4714,13 @@ function _renderInlineProposalCards(container, proposals, directives) {
     let contentHtml = "";
 
     if (p.type === "state_patch") {
-      const key = Object.keys(p.update)[0];
-      const val = p.update[key];
-      topic = key;
-      contentHtml = `數值調整為: ${JSON.stringify(val)}`;
+      const updateObj = p.update || p.patch;
+      if (updateObj && typeof updateObj === "object") {
+        const key = Object.keys(updateObj)[0];
+        const val = updateObj[key];
+        topic = key;
+        contentHtml = `數值調整為: ${JSON.stringify(val)}`;
+      }
     } else if (p.type === "npc_upsert") {
       badgeClass = "add"; badgeText = "NPC";
       topic = (p.npc && (p.npc.name || p.npc.id)) || '未命名';
@@ -4678,6 +4800,15 @@ window.applySingleDebugAction = async function (type, payloadStr, btn) {
     card.classList.add("applied");
     card.querySelector(".proposal-actions").innerHTML = `<span style="color:#4caf50;font-size:0.85em;font-weight:bold;">✔ 已採用</span>`;
     await loadMessages(currentBranchId);
+    await _loadDebugSession(false); // Refresh debug session UI to show the new pending directive
+
+    // Refresh external UI (sidebar status, npcs, etc)
+    const status = await API.status(currentBranchId);
+    renderCharacterStatus(status);
+    updateWorldDayDisplay(status.world_day);
+    loadDungeonProgress();
+    loadNpcs();
+    loadEvents();
   } catch (e) {
     showAlert("套用失敗: " + e.message);
     btn.disabled = false;
@@ -4698,10 +4829,29 @@ async function _loadDebugSession(resetSuggestions = true) {
   document.getElementById("debug-target-branch").textContent = `branch: ${res.target_branch_id}`;
   document.getElementById("debug-unit-id").textContent = `unit: ${res.debug_unit_id}`;
   _renderDebugChatMessages(res.messages || []);
+  _renderPendingDirective(res.pending_directive);
   if (resetSuggestions) {
     _debugPendingProposals = [];
     _debugPendingDirectives = [];
   }
+}
+
+function _renderPendingDirective(directive) {
+  const container = document.getElementById("debug-pending-directive-container");
+  const content = document.getElementById("debug-pending-directive-content");
+  if (!container || !content) return;
+
+  const instruction = (directive?.instruction || "").trim();
+  if (!instruction) {
+    container.classList.add("hidden");
+    content.innerHTML = "";
+    return;
+  }
+
+  container.classList.remove("hidden");
+  // Keep collapsed by default on new load
+  container.classList.remove("expanded");
+  content.innerHTML = markdownToHtml(instruction);
 }
 
 async function openDebugPanel() {
@@ -4775,9 +4925,12 @@ async function sendDebugChat() {
         const rawProposals = data.proposals || [];
         const splitProposals = [];
         rawProposals.forEach(p => {
-          if (p.type === "state_patch" && typeof p.update === "object") {
-            for (const [key, value] of Object.entries(p.update)) {
-              splitProposals.push({ type: "state_patch", update: { [key]: value } });
+          if (p.type === "state_patch") {
+            const updateObj = p.update || p.patch;
+            if (updateObj && typeof updateObj === "object") {
+              for (const [key, value] of Object.entries(updateObj)) {
+                splitProposals.push({ type: "state_patch", update: { [key]: value } });
+              }
             }
           } else {
             splitProposals.push(p);
@@ -4789,6 +4942,11 @@ async function sendDebugChat() {
 
         if (gmNode) {
           _renderInlineProposalCards(gmNode, splitProposals, data.directives || []);
+        }
+
+        // Refresh pending directive if any was applied
+        if (data.directives && data.directives.length > 0) {
+          _loadDebugSession(false);
         }
       },
       (errMsg) => {
@@ -4802,6 +4960,16 @@ async function sendDebugChat() {
 }
 
 
+async function cancelPendingDirective() {
+  try {
+    const res = await API.debugDirectiveClear(currentBranchId);
+    if (!res.ok) throw new Error(res.error);
+    await _loadDebugSession(false);
+  } catch (e) {
+    showAlert("撤銷失敗: " + e.message);
+  }
+}
+
 async function undoDebugChanges() {
   const result = document.getElementById("debug-apply-result");
   if (!result) return;
@@ -4813,6 +4981,14 @@ async function undoDebugChanges() {
   result.textContent = res.audit_summary || "已回滾";
   await loadMessages(currentBranchId);
   await _loadDebugSession();
+
+  // Refresh external UI (sidebar status, npcs, etc)
+  const status = await API.status(currentBranchId);
+  renderCharacterStatus(status);
+  updateWorldDayDisplay(status.world_day);
+  loadDungeonProgress();
+  loadNpcs();
+  loadEvents();
 }
 
 async function clearDebugSession() {

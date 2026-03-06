@@ -365,6 +365,16 @@
           <span id="debug-target-branch">branch: -</span>
           <span id="debug-unit-id">unit: -</span>
         </div>
+        <div id="debug-pending-directive-container" class="debug-pending-directive-container hidden">
+          <div id="debug-pending-directive-header" class="debug-pending-directive-header">
+            <span class="directive-label">📝 1 則待執行指令</span>
+            <div class="directive-header-actions">
+              <span id="debug-pending-directive-cancel" class="directive-cancel-btn" title="撤銷此指令">&times;</span>
+              <span class="directive-toggle-icon">▼</span>
+            </div>
+          </div>
+          <div id="debug-pending-directive-content" class="debug-pending-directive-content"></div>
+        </div>
         <div id="debug-chat-messages" class="debug-chat-messages"></div>
         <div class="debug-chat-input-row">
           <textarea id="debug-chat-input" rows="2" placeholder="告訴 GM 你想修改什麼 (例如: 給我 100 塊)..."></textarea>

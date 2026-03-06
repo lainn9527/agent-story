@@ -754,9 +754,26 @@ body {
 }
 
 /* ---------- Message Action Button ---------- */
-.msg-action-btn {
+
+.msg-actions {
   position: absolute;
   bottom: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  z-index: 10;
+}
+
+.message.gm .msg-actions {
+  left: 0;
+}
+
+.message.user .msg-actions {
+  right: 14px;
+  flex-direction: row-reverse;
+}
+
+.msg-action-btn {
   background: var(--bg-main);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -766,14 +783,6 @@ body {
   cursor: pointer;
   line-height: 1;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.message.gm .msg-action-btn {
-  left: 0;
-}
-
-.message.user .msg-action-btn {
-  right: 14px;
 }
 
 .msg-action-btn:hover {
@@ -1399,6 +1408,25 @@ body {
   margin-top: 5px;
 }
 
+.directive-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.directive-cancel-btn {
+  font-size: 1.2rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.2s;
+  padding: 4px;
+}
+
+.directive-cancel-btn:hover {
+  color: #ff5252;
+}
+
 /* Proposal cards in chat */
 .proposal-cards {
   margin-top: 10px;
@@ -1464,7 +1492,7 @@ body {
   max-height: 200px;
   overflow-y: auto;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
   margin-bottom: 8px;
 }
 
@@ -1671,6 +1699,67 @@ body {
   color: var(--text-dim);
   font-size: 0.8rem;
   margin-bottom: 10px;
+}
+
+
+.debug-pending-directive-container {
+  background: rgba(212, 175, 55, 0.08);
+  border: 1px dashed var(--gold);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.debug-pending-directive-container.hidden {
+  display: none;
+}
+
+.debug-pending-directive-header {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.debug-pending-directive-header:hover {
+  background: rgba(212, 175, 55, 0.12);
+}
+
+.directive-label {
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: var(--gold);
+}
+
+.directive-toggle-icon {
+  font-size: 0.7rem;
+  color: var(--gold);
+  transition: transform 0.3s ease;
+}
+
+.debug-pending-directive-container.expanded .directive-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.debug-pending-directive-content {
+  max-height: 0;
+  padding: 0 12px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  line-height: 1.5;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  word-break: break-all;
+}
+
+.debug-pending-directive-container.expanded .debug-pending-directive-content {
+  max-height: 150px;
+  padding: 0 12px 10px 12px;
+  border-top: 1px solid rgba(212, 175, 55, 0.2);
 }
 
 .debug-chat-messages {
@@ -3073,8 +3162,6 @@ body {
 
 /* ---------- Bug report button (#6) ---------- */
 .msg-report-btn {
-  position: absolute;
-  bottom: 8px;
   background: none;
   border: none;
   color: var(--text-dim);
@@ -3092,14 +3179,6 @@ body {
 .msg-report-btn:hover {
   opacity: 1 !important;
   color: var(--accent);
-}
-
-.message.gm .msg-report-btn {
-  left: 52px;
-}
-
-.message.user .msg-report-btn {
-  right: 56px;
 }
 
 .report-modal-overlay {
@@ -3249,6 +3328,18 @@ body {
   border-radius: var(--radius);
   padding: 10px 12px;
   margin-bottom: 10px;
+}
+
+.dungeon-overview.preparation-mode {
+  border-left: 3px solid var(--gold);
+  background: rgba(212, 175, 55, 0.05);
+}
+
+.dungeon-prep-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 8px;
+  font-style: italic;
 }
 
 /* Mainline progress bar */

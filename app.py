@@ -7721,6 +7721,16 @@ def api_debug_undo():
     audit_summary = "已回滾 Debug 修正（還原至套用前）"
     return jsonify({"ok": True, "restored": True, "audit_summary": audit_summary})
 
+
+@app.route("/api/debug/directive/clear", methods=["POST"])
+def api_debug_directive_clear():
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "main")
+    
+    _clear_debug_directive(story_id, branch_id)
+    return jsonify({"ok": True})
+
 @app.route("/api/debug/clear", methods=["POST"])
 def api_debug_clear():
     story_id = _active_story_id()
