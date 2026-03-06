@@ -38,10 +38,14 @@
 - `fate_mode = false`：
   - 會把「命運走向」段落從 system prompt 移除
   - 最近訊息會先做 fate label 清理（避免模型模仿）
-- 最近訊息（`recent`）一律會先移除非玩家訊息（`gm`/legacy `assistant`）尾端的「可選行動」區塊，避免選項文字反覆回灌造成上下文污染。
+- 最近訊息（`recent`）一律會先移除非玩家訊息（`gm`/legacy `assistant`）尾端的選項區塊（含 `可選行動` 編號列與 `- **「...」：**` 選項列），避免選項文字反覆回灌造成上下文污染；`當前處境` 這類敘事段落會保留。
 - `pistol_mode = true`：
   - 追加「親密場景指示」段落
   - 追加 NSFW 偏好（chips/custom）
+- `branch_config.image_gen_enabled = false`：
+  - 追加「禁止輸出 IMG tag」系統段落，避免模型繼續發出插圖指令
+- `branch_config.image_model`：
+  - 追加目前圖片模型提示（預設 `gemini-2.5-flash-image`），方便同一故事不同分支使用不同產圖模型
 
 ### 2.4 玩家訊息 augmentation（送進 LLM 前）
 
@@ -96,6 +100,9 @@
 - `NPC`：合併 NPC
 - `EVENT`：寫入 events DB
 - `IMG`：非同步生成圖片
+  - 會先檢查 branch config：
+    - `image_gen_enabled = false`：只移除 IMG tag，不會觸發下載
+    - `image_gen_enabled = true`：觸發下載；若有 `image_model` 則優先使用該模型
 - `TIME`：推進 `world_day`
 
 ### 3.2 回覆清理
@@ -182,7 +189,7 @@
 
 - 檔案：`auto_summary.py`
 - 每 5 回合或 phase 轉換時，背景生成 JSON 摘要
-- 對話壓縮（`compaction.py`）在送摘要前也會移除非玩家訊息的「可選行動」區塊，避免選項被固化進長期 recap。
+- 對話壓縮（`compaction.py`）在送摘要前也會移除非玩家訊息尾端的選項區塊（含 `- **「...」：**` 形式），但保留 `當前處境` 等敘事內容，避免選項被固化進長期 recap。
 
 ---
 

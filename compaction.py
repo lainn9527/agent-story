@@ -24,8 +24,8 @@ STORIES_DIR = os.path.join(DATA_DIR, "stories")
 # Compaction thresholds
 RECAP_CHAR_CAP = 8000          # Max chars for recap text
 RECAP_META_COMPACT_TARGET = 3000  # Target chars when meta-compacting
-MIN_UNCOMPACTED_FOR_TRIGGER = 20  # Need >20 uncompacted msgs to trigger
-RECENT_WINDOW = 20               # Keep last 20 messages as raw context
+MIN_UNCOMPACTED_FOR_TRIGGER = 10  # Need >10 uncompacted msgs to trigger
+RECENT_WINDOW = 10               # Keep last 10 messages as raw context
 
 _FALLBACK_RECAP = "（尚無回顧，完整對話記錄已提供。）"
 
@@ -65,8 +65,28 @@ _META_COMPACT_PROMPT = """\
 
 # Strip GM choice scaffolding from recap source so it doesn't become long-term memory.
 _CHOICE_BLOCK_RE = re.compile(
-    r"(?:^|\n)\*{0,2}\s*可選行動\s*[:：]\s*\*{0,2}\s*(?:\n.*)?\Z",
-    re.DOTALL,
+    r"""
+    (?:
+        (?:\n|^)
+        (?:
+            \*{0,2}[^\n]*(?:可選行動|你打算)[^\n]*\*{0,2}\s*\n
+        )?
+        (?:
+            \s*(?:\d+[.)、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*.+(?:\n|$)
+        ){2,}
+        \s*\Z
+    )
+    |
+    (?:
+        (?:\n|^)
+        (?:
+            \s*-\s*\*{0,2}[「『][^\n」』]{1,80}[」』]\s*[:：]\*{0,2}\s*.+(?:\n|$)
+            (?:\s*\n)*
+        ){2,}
+        \s*\Z
+    )
+    """,
+    re.DOTALL | re.VERBOSE,
 )
 
 

@@ -11,7 +11,7 @@ Browser (static/app.js, templates/index.html)
           -> gemini_bridge.py 或 claude_bridge.py
       -> Lore / Event / Usage / State SQLite
       -> JSON runtime files (messages/state/npcs/branch tree/saves...)
-      -> Background threads (tag extraction, compaction, NPC evolution, image gen)
+      -> Background threads (tag extraction, compaction, NPC evolution, state cleanup, image gen)
 ```
 
 ## 2) 主要模組
@@ -43,6 +43,8 @@ Browser (static/app.js, templates/index.html)
   - 長對話壓縮（recap）
 - `npc_evolution.py`
   - NPC 近期活動演化
+- `state_cleanup.py`
+  - LLM 狀態審核：依階段/NPC/事件/道具/關係產出清理建議（歸檔 NPC、合併重複、解決事件、移除道具），背景執行；可由 phase 轉換、每 N 回合、或手動按鈕觸發
 - `world_timer.py`
   - `world_day` 與 `<!--TIME ... TIME-->` 處理
 - `gm_cheats.py` / `dice.py`
@@ -115,6 +117,7 @@ Browser (static/app.js, templates/index.html)
 6. 落盤 GM 訊息與 snapshot。
 7. 背景觸發：
    - `_extract_tags_async()` 二次結構化抽取（LLM）
+   - `run_state_cleanup_async()` 狀態清理（phase 轉換 副本→主神空間 或每 N 回合或手動觸發時）
    - `compact_async()` 長對話壓縮
    - `run_npc_evolution_async()` NPC 演化
    - 自動 pruning 無效 sibling（依規則）

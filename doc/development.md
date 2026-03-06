@@ -58,6 +58,7 @@ pytest tests/test_debug_api.py
 
 - Branch tree / fork / sibling 邏輯
 - state update 與 map/list schema 行為
+- state cleanup 套用邏輯（`tests/test_state_cleanup.py`）
 - lore/event DB 搜尋與索引
 - Flask API 合約（`tests/test_api_routes.py`）
 - async tag extraction 關鍵路徑
@@ -176,6 +177,7 @@ git tag vX.Y.Z
 
 - `gm_request` / `gm_response_raw`
 - `extract_tags_request` / `extract_tags_response_raw`
+- `state_cleanup_request` / `state_cleanup_response_raw`
 - `state_normalize_request` / `state_normalize_response_raw`
 - `lore_promote_review_request` / `lore_promote_review_response_raw`
 - `lore_chat_request` / `lore_chat_response_raw`
@@ -216,6 +218,11 @@ ls -lah data/llm_traces/story_original/<YYYY-MM-DD>/<branch_id>/msg_000407/
 
 - 確認目標分支 `messages.json` 內是否有對應 snapshot
 - 必要時使用 `scripts/backfill_snapshots.py --dry-run`
+
+### 問題：NPC/事件/道具欄髒亂（過多已結束副本角色、重複名稱、過時事件）
+
+- 設定面板「狀態清理」按鈕可手動觸發 LLM 審核與清理（歸檔 NPC、合併重複、解決事件、移除道具）
+- 或呼叫 `POST /api/state/cleanup`（body 可帶 `branch_id`）；清理在背景執行，完成後會寫入 npcs/state/events
 
 ### 問題：切換機器後資料不一致
 

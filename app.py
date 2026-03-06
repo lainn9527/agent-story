@@ -292,7 +292,7 @@ def _load_json(path, default=None):
 
 def _save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
@@ -789,9 +789,11 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
             dirty = True
             log.info("    auto-migrate: converted %s from list to map in %s/%s", lkey, story_id, branch_id)
 
+    needs_persist = dirty or not os.path.exists(path)
     if dirty:
         log.info("    self-heal: cleaned artifacts from %s/%s", story_id, branch_id)
-    _save_json(path, state)
+    if needs_persist:
+        _save_json(path, state)
     return state
 
 
@@ -808,6 +810,30 @@ _TEAM_RULES = {
         "固定隊伍間偶爾會被安排進同一副本，形成合作或對抗局面。"
     ),
 }
+
+DEFAULT_IMAGE_MODEL = "imagen-4.0-ultra-generate-001"
+
+
+def _branch_config_defaults() -> dict:
+    return {
+        "image_gen_enabled": True,
+        "image_model": DEFAULT_IMAGE_MODEL,
+    }
+
+
+def _is_image_gen_enabled(branch_config: dict) -> bool:
+    """Branch config gate for scene image generation. Default: enabled."""
+    val = branch_config.get("image_gen_enabled", True)
+    if isinstance(val, str):
+        return val.strip().lower() not in {"0", "false", "off", "no"}
+    return bool(val)
+
+
+def _get_image_model(branch_config: dict) -> str:
+    model = branch_config.get("image_model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return DEFAULT_IMAGE_MODEL
 
 
 def _rel_to_str(val) -> str:
@@ -1278,6 +1304,8 @@ def _build_story_system_prompt(
     branch_config = _load_branch_config(story_id, branch_id)
     team_mode = branch_config.get("team_mode", "free_agent")
     team_rules = _TEAM_RULES.get(team_mode, _TEAM_RULES["free_agent"])
+    image_gen_enabled = _is_image_gen_enabled(branch_config)
+    image_model = _get_image_model(branch_config)
     # Build dungeon context
     dungeon_context = build_dungeon_context(story_id, branch_id)
     if os.path.exists(prompt_path):
@@ -1340,6 +1368,19 @@ def _build_story_system_prompt(
         if prefs_text:
             pistol_block += f"- 玩家偏好設定：\n{prefs_text}\n"
         result += pistol_block
+
+    if image_gen_enabled:
+        result += (
+            "\n\n## 場景插圖設定（系統）\n"
+            "- 本分支已啟用場景插圖。若需插圖，可依既有規則輸出單一 IMG tag。\n"
+            f"- 當前圖片模型：`{image_model}`。\n"
+        )
+    else:
+        result += (
+            "\n\n## 場景插圖設定（系統）\n"
+            "- 本分支已關閉場景插圖。\n"
+            "- 禁止輸出任何 IMG tag。\n"
+        )
 
     return result
 
@@ -3154,7 +3195,7 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "提取**通用世界規則與設定**，這些設定要適用於任何角色、任何分支時間線。\n"
                 "**核心判斷標準：GM 在未來的其他場景中是否需要參考這條設定？** 只有「是」才提取。\n"
                 "✓ 適合提取：體系或副本的核心規則與運作機制、重要且可重複出現的地點（如總部、主要設施）、商城兌換項目\n"
-                "✗ 禁止提取：一次性場景細節（具體房間、走廊、臨時戰場的描述）、"
+                "✗ 禁止提取：玩家或特定 NPC 專屬的獨有道具、一次性消耗品、個人技能與強化素材（如『空白的因果律之格』、『紅衣核心』等）。**這些屬於 `inventory` 或 `abilities` 的管轄範圍。Lore 僅保留所有輪迴者皆適用的「客觀世界規律、體系通用設定與常規商城販售物」。**"
                 "劇情事件的具體過程（交給 events 追蹤）、"
                 "角色的個人數值或進度（如「基因鎖進度15%」「獎勵點5740」）、"
                 "角色獲得/失去的具體道具、角色習得的功法與技能進度、角色的戰鬥過程與經歷、角色之間的互動劇情\n"
@@ -3170,6 +3211,10 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- 道具：角色可使用的物品與裝備\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
+                "**【防幻覺絕對規則】：**\n"
+                "* **嚴禁僅因對話中「提及」、「討論」或「回憶」某事件就更改其狀態（例如提及「回歸現實」不代表該事件被 triggered）。**\n"
+                "* `triggered`（觸發）：必須是該事件在物理層面、劇情層面產生了**實質性的初步進展或變故**。\n"
+                "* `resolved`（解決）：必須是該事件的目標已徹底完成或因故徹底終結。\n"
                 "優先輸出 `event_ops`（用 id 更新，避免 title 漂移）：\n"
                 f"{active_events_text}\n"
                 "- update：已有事件狀態變化（如伏筆被觸發、事件被解決）時，輸出 id + status\n"
@@ -3215,8 +3260,12 @@ def _extract_tags_async(story_id: str, branch_id: str, gm_text: str, msg_index: 
                 "- **人際關係**：`relationships: {\"NPC名\": \"新關係描述\"}`。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
                 "- **體系等級**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），**必須輸出 systems 更新**，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）\n"
                 "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
-                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
+                "**【欄位嚴格寫入規則】：**\n"
+                "- **`completed_missions`（已完成任務）**：**絕對約束！** 僅限於主神明確發布並結算的「主線/支線任務」與「隱藏成就」。**嚴禁**將「獲得裝備」、「得知情報」、「抵達某地」或「日常行為」視為任務寫入此陣列。\n"
+                "- **`relationships`（人際關係與 NPC 狀態）**：不僅記錄好感度與敵友關係。當 GM 文本明確描寫 NPC 的**心理狀態或情緒發生重大轉折**（例如：對未來副本感到恐懼、對玩家產生依賴/警惕），**必須更新該 NPC 的關係描述**，以確保 NPC 具備記憶與情緒連貫性。\n"
+                "- **`systems`（體系等級）**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），必須輸出 systems 更新，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）。\n"
+                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
                 "\n**道具欄清理原則**（每次提取時都必須遵守）：\n"
                 "- **禁止寫入場景/戰鬥狀態**：「戰鬥中」「對峙中」「集結中」「盤旋中」「佔領中」「啟動中」「錄製中」「噴湧中」等臨時狀態不是道具，不要寫入 inventory。這些只是當前回合的敘事描述，下一回合就過時了。\n"
                 "- **已消耗/已使用的道具**：設為 null 移除（如 `\"榴彈\": null`）\n"
@@ -3585,6 +3634,38 @@ def _extract_item_base_name(item: str) -> str:
     return name
 
 
+def _dedup_inventory_plain_vs_variant(inv_map: dict) -> dict:
+    """Drop plain-name keys when a variant with the same base name exists.
+
+    Example:
+      "縛魂者之脊" + "縛魂者之脊 (C級)" -> keep only the variant key.
+
+    Safety:
+      Distinct variant keys (e.g. 定界珠(生) vs 定界珠(死)) are preserved.
+    """
+    if not isinstance(inv_map, dict) or len(inv_map) < 2:
+        return inv_map
+
+    groups: dict[str, list[str]] = {}
+    for key in inv_map.keys():
+        base = _extract_item_base_name(key)
+        norm_base = _normalize_map_key(base)
+        groups.setdefault(norm_base, []).append(key)
+
+    remove_keys: set[str] = set()
+    for keys in groups.values():
+        if len(keys) < 2:
+            continue
+        plain_keys = [k for k in keys if k.strip() == _extract_item_base_name(k)]
+        variant_keys = [k for k in keys if k not in plain_keys]
+        if plain_keys and variant_keys:
+            remove_keys.update(plain_keys)
+
+    if not remove_keys:
+        return inv_map
+    return {k: v for k, v in inv_map.items() if k not in remove_keys}
+
+
 def _migrate_list_to_map(items: list) -> dict:
     """Convert a list of item strings to a map (key→value).
 
@@ -3794,6 +3875,11 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
         if key in update:
             state[key] = update[key]
 
+    # Inventory hygiene: if both plain and variant keys coexist for same base
+    # item, keep the variant key and drop the plain key.
+    if isinstance(state.get("inventory"), dict):
+        state["inventory"] = _dedup_inventory_plain_vs_variant(state["inventory"])
+
     # Build handled_keys set
     handled_keys = set()
     handled_keys.add("reward_points")
@@ -3910,6 +3996,24 @@ def get_full_timeline(story_id: str, branch_id: str) -> list[dict]:
         timeline.extend(delta)
 
     return timeline
+
+
+def _next_timeline_index(story_id: str, branch_id: str, timeline: list[dict] | None = None) -> int:
+    """Return the next message index for appending in a branch timeline."""
+    if timeline is None:
+        timeline = get_full_timeline(story_id, branch_id)
+    max_index = -1
+    for msg in timeline:
+        idx = msg.get("index")
+        if isinstance(idx, str):
+            try:
+                idx = int(idx)
+            except ValueError:
+                continue
+        if isinstance(idx, int):
+            if idx > max_index:
+                max_index = idx
+    return max_index + 1
 
 
 def _resolve_sibling_parent(branches: dict, parent_branch_id: str, branch_point_index: int) -> str:
@@ -4377,8 +4481,28 @@ _CONTEXT_ECHO_RE = re.compile(
 # Trailing choice section generated for the player UI.
 # Kept in stored transcript but stripped from model-facing "recent" context.
 _CHOICE_BLOCK_RE = re.compile(
-    r"(?:^|\n)\*{0,2}\s*可選行動\s*[:：]\s*\*{0,2}\s*(?:\n.*)?\Z",
-    re.DOTALL,
+    r"""
+    (?:
+        (?:\n|^)
+        (?:
+            \*{0,2}[^\n]*(?:可選行動|你打算)[^\n]*\*{0,2}\s*\n
+        )?
+        (?:
+            \s*(?:\d+[.)、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*.+(?:\n|$)
+        ){2,}
+        \s*\Z
+    )
+    |
+    (?:
+        (?:\n|^)
+        (?:
+            \s*-\s*\*{0,2}[「『][^\n」』]{1,80}[」』]\s*[:：]\*{0,2}\s*.+(?:\n|$)
+            (?:\s*\n)*
+        ){2,}
+        \s*\Z
+    )
+    """,
+    re.DOTALL | re.VERBOSE,
 )
 
 # Pattern to strip fate direction labels from GM text in conversation history
@@ -4441,8 +4565,11 @@ def _sanitize_recent_messages(messages: list[dict], *, strip_fate: bool) -> list
 _REWARD_HINT_RE = re.compile(r"【主神提示[:：].*?獎勵點.*?】")
 
 
-def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_index: int) -> tuple[str, dict | None, dict]:
-    """Extract all hidden tags from GM response. Returns (clean_text, image_info, snapshots)."""
+def _process_gm_response(
+    gm_response: str, story_id: str, branch_id: str, msg_index: int, turn_count: int | None = None
+) -> tuple[str, dict | None, dict]:
+    """Extract all hidden tags from GM response. Returns (clean_text, image_info, snapshots).
+    turn_count: optional user-message count for periodic cleanup; if None, msg_index is used."""
     # Strip context injection sections that the GM may have echoed back
     gm_response = _CONTEXT_ECHO_RE.sub("", gm_response).strip()
     gm_response = re.sub(r"^---\s*", "", gm_response).strip()
@@ -4460,10 +4587,18 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
         gm_response = re.sub(r"\n{3,}", "\n\n", gm_response).strip()
 
     gm_response, state_updates = _extract_state_tag(gm_response)
+    if state_updates:
+        old_phase_before_state = _load_character_state(story_id, branch_id).get("current_phase")
     for state_update in state_updates:
         _apply_state_update(story_id, branch_id, state_update)
     if not state_updates:
         log.info("GM response missing STATE tag (msg_index=%d)", msg_index)
+    # Phase transition 副本中/副本結算 → 主神空間: trigger state cleanup
+    if state_updates:
+        new_state = _load_character_state(story_id, branch_id)
+        if old_phase_before_state in ("副本中", "副本結算") and new_state.get("current_phase") == "主神空間":
+            from state_cleanup import run_state_cleanup_async
+            run_state_cleanup_async(story_id, branch_id, force=True)
 
     gm_response, lore_entries = _extract_lore_tag(gm_response)
     for lore_entry in lore_entries:
@@ -4488,8 +4623,17 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     gm_response, img_prompt = _extract_img_tag(gm_response)
     image_info = None
     if img_prompt:
-        filename = generate_image_async(story_id, img_prompt, msg_index)
-        image_info = {"filename": filename, "ready": False}
+        branch_config = _load_branch_config(story_id, branch_id)
+        if _is_image_gen_enabled(branch_config):
+            filename = generate_image_async(
+                story_id,
+                img_prompt,
+                msg_index,
+                model=_get_image_model(branch_config),
+            )
+            image_info = {"filename": filename, "ready": False}
+        else:
+            log.info("image_gen disabled by branch config: branch=%s msg_index=%s", branch_id, msg_index)
 
     # Extract TIME tags and advance world_day
     had_time_tags = bool(TIME_RE.search(gm_response))
@@ -4499,6 +4643,12 @@ def _process_gm_response(gm_response: str, story_id: str, branch_id: str, msg_in
     _extract_tags_async(story_id, branch_id, gm_response, msg_index,
                         skip_state=False,
                         skip_time=had_time_tags)
+
+    # Periodic state cleanup (every N turns, cooldown)
+    from state_cleanup import should_run_cleanup, run_state_cleanup_async
+    cleanup_turn = turn_count if turn_count is not None else msg_index
+    if should_run_cleanup(story_id, branch_id, cleanup_turn):
+        run_state_cleanup_async(story_id, branch_id, force=False, turn_index=cleanup_turn)
 
     # Build snapshots for branch forking accuracy
     snapshots = {
@@ -4908,11 +5058,12 @@ def api_send():
     # 1. Save player message
     t0 = time.time()
     full_timeline = get_full_timeline(story_id, branch_id)
+    next_msg_index = _next_timeline_index(story_id, branch_id, timeline=full_timeline)
 
     player_msg = {
         "role": "user",
         "content": user_text,
-        "index": len(full_timeline),
+        "index": next_msg_index,
     }
     _upsert_branch_message(story_id, branch_id, player_msg)
     full_timeline.append(player_msg)
@@ -4954,7 +5105,7 @@ def api_send():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     # 4. Call Claude (stateless)
-    gm_msg_index = len(full_timeline)
+    gm_msg_index = next_msg_index + 1
     _trace_llm(
         stage="gm_request",
         story_id=story_id,
@@ -4989,7 +5140,10 @@ def api_send():
 
     # 5. Extract all hidden tags (STATE, LORE, NPC, EVENT, IMG)
     t0 = time.time()
-    gm_response, image_info, snapshots = _process_gm_response(gm_response, story_id, branch_id, gm_msg_index)
+    send_turn_count = sum(1 for m in full_timeline if m.get("role") == "user")
+    gm_response, image_info, snapshots = _process_gm_response(
+        gm_response, story_id, branch_id, gm_msg_index, turn_count=send_turn_count
+    )
     log.info("  parse_tags: %.0fms", (time.time() - t0) * 1000)
 
     # 6. Save GM response
@@ -5056,11 +5210,12 @@ def api_send_stream():
 
     # 1. Save player message (before streaming starts)
     full_timeline = get_full_timeline(story_id, branch_id)
+    next_msg_index = _next_timeline_index(story_id, branch_id, timeline=full_timeline)
 
     player_msg = {
         "role": "user",
         "content": user_text,
-        "index": len(full_timeline),
+        "index": next_msg_index,
     }
     _upsert_branch_message(story_id, branch_id, player_msg)
     full_timeline.append(player_msg)
@@ -5094,7 +5249,7 @@ def api_send_stream():
         player_msg["dice"] = dice_result
         _upsert_branch_message(story_id, branch_id, player_msg)
 
-    gm_msg_index = len(full_timeline)
+    gm_msg_index = next_msg_index + 1
     _trace_llm(
         stage="gm_request",
         story_id=story_id,
@@ -5230,6 +5385,24 @@ def api_state_rebuild():
     count = rebuild_state_db_from_json(story_id, branch_id, state=state, npcs=npcs)
     summary = get_state_summary(story_id, branch_id)
     return jsonify({"ok": True, "branch_id": branch_id, "count": count, "summary": summary})
+
+
+@app.route("/api/state/cleanup", methods=["POST"])
+def api_state_cleanup():
+    """Run LLM-based state cleanup synchronously and return summary."""
+    story_id = _active_story_id()
+    body = request.get_json(silent=True) or {}
+    branch_id = body.get("branch_id")
+    if not branch_id:
+        tree = _load_tree(story_id)
+        branch_id = tree.get("active_branch_id", "main")
+    from state_cleanup import run_state_cleanup_sync
+    try:
+        summary = run_state_cleanup_sync(story_id, branch_id)
+        return jsonify({"ok": True, "branch_id": branch_id, "summary": summary})
+    except Exception as e:
+        log.warning("api_state_cleanup error: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -5437,7 +5610,7 @@ def api_branch_config_get(branch_id):
     """Get branch config."""
     story_id = _active_story_id()
     config = _load_branch_config(story_id, branch_id)
-    return jsonify({"ok": True, "config": config})
+    return jsonify({"ok": True, "config": config, "defaults": _branch_config_defaults()})
 
 
 @app.route("/api/branches/<branch_id>/config", methods=["POST"])
@@ -5448,7 +5621,7 @@ def api_branch_config_set(branch_id):
     body = request.get_json(force=True)
     config.update(body)
     _save_branch_config(story_id, branch_id, config)
-    return jsonify({"ok": True, "config": config})
+    return jsonify({"ok": True, "config": config, "defaults": _branch_config_defaults()})
 
 
 @app.route("/api/branches/edit", methods=["POST"])
@@ -8345,6 +8518,10 @@ def api_dungeon_return():
     state["current_dungeon"] = ""
     state["reward_points"] = state.get("reward_points", 0) + total_reward
     _save_character_state(story_id, branch_id, state)
+
+    # State cleanup after dungeon return (button path). Narrative return triggers cleanup in _process_gm_response.
+    from state_cleanup import run_state_cleanup_async
+    run_state_cleanup_async(story_id, branch_id, force=True)
 
     # Advance world time (recovery time)
     try:

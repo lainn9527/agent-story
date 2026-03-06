@@ -211,6 +211,17 @@
             </div>
           </div>
           <div class="addon-section">
+            <div class="addon-section-title">場景插圖</div>
+            <div class="addon-toggle-field">
+              <span>啟用</span>
+              <button id="addon-image-gen-btn" class="cheat-toggle active" onclick="toggleImageGen()">ON</button>
+            </div>
+            <div class="addon-field">
+              <label for="addon-image-model">圖片模型</label>
+              <select id="addon-image-model"></select>
+            </div>
+          </div>
+          <div class="addon-section">
             <div class="addon-section-title">命運走向</div>
             <div class="addon-toggle-field">
               <span>啟用</span>
@@ -233,10 +244,14 @@
             </div>
           </div>
           <div class="addon-section">
-            <div class="addon-section-title">Debug</div>
+            <div class="addon-section-title">進階工具</div>
             <div class="addon-toggle-field">
               <span>修正面板</span>
               <button id="addon-debug-btn" class="cheat-toggle">開啟</button>
+            </div>
+            <div class="addon-toggle-field">
+              <span>清理狀態</span>
+              <button id="cleanup-btn" class="cheat-toggle" onclick="runStateCleanup()">清理</button>
             </div>
           </div>
         </div>

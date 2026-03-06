@@ -154,6 +154,32 @@ const API = {
       body: JSON.stringify({ name }),
     }).then(r => r.json()),
 
+  // Debug Panel
+  debugSession: (branchId) =>
+    fetch(`/api/debug/session?branch_id=${branchId || "main"}`).then(r => r.json()),
+  debugApply: (branchId, actions, directives) =>
+    fetch("/api/debug/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        branch_id: branchId || "main",
+        actions: actions || [],
+        directives: directives || [],
+      }),
+    }).then(r => r.json()),
+  debugUndo: (branchId) =>
+    fetch("/api/debug/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: branchId || "main" }),
+    }).then(r => r.json()),
+  debugClear: (branchId) =>
+    fetch("/api/debug/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: branchId || "main" }),
+    }).then(r => r.json()),
+
   switchBranch: (branchId) =>
     fetch("/api/branches/switch", {
       method: "POST",
@@ -207,6 +233,16 @@ const API = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName }),
+    }).then(r => r.json()),
+
+  getBranchConfig: (branchId) =>
+    fetch(`/api/branches/${encodeURIComponent(branchId || "main")}/config`).then(r => r.json()),
+
+  setBranchConfig: (branchId, data) =>
+    fetch(`/api/branches/${encodeURIComponent(branchId || "main")}/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data || {}),
     }).then(r => r.json()),
 
   // Story APIs
@@ -292,32 +328,6 @@ const API = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch_id: branchId }),
-    }).then(r => r.json()),
-
-  // Debug Panel
-  debugSession: (branchId) =>
-    fetch(`/api/debug/session?branch_id=${branchId || "main"}`).then(r => r.json()),
-  debugApply: (branchId, actions, directives) =>
-    fetch("/api/debug/apply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        branch_id: branchId || "main",
-        actions: actions || [],
-        directives: directives || [],
-      }),
-    }).then(r => r.json()),
-  debugUndo: (branchId) =>
-    fetch("/api/debug/undo", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branch_id: branchId || "main" }),
-    }).then(r => r.json()),
-  debugClear: (branchId) =>
-    fetch("/api/debug/clear", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branch_id: branchId || "main" }),
     }).then(r => r.json()),
 };
 
@@ -1068,7 +1078,7 @@ function _btFindDeepestLeaf(startId, childrenOf) {
     const kids = (childrenOf[id] || []).filter(k => !k.deleted && !k.merged && !k.pruned);
     if (!kids.length) {
       if (depth > bestDepth || (depth === bestDepth && best &&
-        (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
+          (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
         best = id; bestDepth = depth;
       }
       return;
@@ -1564,78 +1574,79 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
   try {
 
-    const switchRes = await API.switchBranch(branchId);
-    if (!switchRes.ok) {
-      showAlert(switchRes.error || "切換分支失敗");
-      return;
-    }
-    currentBranchId = branchId;
-    updateBranchIndicator();
-    renderBranchList();
+  const switchRes = await API.switchBranch(branchId);
+  if (!switchRes.ok) {
+    showAlert(switchRes.error || "切換分支失敗");
+    return;
+  }
+  currentBranchId = branchId;
+  updateBranchIndicator();
+  renderBranchList();
 
-    if (scrollToIndex != null || preserveScroll) {
-      $messages.style.minHeight = $messages.scrollHeight + "px";
-    }
+  if (scrollToIndex != null || preserveScroll) {
+    $messages.style.minHeight = $messages.scrollHeight + "px";
+  }
 
-    if (isAutoBranch(branchId)) {
-      await loadMessages(branchId, { tail: 100 });
-    } else {
-      await loadMessages(branchId);
-    }
-    const status = await API.status(branchId);
-    renderCharacterStatus(status);
-    loadNpcs();
-    loadEvents();
-    loadDungeonProgress();
-    loadSummaries();
-    loadFateModeStatus();
-    loadDiceCheatStatus();
-    loadPistolModeStatus();
+  if (isAutoBranch(branchId)) {
+    await loadMessages(branchId, { tail: 100 });
+  } else {
+    await loadMessages(branchId);
+  }
+  const status = await API.status(branchId);
+  renderCharacterStatus(status);
+  loadNpcs();
+  loadEvents();
+  loadDungeonProgress();
+  loadSummaries();
+  loadFateModeStatus();
+  loadDiceCheatStatus();
+  loadPistolModeStatus();
+  loadImageGenAddonState();
 
-    // Show/hide "load earlier" button for auto branches with truncated messages
-    if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
-      $loadBtn.style.display = "";
-      $loadBtn.onclick = async () => {
-        $loadBtn.style.display = "none";
-        await loadMessages(branchId);
-        scrollToBottom();
-      };
-    } else {
+  // Show/hide "load earlier" button for auto branches with truncated messages
+  if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
+    $loadBtn.style.display = "";
+    $loadBtn.onclick = async () => {
       $loadBtn.style.display = "none";
-    }
+      await loadMessages(branchId);
+      scrollToBottom();
+    };
+  } else {
+    $loadBtn.style.display = "none";
+  }
 
-    if (isAutoBranch(branchId)) {
-      startLivePolling(branchId);
+  if (isAutoBranch(branchId)) {
+    startLivePolling(branchId);
+  } else {
+    stopLivePolling();
+  }
+
+  if (forcePreserve) {
+    // Keep current scroll position — user may have scrolled during streaming
+    const currentScroll = container.scrollTop;
+    requestAnimationFrame(() => {
+      container.scrollTop = currentScroll;
+      $messages.style.minHeight = "";
+      fadeIn();
+    });
+    return;
+  }
+
+  if (preserveScroll) {
+    if (isAtBottom) {
+      scrollToBottom();
+      $messages.style.minHeight = "";
+      requestAnimationFrame(() => { fadeIn(); });
     } else {
-      stopLivePolling();
-    }
-
-    if (forcePreserve) {
-      // Keep current scroll position — user may have scrolled during streaming
-      const currentScroll = container.scrollTop;
+      container.scrollTop = savedScrollTop;
       requestAnimationFrame(() => {
-        container.scrollTop = currentScroll;
+        container.scrollTop = savedScrollTop;
         $messages.style.minHeight = "";
         fadeIn();
       });
-      return;
     }
-
-    if (preserveScroll) {
-      if (isAtBottom) {
-        scrollToBottom();
-        $messages.style.minHeight = "";
-        requestAnimationFrame(() => { fadeIn(); });
-      } else {
-        container.scrollTop = savedScrollTop;
-        requestAnimationFrame(() => {
-          container.scrollTop = savedScrollTop;
-          $messages.style.minHeight = "";
-          fadeIn();
-        });
-      }
-      return;
-    }
+    return;
+  }
 
   } catch (err) {
     fadeIn();
@@ -2028,11 +2039,6 @@ function renderMessages(messages) {
         $messages.appendChild(bpDiv);
         branchDividerInserted = true;
       }
-    }
-
-    if (msg.message_type === "debug_audit" || msg.role === "system") {
-      $messages.appendChild(createDebugAuditMessageElement(msg));
-      continue;
     }
 
     const el = document.createElement("div");
@@ -3046,7 +3052,19 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
+const GEMINI_IMAGE_MODELS = [
+  "imagen-4.0-ultra-generate-001",
+  "gemini-3.1-flash-image-preview",
+  "gemini-2.5-flash-image",
+];
+let serverDefaultImageModel = "";
 const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude" };
+
+function getDefaultImageModel() {
+  const model = (serverDefaultImageModel || "").trim();
+  if (model) return model;
+  return GEMINI_IMAGE_MODELS[0] || "";
+}
 
 async function loadConfigPanel() {
   const provSel = document.getElementById("provider-select");
@@ -3178,6 +3196,45 @@ async function toggleDiceCheat() {
   }
 }
 
+async function runStateCleanup() {
+  const btn = document.getElementById("cleanup-btn");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "清理中…";
+  try {
+    const res = await fetch("/api/state/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId }),
+    });
+    const data = await res.json();
+    if (data.ok && data.summary) {
+      const s = data.summary;
+      const parts = [];
+      if (s.archived_npcs) parts.push(`歸檔 ${s.archived_npcs} NPC`);
+      if (s.merged_npcs) parts.push(`合併 ${s.merged_npcs} NPC`);
+      if (s.resolved_events) parts.push(`結案 ${s.resolved_events} 事件`);
+      if (s.removed_inventory) parts.push(`移除 ${s.removed_inventory} 道具`);
+      if (s.removed_abilities) parts.push(`移除 ${s.removed_abilities} 技能`);
+      if (s.added_abilities) parts.push(`新增 ${s.added_abilities} 整合技能`);
+      if (s.updated_systems) parts.push(`更新 ${s.updated_systems} 體系`);
+      if (s.clean_relationships) parts.push(`歸檔 ${s.clean_relationships} 關係`);
+      const msg = parts.length > 0
+        ? "清理完成：" + parts.join("、")
+        : "清理完成，沒有需要清理的項目";
+      showToast(msg, 5000);
+    } else {
+      showToast(data.error || "清理失敗");
+    }
+  } catch (e) {
+    console.error("cleanup error:", e);
+    showToast("清理失敗：網路錯誤");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "清理";
+  }
+}
+
 async function toggleFateMode() {
   const addonBtn = document.getElementById("addon-fate-btn");
   const drawerBtn = document.getElementById("fate-cheat-btn");
@@ -3221,6 +3278,27 @@ function _syncDiceToggleDisabled(disabled) {
 function initAddonPanel() {
   const btn = document.getElementById("addon-panel-btn");
   const panel = document.getElementById("addon-panel");
+  
+  document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
+    haptic();
+    await openDebugPanel();
+  });
+
+  const debugModal = document.getElementById("debug-panel-modal");
+  document.getElementById("debug-panel-close")?.addEventListener("click", closeDebugPanel);
+  debugModal?.addEventListener("click", (e) => {
+    if (e.target === debugModal) closeDebugPanel();
+  });
+  document.getElementById("debug-chat-send")?.addEventListener("click", sendDebugChat);
+  document.getElementById("debug-chat-input")?.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      sendDebugChat();
+    }
+  });
+  document.getElementById("debug-apply-btn")?.addEventListener("click", applyDebugChanges);
+  document.getElementById("debug-undo-btn")?.addEventListener("click", undoDebugChanges);
+  document.getElementById("debug-clear-btn")?.addEventListener("click", clearDebugSession);
   if (!btn || !panel) return;
 
   btn.addEventListener("click", (e) => {
@@ -3241,11 +3319,6 @@ function initAddonPanel() {
 
   // Prevent panel clicks from closing
   panel.addEventListener("click", (e) => e.stopPropagation());
-
-  document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
-    haptic();
-    await openDebugPanel();
-  });
 
   // Pistol prefs modal: chip toggles + close handlers
   const prefsModal = document.getElementById("pistol-prefs-modal");
@@ -3284,6 +3357,15 @@ function initAddonPanel() {
       });
     });
   }
+}
+
+async function openAddonPanel() {
+  const panel = document.getElementById("addon-panel");
+  
+  document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
+    haptic();
+    await openDebugPanel();
+  });
 
   const debugModal = document.getElementById("debug-panel-modal");
   document.getElementById("debug-panel-close")?.addEventListener("click", closeDebugPanel);
@@ -3300,10 +3382,6 @@ function initAddonPanel() {
   document.getElementById("debug-apply-btn")?.addEventListener("click", applyDebugChanges);
   document.getElementById("debug-undo-btn")?.addEventListener("click", undoDebugChanges);
   document.getElementById("debug-clear-btn")?.addEventListener("click", clearDebugSession);
-}
-
-async function openAddonPanel() {
-  const panel = document.getElementById("addon-panel");
   if (!panel) return;
   panel.classList.remove("hidden");
   const btn = document.getElementById("addon-panel-btn");
@@ -3313,179 +3391,82 @@ async function openAddonPanel() {
 
 function closeAddonPanel() {
   const panel = document.getElementById("addon-panel");
+  
+  document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
+    haptic();
+    await openDebugPanel();
+  });
+
+  const debugModal = document.getElementById("debug-panel-modal");
+  document.getElementById("debug-panel-close")?.addEventListener("click", closeDebugPanel);
+  debugModal?.addEventListener("click", (e) => {
+    if (e.target === debugModal) closeDebugPanel();
+  });
+  document.getElementById("debug-chat-send")?.addEventListener("click", sendDebugChat);
+  document.getElementById("debug-chat-input")?.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      sendDebugChat();
+    }
+  });
+  document.getElementById("debug-apply-btn")?.addEventListener("click", applyDebugChanges);
+  document.getElementById("debug-undo-btn")?.addEventListener("click", undoDebugChanges);
+  document.getElementById("debug-clear-btn")?.addEventListener("click", clearDebugSession);
   if (panel) panel.classList.add("hidden");
   const btn = document.getElementById("addon-panel-btn");
   if (btn) btn.setAttribute("aria-expanded", "false");
 }
 
-function stripDebugTags(text) {
-  if (!text) return "";
-  return text
-    .replace(/<!--DEBUG_ACTION[\s\S]*?DEBUG_ACTION-->/g, "")
-    .replace(/<!--DEBUG_DIRECTIVE[\s\S]*?DEBUG_DIRECTIVE-->/g, "")
-    .trim();
-}
-
-function _renderDebugChatMessages(messages) {
-  const box = document.getElementById("debug-chat-messages");
-  if (!box) return;
-  box.innerHTML = "";
-  for (const msg of messages || []) {
-    const node = document.createElement("div");
-    node.className = `debug-chat-msg ${msg.role === "user" ? "user" : "assistant"}`;
-    const role = document.createElement("div");
-    role.className = "debug-chat-role";
-    role.textContent = msg.role === "user" ? "玩家" : "Debug GM";
-    const content = document.createElement("div");
-    const cleanContent = msg.role === "assistant" ? stripDebugTags(msg.content) : msg.content;
-    content.innerHTML = markdownToHtml(cleanContent || "");
-    node.appendChild(role);
-    node.appendChild(content);
-    box.appendChild(node);
+function _renderImageModelOptions(selectEl, selectedModel) {
+  if (!selectEl) return;
+  const options = [];
+  const pick = (selectedModel || "").trim() || getDefaultImageModel();
+  options.push(pick);
+  for (const m of GEMINI_IMAGE_MODELS) {
+    if (!options.includes(m)) options.push(m);
   }
-  box.scrollTop = box.scrollHeight;
-}
-
-
-async function _loadDebugSession(resetSuggestions = true) {
-  const res = await API.debugSession(currentBranchId);
-  if (!res.ok) throw new Error(res.error || "載入 debug session 失敗");
-  _debugSession = res;
-  document.getElementById("debug-target-branch").textContent = `branch: ${res.target_branch_id}`;
-  document.getElementById("debug-unit-id").textContent = `unit: ${res.debug_unit_id}`;
-  _renderDebugChatMessages(res.messages || []);
-  if (resetSuggestions) {
-    _debugPendingProposals = [];
-    _debugPendingDirectives = [];
+  selectEl.innerHTML = "";
+  for (const m of options) {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m;
+    if (m === pick) opt.selected = true;
+    selectEl.appendChild(opt);
   }
 }
 
-async function openDebugPanel() {
-  closeAddonPanel();
-  const modal = document.getElementById("debug-panel-modal");
-  if (!modal) return;
-  modal.classList.remove("hidden");
-  document.getElementById("debug-apply-result").textContent = "";
-  await _loadDebugSession();
-}
+async function loadImageGenAddonState() {
+  const btn = document.getElementById("addon-image-gen-btn");
+  const modelSel = document.getElementById("addon-image-model");
+  if (!btn || !modelSel) return;
 
-function closeDebugPanel() {
-  const modal = document.getElementById("debug-panel-modal");
-  if (!modal) return;
-  modal.classList.add("hidden");
-}
-
-async function sendDebugChat() {
-  const input = document.getElementById("debug-chat-input");
-  const sendBtn = document.getElementById("debug-chat-send");
-  const box = document.getElementById("debug-chat-messages");
-  const result = document.getElementById("debug-apply-result");
-  if (!input || !sendBtn || !box || !result) return;
-
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
-  sendBtn.disabled = true;
-  result.textContent = "";
-
-  const userNode = document.createElement("div");
-  userNode.className = "debug-chat-msg user";
-  userNode.innerHTML = `<div class="debug-chat-role">玩家</div><div>${markdownToHtml(text)}</div>`;
-  box.appendChild(userNode);
-
-  const gmNode = document.createElement("div");
-  gmNode.className = "debug-chat-msg assistant";
-  gmNode.innerHTML = `<div class="debug-chat-role">Debug GM</div><div class="debug-chat-stream"><span class="debug-thinking">Thinking...</span></div>`;
-  box.appendChild(gmNode);
-  box.scrollTop = box.scrollHeight;
-
-  let streamed = "";
-  let isFirstChunk = true;
   try {
-    await streamFromSSE(
-      "/api/debug/chat/stream",
-      { branch_id: currentBranchId, user_message: text },
-      (chunk) => {
-        streamed += chunk;
-        const target = gmNode.querySelector(".debug-chat-stream");
-        if (target) {
-          if (isFirstChunk) {
-            target.innerHTML = "";
-            isFirstChunk = false;
-          }
-          target.innerHTML = markdownToHtml(stripDebugTags(streamed));
-        }
-        box.scrollTop = box.scrollHeight;
-      },
-      async (data) => {
-        const finalText = data.response || streamed;
-        const target = gmNode.querySelector(".debug-chat-stream");
-        if (target) {
-          if (isFirstChunk) {
-            target.innerHTML = "";
-            isFirstChunk = false;
-          }
-          target.innerHTML = markdownToHtml(stripDebugTags(finalText));
-        }
-        _debugPendingProposals = data.proposals || [];
-        _debugPendingDirectives = data.directives || [];
-        await _loadDebugSession(false);
-      },
-      (errMsg) => {
-        gmNode.remove();
-        showAlert(errMsg || "debug chat 失敗");
-      },
-    );
-  } finally {
-    sendBtn.disabled = false;
-  }
-}
-
-async function applyDebugChanges() {
-  const result = document.getElementById("debug-apply-result");
-  if (!result) return;
-  try {
-    const res = await API.debugApply(currentBranchId, _debugPendingProposals, _debugPendingDirectives);
-    if (!res.ok) {
-      result.textContent = res.error || "套用失敗";
-      return;
+    const res = await API.getBranchConfig(currentBranchId);
+    const cfg = (res && res.ok && res.config && typeof res.config === "object") ? res.config : {};
+    const defaults = (res && res.defaults && typeof res.defaults === "object") ? res.defaults : {};
+    if (typeof defaults.image_model === "string" && defaults.image_model.trim()) {
+      serverDefaultImageModel = defaults.image_model.trim();
     }
-    const failed = (res.results || []).filter(x => !x.ok);
-    const failLines = failed.map(x => `- ${x.type}: ${x.error || "unknown error"}`);
-    result.textContent = [res.audit_summary || "", ...failLines].filter(Boolean).join("\n");
-    showAlert(res.audit_summary || "變更套用成功！");
-    await loadMessages(currentBranchId);
-    await _loadDebugSession();
+    const defaultModel = getDefaultImageModel();
+    const enabled = cfg.image_gen_enabled !== false;
+    const model = (typeof cfg.image_model === "string" && cfg.image_model.trim())
+      ? cfg.image_model.trim()
+      : defaultModel;
+
+    btn.textContent = enabled ? "ON" : "OFF";
+    btn.classList.toggle("active", enabled);
+    _renderImageModelOptions(modelSel, model);
+    modelSel.disabled = !enabled;
+    modelSel.onchange = async () => {
+      await API.setBranchConfig(currentBranchId, { image_model: modelSel.value });
+    };
   } catch (e) {
-    result.textContent = e.message || "套用失敗";
+    console.error("loadImageGenAddonState error:", e);
+    btn.textContent = "ON";
+    btn.classList.add("active");
+    _renderImageModelOptions(modelSel, getDefaultImageModel());
+    modelSel.disabled = false;
   }
-}
-
-async function undoDebugChanges() {
-  const result = document.getElementById("debug-apply-result");
-  if (!result) return;
-  const res = await API.debugUndo(currentBranchId);
-  if (!res.ok) {
-    result.textContent = res.error || "Undo 失敗";
-    return;
-  }
-  result.textContent = res.audit_summary || "已回滾";
-  await loadMessages(currentBranchId);
-  await _loadDebugSession();
-}
-
-async function clearDebugSession() {
-  const result = document.getElementById("debug-apply-result");
-  if (!result) return;
-  if (!await showConfirm("確定要清空 Debug 對話紀錄嗎？（不影響已套用的改變）")) return;
-
-  const res = await API.debugClear(currentBranchId);
-  if (!res.ok) {
-    result.textContent = res.error || "清除失敗";
-    return;
-  }
-  result.textContent = res.audit_summary || "已清除";
-  await _loadDebugSession();
 }
 
 async function loadAddonPanelState() {
@@ -3576,7 +3557,28 @@ async function loadAddonPanelState() {
     pistolPrefsBtn.classList.toggle("hidden", !pistolBtn.classList.contains("active"));
   }
 
+  await loadImageGenAddonState();
   updateAddonBtnIndicator();
+}
+
+async function toggleImageGen() {
+  const btn = document.getElementById("addon-image-gen-btn");
+  const modelSel = document.getElementById("addon-image-model");
+  if (!btn || !modelSel) return;
+  const isActive = btn.classList.contains("active");
+  const newState = !isActive;
+  try {
+    await API.setBranchConfig(currentBranchId, {
+      image_gen_enabled: newState,
+      image_model: modelSel.value || getDefaultImageModel(),
+    });
+    btn.textContent = newState ? "ON" : "OFF";
+    btn.classList.toggle("active", newState);
+    modelSel.disabled = !newState;
+    updateAddonBtnIndicator();
+  } catch (e) {
+    console.error("toggleImageGen error:", e);
+  }
 }
 
 async function toggleAddonDiceCheat() {
@@ -3752,7 +3754,7 @@ async function savePistolPrefs() {
     const prev = await fetch("/api/nsfw-preferences");
     const prevData = await prev.json();
     chipCounts = prevData.chip_counts || {};
-  } catch (_) { }
+  } catch (_) {}
   for (const c of chipsFlat) {
     chipCounts[c] = (chipCounts[c] || 0) + 1;
   }
@@ -3784,7 +3786,10 @@ function updateAddonBtnIndicator() {
   const pistolActive = document.getElementById("addon-pistol-btn")?.classList.contains("active")
     || document.getElementById("pistol-badge")?.classList.contains("visible")
     || false;
-  btn.classList.toggle("addon-active", diceActive || pistolActive);
+  const imageDisabled = document.getElementById("addon-image-gen-btn")
+    ? !document.getElementById("addon-image-gen-btn").classList.contains("active")
+    : false;
+  btn.classList.toggle("addon-active", diceActive || pistolActive || imageDisabled);
 }
 
 async function loadPistolModeStatus() {
@@ -4182,11 +4187,6 @@ function appendMessage(msg) {
     }
   }
 
-  if (msg.message_type === "debug_audit" || msg.role === "system") {
-    $messages.appendChild(createDebugAuditMessageElement(msg));
-    return;
-  }
-
   const el = document.createElement("div");
   el.className = `message ${msg.role}`;
   if (msg.inherited) el.classList.add("inherited");
@@ -4473,11 +4473,6 @@ document.addEventListener("keydown", (e) => {
       closePistolPrefsModal();
       return;
     }
-    if (!document.getElementById("debug-panel-modal").classList.contains("hidden")) {
-      e.stopImmediatePropagation();
-      closeDebugPanel();
-      return;
-    }
     if (!document.getElementById("addon-panel").classList.contains("hidden")) {
       e.stopImmediatePropagation();
       closeAddonPanel();
@@ -4509,3 +4504,176 @@ document.addEventListener("keydown", (e) => {
 // Boot
 // ---------------------------------------------------------------------------
 init();
+
+// ==========================================
+// Debug Panel Layout
+// ==========================================
+
+function stripDebugTags(text) {
+  if (!text) return "";
+  return text
+    .replace(/<!--DEBUG_ACTION[\s\S]*?DEBUG_ACTION-->/g, "")
+    .replace(/<!--DEBUG_DIRECTIVE[\s\S]*?DEBUG_DIRECTIVE-->/g, "")
+    .trim();
+}
+
+function _renderDebugChatMessages(messages) {
+  const box = document.getElementById("debug-chat-messages");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const msg of messages || []) {
+    const node = document.createElement("div");
+    node.className = `debug-chat-msg ${msg.role === "user" ? "user" : "assistant"}`;
+    const role = document.createElement("div");
+    role.className = "debug-chat-role";
+    role.textContent = msg.role === "user" ? "玩家" : "Debug GM";
+    const content = document.createElement("div");
+    const cleanContent = msg.role === "assistant" ? stripDebugTags(msg.content) : msg.content;
+    content.innerHTML = markdownToHtml(cleanContent || "");
+    node.appendChild(role);
+    node.appendChild(content);
+    box.appendChild(node);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+async function _loadDebugSession(resetSuggestions = true) {
+  const res = await API.debugSession(currentBranchId);
+  if (!res.ok) throw new Error(res.error || "載入 debug session 失敗");
+  _debugSession = res;
+  document.getElementById("debug-target-branch").textContent = `branch: ${res.target_branch_id}`;
+  document.getElementById("debug-unit-id").textContent = `unit: ${res.debug_unit_id}`;
+  _renderDebugChatMessages(res.messages || []);
+  if (resetSuggestions) {
+    _debugPendingProposals = [];
+    _debugPendingDirectives = [];
+  }
+}
+
+async function openDebugPanel() {
+  closeAddonPanel();
+  const modal = document.getElementById("debug-panel-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  document.getElementById("debug-apply-result").textContent = "";
+  await _loadDebugSession();
+}
+
+function closeDebugPanel() {
+  const modal = document.getElementById("debug-panel-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+}
+
+async function sendDebugChat() {
+  const input = document.getElementById("debug-chat-input");
+  const sendBtn = document.getElementById("debug-chat-send");
+  const box = document.getElementById("debug-chat-messages");
+  const result = document.getElementById("debug-apply-result");
+  if (!input || !sendBtn || !box || !result) return;
+
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  sendBtn.disabled = true;
+  result.textContent = "";
+
+  const userNode = document.createElement("div");
+  userNode.className = "debug-chat-msg user";
+  userNode.innerHTML = `<div class="debug-chat-role">玩家</div><div>${markdownToHtml(text)}</div>`;
+  box.appendChild(userNode);
+
+  const gmNode = document.createElement("div");
+  gmNode.className = "debug-chat-msg assistant";
+  gmNode.innerHTML = `<div class="debug-chat-role">Debug GM</div><div class="debug-chat-stream"><span class="debug-thinking">Thinking...</span></div>`;
+  box.appendChild(gmNode);
+  box.scrollTop = box.scrollHeight;
+
+  let streamed = "";
+  let isFirstChunk = true;
+  try {
+    await streamFromSSE(
+      "/api/debug/chat/stream",
+      { branch_id: currentBranchId, user_message: text },
+      (chunk) => {
+        streamed += chunk;
+        const target = gmNode.querySelector(".debug-chat-stream");
+        if (target) {
+          if (isFirstChunk) {
+            target.innerHTML = "";
+            isFirstChunk = false;
+          }
+          target.innerHTML = markdownToHtml(stripDebugTags(streamed));
+        }
+        box.scrollTop = box.scrollHeight;
+      },
+      async (data) => {
+        const finalText = data.response || streamed;
+        const target = gmNode.querySelector(".debug-chat-stream");
+        if (target) {
+          if (isFirstChunk) {
+            target.innerHTML = "";
+            isFirstChunk = false;
+          }
+          target.innerHTML = markdownToHtml(stripDebugTags(finalText));
+        }
+        _debugPendingProposals = data.proposals || [];
+        _debugPendingDirectives = data.directives || [];
+        await _loadDebugSession(false);
+      },
+      (errMsg) => {
+        gmNode.remove();
+        showAlert(errMsg || "debug chat 失敗");
+      },
+    );
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+async function applyDebugChanges() {
+  const result = document.getElementById("debug-apply-result");
+  if (!result) return;
+  try {
+    const res = await API.debugApply(currentBranchId, _debugPendingProposals, _debugPendingDirectives);
+    if (!res.ok) {
+      result.textContent = res.error || "套用失敗";
+      return;
+    }
+    const failed = (res.results || []).filter(x => !x.ok);
+    const failLines = failed.map(x => `- ${x.type}: ${x.error || "unknown error"}`);
+    result.textContent = [res.audit_summary || "", ...failLines].filter(Boolean).join("\n");
+    showAlert(res.audit_summary || "變更套用成功！");
+    await loadMessages(currentBranchId);
+    await _loadDebugSession();
+  } catch (e) {
+    result.textContent = e.message || "套用失敗";
+  }
+}
+
+async function undoDebugChanges() {
+  const result = document.getElementById("debug-apply-result");
+  if (!result) return;
+  const res = await API.debugUndo(currentBranchId);
+  if (!res.ok) {
+    result.textContent = res.error || "Undo 失敗";
+    return;
+  }
+  result.textContent = res.audit_summary || "已回滾";
+  await loadMessages(currentBranchId);
+  await _loadDebugSession();
+}
+
+async function clearDebugSession() {
+  const result = document.getElementById("debug-apply-result");
+  if (!result) return;
+  if (!await showConfirm("確定要清空 Debug 對話紀錄嗎？（不影響已套用的改變）")) return;
+
+  const res = await API.debugClear(currentBranchId);
+  if (!res.ok) {
+    result.textContent = res.error || "清除失敗";
+    return;
+  }
+  result.textContent = res.audit_summary || "已清除";
+  await _loadDebugSession();
+}

@@ -55,14 +55,18 @@
 | PATCH | `/api/branches/<branch_id>` | 分支改名 | body: `name` |
 | DELETE | `/api/branches/<branch_id>` | 刪除分支（main 不可刪） | - |
 | POST | `/api/branches/<branch_id>/protect` | 切換 protected（防 auto-prune） | - |
-| GET | `/api/branches/<branch_id>/config` | 讀分支設定 | - |
-| POST | `/api/branches/<branch_id>/config` | 更新分支設定（merge） | 任意 JSON |
+| GET | `/api/branches/<branch_id>/config` | 讀分支設定（含 `defaults`） | - |
+| POST | `/api/branches/<branch_id>/config` | 更新分支設定（merge，回傳含 `defaults`） | 任意 JSON（常用：`team_mode`, `image_gen_enabled`, `image_model`） |
 | POST | `/api/branches/edit` | 編輯歷史玩家訊息並生成新分支 | body: `parent_branch_id`, `branch_point_index`, `edited_message` |
 | POST | `/api/branches/edit/stream` | `edit` 的 SSE 版本 | 同上 |
 | POST | `/api/branches/regenerate` | 對既有玩家訊息重生成 GM 回覆（新分支） | body: `parent_branch_id`, `branch_point_index` |
 | POST | `/api/branches/regenerate/stream` | `regenerate` 的 SSE 版本 | 同上 |
 | POST | `/api/branches/promote` | Promote 某分支為主線路徑並剪枝 | body: `branch_id` |
 | POST | `/api/branches/merge` | 合併子分支回父分支 | body: `branch_id` |
+
+`/api/branches/<branch_id>/config` 回傳格式補充：
+- `config`: 該分支已保存的設定（僅使用者/系統曾寫入的 key）
+- `defaults`: 目前後端預設值（目前含 `image_gen_enabled=true`, `image_model`），前端可用來避免硬編碼 default 漂移
 
 ## 故事（Story）管理
 
