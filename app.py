@@ -11,6 +11,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 
 # Version — single source of truth in VERSION file
@@ -111,6 +112,20 @@ try:
     LLM_TRACE_RETENTION_DAYS = max(1, int(os.environ.get("LLM_TRACE_RETENTION_DAYS", "14")))
 except ValueError:
     LLM_TRACE_RETENTION_DAYS = 14
+BRANCH_LORE_SCORE_FLOOR = 0.02
+LORE_QUERY_MAX_RECENT_GM = 5
+LORE_QUERY_MAX_TERMS = 12
+_LORE_QUERY_STOP_TERMS = {
+    "主角", "隊長", "當前", "處境", "當前處境", "原本", "周圍", "似乎", "發出",
+    "已經", "東西", "能力", "完成", "利用", "作為", "白色", "空氣", "無數",
+    "瞬間", "以下行動", "素材", "級素材", "主神提示",
+}
+_LORE_QUERY_STOP_CHARS = set(
+    "的一是在有和就都也很嗎呢啊吧了我你他她它們這那個對於與及而並將被把讓來去會可要想說看做給著後前中上下內外高低新舊其並且或等得地"
+)
+_LORE_QUERY_INTERNAL_PUNCT = set("，,。！？!?；;：:、／/—-「」『』【】《》")
+_LORE_QUERY_QUOTED_RE = re.compile(r"[《「『【]([^\n]{2,20}?)[》」』】]")
+_LORE_QUERY_CJK_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 
 # Legacy paths — used only during migration
 CONVERSATION_PATH = os.path.join(BASE_DIR, "Grok_conversation.md")
@@ -1948,6 +1963,17 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
     query_bgs = _bigrams(query)
     # Also use query words for non-CJK matching
     query_lower = query.lower()
+    expanded_query = query.splitlines()[-1] if "\n" in query else query
+    query_terms = []
+    seen_terms = set()
+    for raw_term in re.split(r"\s+", expanded_query):
+        if not _LORE_QUERY_CJK_RE.search(raw_term):
+            continue
+        term = _normalize_lore_query_term(raw_term)
+        if not term or term in seen_terms or _is_noisy_lore_query_term(term):
+            continue
+        seen_terms.add(term)
+        query_terms.append(term)
 
     # Dungeon scoping context
     current_dungeon = ""
@@ -1962,7 +1988,8 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
         topic = e.get("topic", "")
         content = e.get("content", "")
         category = e.get("category", "")
-        text = f"{category} {topic} {content}"
+        subcategory = e.get("subcategory", "")
+        text = f"{category} {subcategory} {topic} {content}"
 
         score = 0.0
         text_bgs = _bigrams(text)
@@ -1973,12 +2000,15 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
         # Boost for substring match in topic
         if query_lower and query_lower in topic.lower():
             score += 2.0
+        score += sum(1.5 for term in query_terms if term in topic)
+        score += sum(2.0 for term in query_terms if term in subcategory)
+        score += sum(0.6 for term in query_terms if term in content)
 
         # Penalize lore from other dungeons
-        if in_dungeon and category == "副本世界觀" and e.get("subcategory", "") != current_dungeon:
+        if in_dungeon and category == "副本世界觀" and subcategory != current_dungeon:
             score *= 0.1
 
-        if score > 0:
+        if score >= BRANCH_LORE_SCORE_FLOOR:
             scored.append((score, e))
 
     scored.sort(key=lambda x: -x[0])
@@ -1988,7 +2018,7 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
     used_tokens = 0
     for _, e in scored:
         content = e.get("content", "")
-        est_tokens = len(content) // 2  # rough CJK estimate
+        est_tokens = len(content)  # CJK content is close to 1 token per char
         if used_tokens + est_tokens > token_budget and lines:
             break
         if len(content) > 1200:
@@ -2005,6 +2035,180 @@ def _search_branch_lore(story_id: str, branch_id: str, query: str,
     if not lines:
         return ""
     return "[相關分支設定]\n" + "\n".join(lines)
+
+
+def _normalize_lore_query_term(term: str) -> str:
+    return re.sub(r"\s+", "", term).strip("：:，,。！？!?、（）()[]{}").strip()
+
+
+def _is_noisy_lore_query_term(term: str) -> bool:
+    if len(term) < 2 or len(term) > 12:
+        return True
+    if term in _LORE_QUERY_STOP_TERMS:
+        return True
+    if any(ch in _LORE_QUERY_INTERNAL_PUNCT for ch in term):
+        return True
+    if term[0] in _LORE_QUERY_STOP_CHARS or term[-1] in _LORE_QUERY_STOP_CHARS:
+        return True
+    if all(ch in _LORE_QUERY_STOP_CHARS for ch in term):
+        return True
+    if len(term) == 2 and (term[0] in _LORE_QUERY_STOP_CHARS or term[1] in _LORE_QUERY_STOP_CHARS):
+        return True
+    return False
+
+
+def _split_quoted_lore_terms(term: str) -> list[str]:
+    parts = [term]
+    for sep in ("：", ":", "·", "／", "/", "—", "-"):
+        next_parts = []
+        for part in parts:
+            if sep not in part:
+                next_parts.append(part)
+                continue
+            next_parts.extend(piece for piece in part.split(sep) if piece)
+        parts = next_parts
+
+    normalized = []
+    seen = set()
+    for part in parts:
+        clean = _normalize_lore_query_term(part)
+        if clean and clean not in seen:
+            normalized.append(clean)
+            seen.add(clean)
+    return normalized
+
+
+def _extract_recent_lore_terms(recent_messages: list[dict] | None,
+                               limit: int = LORE_QUERY_MAX_TERMS) -> list[str]:
+    if not recent_messages:
+        return []
+
+    gm_messages = [
+        m.get("content", "")
+        for m in recent_messages
+        if m.get("role") in ("gm", "assistant") and isinstance(m.get("content"), str) and m.get("content")
+    ][-LORE_QUERY_MAX_RECENT_GM:]
+    if not gm_messages:
+        return []
+
+    scores = Counter()
+    for idx, text in enumerate(gm_messages):
+        recency_weight = idx + 1
+        latest_bonus = 2 if idx == len(gm_messages) - 1 else 0
+
+        for raw_term in _LORE_QUERY_QUOTED_RE.findall(text):
+            for term in _split_quoted_lore_terms(raw_term):
+                if not _is_noisy_lore_query_term(term):
+                    scores[term] += recency_weight * 10 + len(term) + latest_bonus * 4
+
+        for run in _LORE_QUERY_CJK_RE.findall(text):
+            for n in (3, 4):
+                for i in range(len(run) - n + 1):
+                    term = run[i:i + n]
+                    if _is_noisy_lore_query_term(term):
+                        continue
+                    scores[term] += recency_weight * (n - 1) + latest_bonus * (n - 1)
+
+    selected = []
+    for term, _ in sorted(scores.items(), key=lambda kv: (-kv[1], -len(kv[0]), kv[0])):
+        if any(term in kept for kept in selected if len(kept) > len(term)):
+            continue
+        selected.append(term)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _select_lore_npc_terms(
+    user_text: str,
+    recent_messages: list[dict] | None = None,
+    npcs: list[dict] | None = None,
+) -> list[str]:
+    if not npcs:
+        return []
+
+    recent_text = "\n".join(
+        m.get("content", "")
+        for m in (recent_messages or [])
+        if m.get("role") in ("gm", "assistant") and isinstance(m.get("content"), str)
+    )
+    context_text = f"{user_text}\n{recent_text}"
+    selected = []
+    seen = set()
+    for npc in npcs:
+        if not isinstance(npc, dict):
+            continue
+        name = _normalize_lore_query_term(str(npc.get("name", "")))
+        if (
+            not name
+            or name in seen
+            or _is_noisy_lore_query_term(name)
+            or name not in context_text
+        ):
+            continue
+        seen.add(name)
+        selected.append(name)
+    return selected
+
+
+def _extract_user_lore_terms(user_text: str, recent_messages: list[dict] | None = None) -> list[str]:
+    if not user_text:
+        return []
+
+    recent_text = "\n".join(
+        m.get("content", "")
+        for m in (recent_messages or [])
+        if m.get("role") in ("gm", "assistant") and isinstance(m.get("content"), str)
+    )
+    selected = []
+    seen = set()
+    for raw_term in re.split(r"\s+", user_text):
+        if not _LORE_QUERY_CJK_RE.search(raw_term):
+            continue
+        term = _normalize_lore_query_term(raw_term)
+        if (
+            not term
+            or term in seen
+            or _is_noisy_lore_query_term(term)
+            or (recent_text and term not in recent_text)
+        ):
+            continue
+        seen.add(term)
+        selected.append(term)
+    return selected
+
+
+def _build_lore_search_query(
+    user_text: str,
+    recent_messages: list[dict] | None = None,
+    npcs: list[dict] | None = None,
+    current_dungeon: str = "",
+) -> str:
+    extras = []
+    seen = set()
+
+    def _add(term: str):
+        clean = _normalize_lore_query_term(term)
+        if not clean or clean in seen or _is_noisy_lore_query_term(clean):
+            return
+        seen.add(clean)
+        extras.append(clean)
+
+    if current_dungeon:
+        _add(current_dungeon)
+
+    for npc_name in _select_lore_npc_terms(user_text, recent_messages=recent_messages, npcs=npcs):
+        _add(npc_name)
+
+    for term in _extract_user_lore_terms(user_text, recent_messages=recent_messages):
+        _add(term)
+
+    for term in _extract_recent_lore_terms(recent_messages):
+        _add(term)
+
+    if not extras:
+        return user_text
+    return user_text + "\n" + " ".join(extras)
 
 
 def _get_branch_lore_toc(story_id: str, branch_id: str) -> str:
@@ -4411,6 +4615,7 @@ def _build_augmented_message(
     story_id: str, branch_id: str, user_text: str,
     character_state: dict | None = None,
     npcs: list[dict] | None = None,
+    recent_messages: list[dict] | None = None,
     turn_count: int = 0,
     current_index: int | None = None,
 ) -> tuple[str, dict | None]:
@@ -4430,14 +4635,23 @@ def _build_augmented_message(
             "status": character_state.get("current_status", ""),
             "dungeon": character_state.get("current_dungeon", ""),
         }
+    if npcs is None:
+        npcs = _load_npcs(story_id, branch_id)
+
+    lore_query = _build_lore_search_query(
+        user_text,
+        recent_messages=recent_messages,
+        npcs=npcs,
+        current_dungeon=(character_state or {}).get("current_dungeon", ""),
+    )
 
     parts = []
     # Search base lore (via lore.db indexed search)
-    lore = search_relevant_lore(story_id, user_text, context=lore_context)
+    lore = search_relevant_lore(story_id, lore_query, context=lore_context)
     if lore:
         parts.append(lore)
     # Search branch lore (linear CJK bigram search, smaller dataset)
-    branch_lore = _search_branch_lore(story_id, branch_id, user_text, context=lore_context)
+    branch_lore = _search_branch_lore(story_id, branch_id, lore_query, context=lore_context)
     if branch_lore:
         parts.append(branch_lore)
     if not is_blank:
@@ -4454,15 +4668,7 @@ def _build_augmented_message(
 
     # State RAG — on-demand retrieval for inventory/skills/npcs/relations/missions/systems.
     if character_state:
-        all_npcs: list[dict]
-        if npcs is None:
-            all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
-            npcs = [
-                n for n in all_npcs
-                if isinstance(n, dict) and _normalize_npc_lifecycle_status(n.get("lifecycle_status")) != "archived"
-            ]
-        else:
-            all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
+        all_npcs = _load_npcs(story_id, branch_id, include_archived=True)
         must_include = _extract_state_must_include_keys(user_text, character_state, all_npcs)
         state_block = search_state_entries(
             story_id,
@@ -4753,7 +4959,7 @@ def api_send():
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(
-        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc,
+        story_id, branch_id, user_text, state, npcs=npcs, recent_messages=recent, turn_count=tc,
         current_index=player_msg["index"],
     )
     if dice_result:
@@ -4899,7 +5105,7 @@ def api_send_stream():
     )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_text, dice_result = _build_augmented_message(
-        story_id, branch_id, user_text, state, npcs=npcs, turn_count=tc,
+        story_id, branch_id, user_text, state, npcs=npcs, recent_messages=recent, turn_count=tc,
         current_index=player_msg["index"],
     )
     if dice_result:
@@ -5383,7 +5589,7 @@ def api_branches_edit():
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_edit, dice_result = _build_augmented_message(
-        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc,
+        story_id, branch_id, edited_message, state, npcs=npcs, recent_messages=recent, turn_count=tc,
         current_index=user_msg_index,
     )
     if dice_result:
@@ -5558,7 +5764,7 @@ def api_branches_edit_stream():
     )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_edit, dice_result = _build_augmented_message(
-        story_id, branch_id, edited_message, state, npcs=npcs, turn_count=tc,
+        story_id, branch_id, edited_message, state, npcs=npcs, recent_messages=recent, turn_count=tc,
         current_index=user_msg_index,
     )
     if dice_result:
@@ -5736,7 +5942,7 @@ def api_branches_regenerate():
     t0 = time.time()
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_regen, dice_result = _build_augmented_message(
-        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc,
+        story_id, branch_id, user_msg_content, state, npcs=npcs, recent_messages=recent, turn_count=tc,
         current_index=branch_point_index,
     )
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
@@ -5893,7 +6099,7 @@ def api_branches_regenerate_stream():
     )
     tc = sum(1 for m in full_timeline if m.get("role") == "user")
     augmented_regen, dice_result = _build_augmented_message(
-        story_id, branch_id, user_msg_content, state, npcs=npcs, turn_count=tc,
+        story_id, branch_id, user_msg_content, state, npcs=npcs, recent_messages=recent, turn_count=tc,
         current_index=branch_point_index,
     )
 

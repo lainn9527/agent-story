@@ -71,6 +71,16 @@
 9. `---`
 10. 原始玩家輸入
 
+補充：
+
+- lore 檢索 query 不是只用原始玩家輸入。
+  - 會先保留原始玩家輸入。
+  - 再附加 `current_dungeon`。
+  - 再附加「最近幾則 GM 回覆或玩家輸入中明確提到」的 active NPC 名稱。
+  - 再附加 recent GM 回覆中的高訊號 CJK terms（優先保留副本名、NPC 名、事件名、術式/道具名）。
+- `[相關世界設定]` 會用這個 expanded query 做 keyword + embedding 混合排序，並套用最低 keyword/RRF 分數門檻，避免弱命中條目塞滿 token budget。
+- `[相關分支設定]` 會用同一份 expanded query 做 normalized bigram overlap 搜尋，並額外考慮 query terms 對 `topic/subcategory/content` 的命中；budget 估算以 CJK 約 1 char ≈ 1 token 計，避免低相關的舊分支設定過量注入。
+
 ### 2.5 戰力等級一致性（Tier Consistency）
 
 - `system_prompt.txt` 內新增「戰力等級敘事指南（演出落地）」：五大等級 D/C/B/A/S 的具體演出維度與反面檢查。

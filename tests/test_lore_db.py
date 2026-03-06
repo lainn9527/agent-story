@@ -299,7 +299,11 @@ class TestSearchLore:
         # Pure English query → uses full string as keyword
         # "T病毒" has CJK: "T病毒" → bigrams: "病毒"
         results = lore_db.search_lore(story_id, "T病毒")
-        assert len(results) > 0
+        assert results == []
+
+    def test_filters_single_content_bigram_noise(self, story_id, setup_lore):
+        results = lore_db.search_lore(story_id, "病毒")
+        assert results == []
 
 
 # ===================================================================
@@ -317,7 +321,7 @@ class TestSearchHybrid:
 
     def test_token_budget_respected(self, story_id, setup_lore):
         # With a very small budget, should limit results
-        results = lore_db.search_hybrid(story_id, "的", token_budget=100)
+        results = lore_db.search_hybrid(story_id, "基因鎖", token_budget=100)
         total_tokens = sum(
             min(len(r.get("content", "")), 1200) + len(r.get("topic", "")) + 20
             for r in results
@@ -352,10 +356,17 @@ class TestSearchHybrid:
         results = lore_db.search_hybrid(story_id, "zzz_no_match")
         assert results == []
 
+    def test_rrf_floor_drops_penalized_cross_dungeon_tail(self, story_id, setup_lore_with_subcategory):
+        context = {"phase": "副本中", "status": "", "dungeon": "咒怨"}
+        results = lore_db.search_hybrid(story_id, "副本目標", context=context)
+        topics = [r["topic"] for r in results]
+        assert "咒怨" in topics
+        assert "生化危機" not in topics
+
     def test_dungeon_scoping_penalizes_other_dungeons(self, story_id, setup_lore_with_subcategory):
         """When in 咒怨 dungeon, 生化危機 entries should be penalized."""
         context = {"phase": "副本中", "status": "", "dungeon": "咒怨"}
-        results = lore_db.search_hybrid(story_id, "副本", context=context)
+        results = lore_db.search_hybrid(story_id, "副本目標", context=context)
         assert len(results) > 0
         # 咒怨 should rank before 生化危機
         topics = [r["topic"] for r in results]
@@ -365,7 +376,7 @@ class TestSearchHybrid:
     def test_dungeon_scoping_no_penalty_without_dungeon(self, story_id, setup_lore_with_subcategory):
         """Without dungeon context, no penalization."""
         context = {"phase": "副本中", "status": "", "dungeon": ""}
-        results = lore_db.search_hybrid(story_id, "副本", context=context)
+        results = lore_db.search_hybrid(story_id, "副本目標", context=context)
         # Both should appear without strong penalization
         topics = [r["topic"] for r in results]
         assert "咒怨" in topics or "生化危機" in topics
@@ -373,7 +384,7 @@ class TestSearchHybrid:
     def test_dungeon_scoping_no_penalty_in_main_space(self, story_id, setup_lore_with_subcategory):
         """In 主神空間 (no 副本 in phase), no dungeon penalty even if dungeon set."""
         context = {"phase": "主神空間", "status": "", "dungeon": "咒怨"}
-        results = lore_db.search_hybrid(story_id, "副本", context=context)
+        results = lore_db.search_hybrid(story_id, "副本目標", context=context)
         topics = [r["topic"] for r in results]
         # 生化危機 should NOT be heavily penalized since we're not in a dungeon phase
         assert "生化危機" in topics or len(results) > 0
