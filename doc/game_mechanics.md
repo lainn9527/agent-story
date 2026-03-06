@@ -157,10 +157,17 @@
 - NPC 新增欄位：
   - `lifecycle_status`：`active` / `archived`（缺省視為 `active`）
   - `archived_reason`：封存來源說明（可為 `null`）
-- `_save_npc()` 只用 `current_status` 判定封存/解封存：
-  - archive 關鍵詞：`已損毀`、`威脅解除`、`已退場`、`已失效`、`已封印`、`已消散`、`已離隊`
+- `archive_kind`：`offstage` / `terminal`
+- `origin_dungeon_id` / `origin_run_id`：NPC 首次被記錄時所屬的副本模板與 run 識別（目前 `origin_run_id` 使用當次副本 `entered_at`）
+- `_save_npc()` 會用 `current_status` 判定封存/解封存，並區分歸檔種類：
+  - terminal archive 關鍵詞：`已損毀`、`威脅解除`、`已失效`、`已封印`、`已消散`
+  - offstage archive 關鍵詞：`已退場`、`已離隊`
   - unarchive 關鍵詞：`修復`、`復活`、`再現身`、`重新啟用`、`解除封印`
   - 優先序：顯式 `lifecycle_status` > unarchive > archive > 保持現狀
+  - 顯式 `lifecycle_status="archived"` 時，`archive_kind` 若未提供，會沿用既有值；仍無既有值時預設為 `terminal`
+- `_extract_tags_async()` 與同步 `NPC` tag 路徑會在寫入時附帶當前 run context；若既有 NPC 是 `archived + archive_kind=offstage`，且後續同一個 `origin_run_id` 又收到新的 NPC update，`_save_npc()` 會自動改回 `active`
+- 這個 auto-reactivation 只適用於「同一輪 run 內再次出場」；完整離開副本後重新進入同一模板會產生新的 `origin_run_id`，不會自動復活舊 run 的 archived NPC
+- `state_cleanup` 的 `archive_npcs` 建議現在也會帶 `archive_kind`；merge 掉的別名 NPC 一律視為 `terminal`
 - `_load_npcs()` 預設只回 active；需要全量時用 `include_archived=True`。
 - state.db 對 archived NPC 會打 `NPC|ARCHIVED` tag；`search_state` 預設過濾，只有 forced key（玩家明確提名）才保留。
 

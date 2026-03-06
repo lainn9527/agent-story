@@ -708,6 +708,23 @@ class TestAsyncGmPlanExtraction:
 
 
 class TestNpcTier:
+    def test_derive_npc_lifecycle_classifies_archive_kind(self):
+        assert app_module._derive_npc_lifecycle_from_current_status("已損毀，威脅解除", None) == (
+            "archived",
+            "已損毀",
+            "terminal",
+        )
+        assert app_module._derive_npc_lifecycle_from_current_status("已離隊，暫時退場", None) == (
+            "archived",
+            "已離隊",
+            "offstage",
+        )
+        assert app_module._derive_npc_lifecycle_from_current_status("修復完成", "archived") == (
+            "active",
+            "修復",
+            None,
+        )
+
     @mock.patch("llm_bridge.call_oneshot")
     def test_extract_prompt_includes_tier_schema(self, mock_llm, story_id, setup_story):
         """Extraction prompt should ask for tier field with allowlist format."""
@@ -747,7 +764,24 @@ class TestNpcTier:
         npcs_path = setup_story / "branches" / "main" / "npcs.json"
         npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
         assert npcs[0]["lifecycle_status"] == "archived"
+        assert npcs[0]["archive_kind"] == "terminal"
         assert str(npcs[0].get("archived_reason", "")).startswith("current_status:")
+
+    def test_save_npc_archives_offstage_on_departure_keyword(self, story_id, setup_story):
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "role": "隊友", "current_status": "已離隊，暫時退場"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "archived"
+        assert npcs[0]["archive_kind"] == "offstage"
+        assert npcs[0]["origin_dungeon_id"] == "naruto"
+        assert npcs[0]["origin_run_id"] == "run-1"
 
     def test_save_npc_unarchives_on_repair_keyword(self, story_id, setup_story):
         app_module._save_npc(
@@ -766,6 +800,150 @@ class TestNpcTier:
         assert len(npcs) == 1
         assert npcs[0]["lifecycle_status"] == "active"
         assert npcs[0]["archived_reason"] is None
+
+    def test_save_npc_same_run_offstage_reactivates_and_cleans_relationship_note(self, story_id, setup_story):
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["relationships"] = {"阿喪": "暫時離隊 (已歸檔)"}
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "role": "隊友", "current_status": "已離隊"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+        )
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "role": "回歸隊友"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "active"
+        assert npcs[0]["archive_kind"] is None
+        assert npcs[0]["archived_reason"] is None
+        assert npcs[0]["current_status"] == ""
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["relationships"]["阿喪"] == "暫時離隊"
+
+    @pytest.mark.parametrize(
+        ("existing_status", "existing_archive_kind", "incoming_run_id"),
+        [
+            ("已損毀", "terminal", "run-1"),
+            ("已離隊", "offstage", "run-2"),
+        ],
+    )
+    def test_save_npc_reactivation_requires_offstage_same_run(
+        self,
+        story_id,
+        setup_story,
+        existing_status,
+        existing_archive_kind,
+        incoming_run_id,
+    ):
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "lifecycle_status": "archived", "current_status": existing_status},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+            archive_kind=existing_archive_kind,
+        )
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "role": "被再次提及"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id=incoming_run_id,
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "archived"
+        assert npcs[0]["archive_kind"] == existing_archive_kind
+
+    def test_save_npc_explicit_archive_does_not_trigger_same_run_reactivation(self, story_id, setup_story):
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "current_status": "已離隊"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+        )
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "lifecycle_status": "archived"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+            archive_kind="offstage",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "archived"
+        assert npcs[0]["archive_kind"] == "offstage"
+
+    def test_save_npc_preserves_existing_origin_fields(self, story_id, setup_story):
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "role": "隊友"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+        )
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "relationship_to_player": "信任"},
+            "main",
+            origin_dungeon_id="bleach",
+            origin_run_id="run-2",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["origin_dungeon_id"] == "naruto"
+        assert npcs[0]["origin_run_id"] == "run-1"
+
+    @mock.patch("llm_bridge.call_oneshot")
+    def test_extract_tags_async_uses_current_run_context_for_same_run_reactivation(
+        self,
+        mock_llm,
+        story_id,
+        setup_story,
+        monkeypatch,
+    ):
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["relationships"] = {"阿喪": "暫時離隊 (已歸檔)"}
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        app_module._save_npc(
+            story_id,
+            {"name": "阿喪", "current_status": "已離隊"},
+            "main",
+            origin_dungeon_id="naruto",
+            origin_run_id="run-1",
+        )
+        monkeypatch.setattr(
+            app_module,
+            "get_current_run_context",
+            lambda *_args, **_kwargs: {"dungeon_id": "naruto", "run_id": "run-1"},
+        )
+        mock_llm.return_value = json.dumps({"npcs": [{"name": "阿喪", "role": "再次現身"}]}, ensure_ascii=False)
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "active"
+        assert npcs[0]["archive_kind"] is None
 
     def test_save_npc_r1_name_merge(self, story_id, setup_story):
         app_module._save_npc(story_id, {"name": "小琳", "role": "高中少女"}, "main")

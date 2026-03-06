@@ -182,6 +182,22 @@ def _current_dungeon_name(state: Optional[dict]) -> str:
     return str((state or {}).get("current_dungeon") or "").strip()
 
 
+def get_current_run_context(story_id: str, branch_id: str) -> Optional[dict]:
+    """Return the active dungeon run context, or None when not in a dungeon."""
+    progress = _load_dungeon_progress(story_id, branch_id)
+    if not progress or not progress.get("current_dungeon"):
+        return None
+    current = progress["current_dungeon"]
+    dungeon_id = str(current.get("dungeon_id") or "").strip()
+    run_id = str(current.get("entered_at") or "").strip()
+    if not dungeon_id or not run_id:
+        return None
+    return {
+        "dungeon_id": dungeon_id,
+        "run_id": run_id,
+    }
+
+
 def initialize_dungeon_progress(
     story_id: str,
     branch_id: str,
