@@ -251,3 +251,30 @@
 5. 若調整 tier 或 relationship 正規化規則，需同步更新：
    - `app.py::_normalize_npc_tier()` / `_rel_to_str()`
    - `state_db.py` 內對應 helper（目前為避免循環 import 採 duplicated logic）
+
+---
+
+## Debug Panel Prompt（V1）
+
+路由：`POST /api/debug/chat/stream`
+
+- 使用獨立 Debug system prompt（診斷/修正助手），與主 GM prompt 分離。
+- 每次呼叫會注入：
+  - 主聊天最近 `RECENT_MESSAGE_COUNT` 則（唯讀摘要）
+  - `character_state.json`（完整）
+  - `npcs.json`（含 archived）
+  - `world_day`
+  - `dungeon_progress.json`
+  - `gm_plan.json`
+  - 當前 `debug_directive.json`（若存在）
+- Debug 對話歷史由 server 端管理（`debug_units/<unit>/chat.json`），送 LLM 時僅取最近 20 則。
+- V1 目前直接注入完整 state / NPC / dungeon JSON，尚未做獨立 token budget；大型故事有 context 爆量風險。
+
+### Debug Tag 契約
+
+- 修正提案：`<!--DEBUG_ACTION {...} DEBUG_ACTION-->`
+  - `type` 支援：`state_patch` / `npc_upsert` / `npc_delete` / `world_day_set` / `dungeon_patch`
+- 劇情指令：`<!--DEBUG_DIRECTIVE {"instruction":"..."} DEBUG_DIRECTIVE-->`
+  - apply 後寫入 branch `debug_directive.json`
+  - 下次主 GM 回合注入 `_build_augmented_message`
+  - 該回合完成後由 `_process_gm_response` 自動清除（一次性）

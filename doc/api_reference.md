@@ -105,6 +105,22 @@
 | POST | `/api/lore/chat/stream` | Lore 對話（SSE，含提案解析） | body: `messages` |
 | POST | `/api/lore/apply` | 批次套用 lore 提案 | body: `proposals` |
 
+## Debug Panel
+
+| Method | Path | 說明 | 主要參數 |
+|---|---|---|---|
+| GET | `/api/debug/session` | 取得 Debug session（依 blank root 單位） | `branch_id` |
+| POST | `/api/debug/chat/stream` | Debug 對話串流（SSE，server-owned history） | body: `branch_id`, `user_message` |
+| POST | `/api/debug/apply` | 套用勾選修正（逐項執行） | body: `branch_id`, `actions[]`, `directives[]` |
+| POST | `/api/debug/undo` | 回滾最近一次 Debug apply | body: `branch_id` |
+
+注意：
+
+- `apply` 會先寫完整 backup，再逐項執行 action，回傳每項成功/失敗。
+- `actions` / `directives` 各自都有上限（預設 20，可由 env 覆蓋）；`directives` 只會採用最後一個非空 instruction。
+- `directive` 會獨立寫入 `debug_directive.json`，不受 action 失敗影響。
+- `undo` 只支援最近一次 apply（同 debug unit，且 branch 要匹配）；若 backup 的 `world_day` 損壞，會直接回 `400`，不會 fallback 到目前值。
+
 ## NPC / Events / Images
 
 | Method | Path | 說明 | 主要參數 |

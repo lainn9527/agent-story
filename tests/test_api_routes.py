@@ -356,6 +356,20 @@ class TestBranchesAPI:
         child_plan_path = setup_story / "branches" / child_id / "gm_plan.json"
         assert not child_plan_path.exists()
 
+    def test_create_branch_does_not_copy_debug_directive(self, client, setup_story):
+        main_directive_path = setup_story / "branches" / "main" / "debug_directive.json"
+        main_directive_path.write_text(json.dumps({
+            "instruction": "下回合請補主線提示",
+            "source": "debug_panel",
+        }, ensure_ascii=False), encoding="utf-8")
+
+        resp = client.post("/api/branches", json={"name": "不帶directive", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+
+        child_directive_path = setup_story / "branches" / child_id / "debug_directive.json"
+        assert not child_directive_path.exists()
+
     def test_switch_branch(self, client, setup_story):
         # Create a branch first
         resp = client.post("/api/branches", json={"name": "切換用", "branch_point_index": 1})
@@ -1597,3 +1611,65 @@ class TestCheatsAPI:
 
         resp2 = client.get("/api/cheats/pistol")
         assert resp2.get_json()["pistol_mode"] is True
+
+
+# ===================================================================
+# Debug Panel
+# ===================================================================
+
+
+class TestDebugAPI:
+    def test_get_debug_session(self, client, setup_story):
+        resp = client.get("/api/debug/session?branch_id=main")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["target_branch_id"] == "main"
+        assert "debug_unit_id" in data
+        assert isinstance(data["messages"], list)
+
+    def test_debug_chat_stream_contract(self, client, setup_story, monkeypatch):
+        def _fake_stream(*_args, **_kwargs):
+            yield ("text", "先檢查資料。")
+            yield ("done", {
+                "response": (
+                    "先檢查資料。"
+                    "<!--DEBUG_ACTION {\"type\":\"state_patch\",\"update\":{\"reward_points_delta\":10}} DEBUG_ACTION-->"
+                    "<!--DEBUG_DIRECTIVE {\"instruction\":\"下一回合請回收主線提示\"} DEBUG_DIRECTIVE-->"
+                ),
+                "usage": None,
+            })
+
+        monkeypatch.setattr(app_module, "call_claude_gm_stream", _fake_stream)
+        resp = client.post("/api/debug/chat/stream", json={
+            "branch_id": "main",
+            "user_message": "檢查一下獎勵點",
+        })
+        assert resp.status_code == 200
+        body = b"".join(resp.response).decode("utf-8")
+        done_lines = [ln for ln in body.splitlines() if ln.startswith("data: ")]
+        assert done_lines
+        done_payload = json.loads(done_lines[-1][6:])
+        assert done_payload["type"] == "done"
+        assert isinstance(done_payload.get("proposals"), list)
+        assert isinstance(done_payload.get("directives"), list)
+
+    def test_debug_apply_and_undo_contract(self, client, setup_story):
+        apply_resp = client.post("/api/debug/apply", json={
+            "branch_id": "main",
+            "actions": [{"type": "state_patch", "update": {"reward_points_delta": 20}}],
+            "directives": [{"instruction": "下回合推進主線"}],
+        })
+        assert apply_resp.status_code == 200
+        data = apply_resp.get_json()
+        assert data["ok"] is True
+        assert "results" in data
+        assert "directive_result" in data
+        assert "audit_summary" in data
+
+        undo_resp = client.post("/api/debug/undo", json={"branch_id": "main"})
+        assert undo_resp.status_code == 200
+        undo = undo_resp.get_json()
+        assert undo["ok"] is True
+        assert undo["restored"] is True
+        assert "audit_summary" in undo

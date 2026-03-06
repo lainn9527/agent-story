@@ -338,6 +338,48 @@ class TestBuildAugmentedMessage:
         assert block.startswith("[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]")
         assert len(block) <= 120
 
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="[NPC 近期動態]\n- 阿豪：觀察中")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_debug_directive_injected_between_plan_and_npc_activity(
+        self, _mock_fate, _mock_gm, _mock_act, _mock_evt, _mock_lore, story_id, setup_story
+    ):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "gm_plan.json").write_text(json.dumps({
+            "arc": "主線推進",
+            "next_beats": ["確認任務", "觸發回收"],
+            "must_payoff": [],
+            "updated_at_index": 3,
+        }, ensure_ascii=False), encoding="utf-8")
+        (branch_dir / "debug_directive.json").write_text(json.dumps({
+            "instruction": "下一回合請檢查主線任務是否完成並補提示。"
+        }, ensure_ascii=False), encoding="utf-8")
+
+        text, _ = app_module._build_augmented_message(
+            story_id, "main", "我繼續前進", {"current_phase": "副本中"}, current_index=8
+        )
+
+        gm_idx = text.find("[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]")
+        dbg_idx = text.find("[Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）]")
+        npc_idx = text.find("[NPC 近期動態]")
+        assert gm_idx != -1
+        assert dbg_idx != -1
+        assert npc_idx != -1
+        assert gm_idx < dbg_idx < npc_idx
+
+    def test_process_gm_response_consumes_debug_directive(self, story_id, setup_story, monkeypatch):
+        branch_dir = setup_story / "branches" / "main"
+        directive_path = branch_dir / "debug_directive.json"
+        directive_path.write_text(json.dumps({
+            "instruction": "下一回合推進主線"
+        }, ensure_ascii=False), encoding="utf-8")
+
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+        app_module._process_gm_response("一般回覆內容", story_id, "main", msg_index=1)
+        assert not directive_path.exists()
+
 
 # ===================================================================
 # _build_story_system_prompt

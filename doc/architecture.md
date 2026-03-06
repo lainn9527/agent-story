@@ -78,8 +78,12 @@ Browser (static/app.js, templates/index.html)
   - `conversation_recap.json`
   - `world_day.json`
   - `dungeon_progress.json`
+  - `debug_directive.json`（一次性隱藏 Debug 劇情指令）
   - `gm_cheats.json`
   - `branch_config.json`
+- `debug_units/<debug_unit_id>/`
+  - `chat.json`（Debug 對話歷史，依 blank root 單位共用）
+  - `last_apply_backup.json`（最近一次 Debug apply 前完整快照，供 Undo）
 - `lore.db` / `events.db` / `usage.db`
 - `saves.json`
 - `images/`
@@ -102,6 +106,7 @@ Browser (static/app.js, templates/index.html)
 1. 寫入玩家訊息到分支 delta。
 2. 建構 system prompt（核心角色狀態 + lore + NPC 摘要 + recap + 副本上下文）。
 3. 對玩家訊息做 context augmentation（lore/events/GM 隱藏敘事計劃/npc 活動/state RAG/戰力提醒/骰子提示）。
+   - 若存在 `debug_directive.json`，會注入 `[Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）]` 區塊（一次性）
    - state RAG 走檢索層限流（預設總筆數 30、NPC 類別上限 10）
    - `must_include_keys` 命中項目保底注入，不受類別上限限制
 4. 記錄 request trace，呼叫 LLM（stream 或 non-stream），再記錄 response trace。
