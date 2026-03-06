@@ -1078,7 +1078,7 @@ function _btFindDeepestLeaf(startId, childrenOf) {
     const kids = (childrenOf[id] || []).filter(k => !k.deleted && !k.merged && !k.pruned);
     if (!kids.length) {
       if (depth > bestDepth || (depth === bestDepth && best &&
-          (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
+        (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
         best = id; bestDepth = depth;
       }
       return;
@@ -1574,79 +1574,79 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
   try {
 
-  const switchRes = await API.switchBranch(branchId);
-  if (!switchRes.ok) {
-    showAlert(switchRes.error || "切換分支失敗");
-    return;
-  }
-  currentBranchId = branchId;
-  updateBranchIndicator();
-  renderBranchList();
+    const switchRes = await API.switchBranch(branchId);
+    if (!switchRes.ok) {
+      showAlert(switchRes.error || "切換分支失敗");
+      return;
+    }
+    currentBranchId = branchId;
+    updateBranchIndicator();
+    renderBranchList();
 
-  if (scrollToIndex != null || preserveScroll) {
-    $messages.style.minHeight = $messages.scrollHeight + "px";
-  }
+    if (scrollToIndex != null || preserveScroll) {
+      $messages.style.minHeight = $messages.scrollHeight + "px";
+    }
 
-  if (isAutoBranch(branchId)) {
-    await loadMessages(branchId, { tail: 100 });
-  } else {
-    await loadMessages(branchId);
-  }
-  const status = await API.status(branchId);
-  renderCharacterStatus(status);
-  loadNpcs();
-  loadEvents();
-  loadDungeonProgress();
-  loadSummaries();
-  loadFateModeStatus();
-  loadDiceCheatStatus();
-  loadPistolModeStatus();
-  loadImageGenAddonState();
-
-  // Show/hide "load earlier" button for auto branches with truncated messages
-  if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
-    $loadBtn.style.display = "";
-    $loadBtn.onclick = async () => {
-      $loadBtn.style.display = "none";
-      await loadMessages(branchId);
-      scrollToBottom();
-    };
-  } else {
-    $loadBtn.style.display = "none";
-  }
-
-  if (isAutoBranch(branchId)) {
-    startLivePolling(branchId);
-  } else {
-    stopLivePolling();
-  }
-
-  if (forcePreserve) {
-    // Keep current scroll position — user may have scrolled during streaming
-    const currentScroll = container.scrollTop;
-    requestAnimationFrame(() => {
-      container.scrollTop = currentScroll;
-      $messages.style.minHeight = "";
-      fadeIn();
-    });
-    return;
-  }
-
-  if (preserveScroll) {
-    if (isAtBottom) {
-      scrollToBottom();
-      $messages.style.minHeight = "";
-      requestAnimationFrame(() => { fadeIn(); });
+    if (isAutoBranch(branchId)) {
+      await loadMessages(branchId, { tail: 100 });
     } else {
-      container.scrollTop = savedScrollTop;
+      await loadMessages(branchId);
+    }
+    const status = await API.status(branchId);
+    renderCharacterStatus(status);
+    loadNpcs();
+    loadEvents();
+    loadDungeonProgress();
+    loadSummaries();
+    loadFateModeStatus();
+    loadDiceCheatStatus();
+    loadPistolModeStatus();
+    loadImageGenAddonState();
+
+    // Show/hide "load earlier" button for auto branches with truncated messages
+    if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
+      $loadBtn.style.display = "";
+      $loadBtn.onclick = async () => {
+        $loadBtn.style.display = "none";
+        await loadMessages(branchId);
+        scrollToBottom();
+      };
+    } else {
+      $loadBtn.style.display = "none";
+    }
+
+    if (isAutoBranch(branchId)) {
+      startLivePolling(branchId);
+    } else {
+      stopLivePolling();
+    }
+
+    if (forcePreserve) {
+      // Keep current scroll position — user may have scrolled during streaming
+      const currentScroll = container.scrollTop;
       requestAnimationFrame(() => {
-        container.scrollTop = savedScrollTop;
+        container.scrollTop = currentScroll;
         $messages.style.minHeight = "";
         fadeIn();
       });
+      return;
     }
-    return;
-  }
+
+    if (preserveScroll) {
+      if (isAtBottom) {
+        scrollToBottom();
+        $messages.style.minHeight = "";
+        requestAnimationFrame(() => { fadeIn(); });
+      } else {
+        container.scrollTop = savedScrollTop;
+        requestAnimationFrame(() => {
+          container.scrollTop = savedScrollTop;
+          $messages.style.minHeight = "";
+          fadeIn();
+        });
+      }
+      return;
+    }
 
   } catch (err) {
     fadeIn();
@@ -3278,7 +3278,7 @@ function _syncDiceToggleDisabled(disabled) {
 function initAddonPanel() {
   const btn = document.getElementById("addon-panel-btn");
   const panel = document.getElementById("addon-panel");
-  
+
   document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
     haptic();
     await openDebugPanel();
@@ -3361,7 +3361,7 @@ function initAddonPanel() {
 
 async function openAddonPanel() {
   const panel = document.getElementById("addon-panel");
-  
+
   document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
     haptic();
     await openDebugPanel();
@@ -3391,7 +3391,7 @@ async function openAddonPanel() {
 
 function closeAddonPanel() {
   const panel = document.getElementById("addon-panel");
-  
+
   document.getElementById("addon-debug-btn")?.addEventListener("click", async () => {
     haptic();
     await openDebugPanel();
@@ -3754,7 +3754,7 @@ async function savePistolPrefs() {
     const prev = await fetch("/api/nsfw-preferences");
     const prevData = await prev.json();
     chipCounts = prevData.chip_counts || {};
-  } catch (_) {}
+  } catch (_) { }
   for (const c of chipsFlat) {
     chipCounts[c] = (chipCounts[c] || 0) + 1;
   }
@@ -4537,6 +4537,21 @@ function _renderDebugChatMessages(messages) {
   box.scrollTop = box.scrollHeight;
 }
 
+function _updateDebugApplyButton() {
+  const btn = document.getElementById("debug-apply-btn");
+  if (!btn) return;
+  const count = _debugPendingProposals.length + _debugPendingDirectives.length;
+  if (count > 0) {
+    btn.textContent = `套用修正 (${count} 筆)`;
+    btn.classList.add("pulse-ready");
+    btn.disabled = false;
+  } else {
+    btn.textContent = "目前無待套用修正";
+    btn.classList.remove("pulse-ready");
+    btn.disabled = true;
+  }
+}
+
 async function _loadDebugSession(resetSuggestions = true) {
   const res = await API.debugSession(currentBranchId);
   if (!res.ok) throw new Error(res.error || "載入 debug session 失敗");
@@ -4548,6 +4563,7 @@ async function _loadDebugSession(resetSuggestions = true) {
     _debugPendingProposals = [];
     _debugPendingDirectives = [];
   }
+  _updateDebugApplyButton();
 }
 
 async function openDebugPanel() {

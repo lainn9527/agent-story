@@ -1392,6 +1392,51 @@ body {
   min-height: 60px;
 }
 
+.debug-panel-tools {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 5px;
+}
+
+.debug-panel-tools .cheat-toggle:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border-color: var(--border-color);
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@keyframes pulseReady {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(76, 175, 80, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+  }
+}
+
+.debug-panel-tools .cheat-toggle.pulse-ready {
+  background: #4caf50;
+  color: #fff;
+  border-color: #4caf50;
+  animation: pulseReady 2s infinite;
+}
+
+.debug-result-text {
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;
