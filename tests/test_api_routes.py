@@ -1020,6 +1020,91 @@ class TestSavesAPI:
         assert status_after_send["reward_points"] == 98765
         assert "loaded_save_id" not in status_after_send
 
+    def test_send_uses_max_index_when_timeline_has_gap(self, client, setup_story, story_id, monkeypatch):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["branches"]["branch_gap"] = {
+            "id": "branch_gap",
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "name": "gap branch",
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        branch_dir = setup_story / "branches" / "branch_gap"
+        branch_dir.mkdir(parents=True, exist_ok=True)
+        (branch_dir / "messages.json").write_text(
+            json.dumps([{"index": 3, "role": "gm", "content": "gap 測試訊息"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        captured = {}
+
+        def fake_call_claude_gm(_user_text, system_prompt, _recent, session_id=None):
+            captured["system_prompt"] = system_prompt
+            assert session_id is None
+            return ("GM回覆", None)
+
+        monkeypatch.setattr(app_module, "call_claude_gm", fake_call_claude_gm)
+        monkeypatch.setattr(
+            app_module,
+            "_process_gm_response",
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
+        )
+
+        send_resp = client.post("/api/send", json={"message": "繼續前進", "branch_id": "branch_gap"})
+        assert send_resp.status_code == 200
+        data = send_resp.get_json()
+        assert data["ok"] is True
+
+        assert data["player"]["index"] == 4
+        assert data["gm"]["index"] == 5
+        assert "system_prompt" in captured
+
+        messages = app_module._load_json(app_module._story_messages_path(story_id, "branch_gap"), [])
+        indices = sorted(m.get("index") for m in messages)
+        assert indices == [3, 4, 5]
+        assert any(m["index"] == 4 and m["role"] == "user" and m["content"] == "繼續前進" for m in messages)
+
+    def test_send_stream_uses_max_index_when_timeline_has_gap(self, client, setup_story, story_id, monkeypatch):
+        tree_path = setup_story / "timeline_tree.json"
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))
+        tree["branches"]["branch_gap_stream"] = {
+            "id": "branch_gap_stream",
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "name": "gap stream branch",
+        }
+        tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
+
+        branch_dir = setup_story / "branches" / "branch_gap_stream"
+        branch_dir.mkdir(parents=True, exist_ok=True)
+        (branch_dir / "messages.json").write_text(
+            json.dumps([{"index": 3, "role": "gm", "content": "gap 測試訊息"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None):
+            assert session_id is None
+            yield ("done", {"response": "GM串流回覆", "usage": None})
+
+        monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
+        monkeypatch.setattr(
+            app_module,
+            "_process_gm_response",
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
+        )
+
+        resp = client.post("/api/send/stream", json={"message": "繼續前進", "branch_id": "branch_gap_stream"})
+        assert resp.status_code == 200
+        data = resp.get_data(as_text=True)
+        assert "\"type\": \"done\"" in data
+
+        messages = app_module._load_json(app_module._story_messages_path(story_id, "branch_gap_stream"), [])
+        indices = sorted(m.get("index") for m in messages)
+        assert indices == [3, 4, 5]
+        assert any(m["index"] == 4 and m["role"] == "user" and m["content"] == "繼續前進" for m in messages)
+
     def test_send_stream_after_load_save_clears_preview(self, client, setup_story, monkeypatch):
         save_resp = client.post("/api/saves", json={"name": "B存檔"})
         save = save_resp.get_json()["save"]
