@@ -3604,6 +3604,24 @@ def get_full_timeline(story_id: str, branch_id: str) -> list[dict]:
     return timeline
 
 
+def _next_timeline_index(story_id: str, branch_id: str, timeline: list[dict] | None = None) -> int:
+    """Return the next message index for appending in a branch timeline."""
+    if timeline is None:
+        timeline = get_full_timeline(story_id, branch_id)
+    max_index = -1
+    for msg in timeline:
+        idx = msg.get("index")
+        if isinstance(idx, str):
+            try:
+                idx = int(idx)
+            except ValueError:
+                continue
+        if isinstance(idx, int):
+            if idx > max_index:
+                max_index = idx
+    return max_index + 1
+
+
 def _resolve_sibling_parent(branches: dict, parent_branch_id: str, branch_point_index: int) -> str:
     """Walk up ancestor chain for sibling detection.
 
@@ -4639,11 +4657,12 @@ def api_send():
     # 1. Save player message
     t0 = time.time()
     full_timeline = get_full_timeline(story_id, branch_id)
+    next_msg_index = _next_timeline_index(story_id, branch_id, timeline=full_timeline)
 
     player_msg = {
         "role": "user",
         "content": user_text,
-        "index": len(full_timeline),
+        "index": next_msg_index,
     }
     _upsert_branch_message(story_id, branch_id, player_msg)
     full_timeline.append(player_msg)
@@ -4685,7 +4704,7 @@ def api_send():
     log.info("  context_search: %.0fms", (time.time() - t0) * 1000)
 
     # 4. Call Claude (stateless)
-    gm_msg_index = len(full_timeline)
+    gm_msg_index = next_msg_index + 1
     _trace_llm(
         stage="gm_request",
         story_id=story_id,
@@ -4790,11 +4809,12 @@ def api_send_stream():
 
     # 1. Save player message (before streaming starts)
     full_timeline = get_full_timeline(story_id, branch_id)
+    next_msg_index = _next_timeline_index(story_id, branch_id, timeline=full_timeline)
 
     player_msg = {
         "role": "user",
         "content": user_text,
-        "index": len(full_timeline),
+        "index": next_msg_index,
     }
     _upsert_branch_message(story_id, branch_id, player_msg)
     full_timeline.append(player_msg)
@@ -4828,7 +4848,7 @@ def api_send_stream():
         player_msg["dice"] = dice_result
         _upsert_branch_message(story_id, branch_id, player_msg)
 
-    gm_msg_index = len(full_timeline)
+    gm_msg_index = next_msg_index + 1
     _trace_llm(
         stage="gm_request",
         story_id=story_id,
