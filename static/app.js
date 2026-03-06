@@ -4630,7 +4630,6 @@ window.applySingleDebugAction = async function (type, index, btn) {
 
     card.classList.add("applied");
     card.querySelector(".proposal-actions").innerHTML = `<span style="color:#4caf50;font-size:0.85em;font-weight:bold;">✔ 已採用</span>`;
-    showAlert(res.audit_summary || "變更套用成功！");
     await loadMessages(currentBranchId);
   } catch (e) {
     showAlert("套用失敗: " + e.message);
