@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>主神空間 — 無限輪迴 RPG</title>
   <link rel="stylesheet" href="/static/style.css?v={{ v }}">
 </head>
+
 <body>
   <!-- Header -->
   <header id="header">
@@ -90,8 +92,8 @@
     <div class="drawer-section" id="dungeon-section" style="display:none;">
       <div class="drawer-section-title">
         <span>⚔️ 副本進度</span>
-        <button id="dungeon-exit-btn" class="drawer-add-btn dungeon-exit-btn"
-                title="回歸主神空間（需主線 100%）" style="display:none;">
+        <button id="dungeon-exit-btn" class="drawer-add-btn dungeon-exit-btn" title="回歸主神空間（需主線 100%）"
+          style="display:none;">
           ↩
         </button>
       </div>
@@ -225,7 +227,8 @@
               <span>啟用</span>
               <div class="addon-pistol-controls">
                 <button id="addon-pistol-btn" class="cheat-toggle" onclick="togglePistolMode()">OFF</button>
-                <button id="addon-pistol-prefs-btn" class="pistol-prefs-btn hidden" onclick="openPistolPrefsModal()" title="偏好設定">&#x2699;</button>
+                <button id="addon-pistol-prefs-btn" class="pistol-prefs-btn hidden" onclick="openPistolPrefsModal()"
+                  title="偏好設定">&#x2699;</button>
               </div>
             </div>
           </div>
@@ -259,7 +262,8 @@
       </div>
       <div class="modal-field">
         <label for="ns-schema">角色 Schema (JSON)</label>
-        <textarea id="ns-schema" rows="6" placeholder='{"fields": [...], "lists": [...], "direct_overwrite_keys": [...]}'></textarea>
+        <textarea id="ns-schema" rows="6"
+          placeholder='{"fields": [...], "lists": [...], "direct_overwrite_keys": [...]}'></textarea>
       </div>
       <div class="modal-field">
         <label for="ns-state">初始角色狀態 (JSON)</label>
@@ -341,26 +345,22 @@
         <h2>Debug Panel</h2>
         <button id="debug-panel-close" class="summary-modal-close-btn">&times;</button>
       </div>
-      <div class="debug-panel-meta">
-        <span id="debug-target-branch">branch: -</span>
-        <span id="debug-unit-id">unit: -</span>
-      </div>
-      <div id="debug-chat-messages" class="debug-chat-messages"></div>
-      <div class="debug-chat-input-row">
-        <textarea id="debug-chat-input" rows="2" placeholder="輸入要查核或修正的問題..."></textarea>
-        <button id="debug-chat-send" class="modal-create-btn">送出</button>
-      </div>
-      <div class="debug-block">
-        <div class="debug-block-title">修正提案（actions）</div>
-        <div id="debug-proposals" class="debug-items"></div>
-      </div>
-      <div class="debug-block">
-        <div class="debug-block-title">劇情指令（directives）</div>
-        <div id="debug-directives" class="debug-items"></div>
+      <div class="debug-panel-body">
+        <div class="debug-panel-meta">
+          <span id="debug-target-branch">branch: -</span>
+          <span id="debug-unit-id">unit: -</span>
+        </div>
+        <div id="debug-chat-messages" class="debug-chat-messages"></div>
+        <div class="debug-chat-input-row">
+          <textarea id="debug-chat-input" rows="2" placeholder="輸入要查核或修正的問題..."></textarea>
+          <button id="debug-chat-send" class="modal-create-btn">送出</button>
+        </div>
+
       </div>
       <div class="debug-panel-actions">
-        <button id="debug-apply-btn" class="modal-create-btn">套用勾選項目</button>
+        <button id="debug-apply-btn" class="modal-create-btn">套用修正</button>
         <button id="debug-undo-btn" class="modal-cancel-btn">Undo</button>
+        <button id="debug-clear-btn" class="modal-danger-btn" style="margin-left: auto;">清空對話紀錄</button>
       </div>
       <div id="debug-apply-result" class="debug-apply-result"></div>
     </div>
@@ -569,4 +569,5 @@
 
   <script src="/static/app.js?v={{ v }}"></script>
 </body>
+
 </html>

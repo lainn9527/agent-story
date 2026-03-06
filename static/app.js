@@ -313,6 +313,12 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch_id: branchId || "main" }),
     }).then(r => r.json()),
+  debugClear: (branchId) =>
+    fetch("/api/debug/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: branchId || "main" }),
+    }).then(r => r.json()),
 };
 
 // ---------------------------------------------------------------------------
@@ -1062,7 +1068,7 @@ function _btFindDeepestLeaf(startId, childrenOf) {
     const kids = (childrenOf[id] || []).filter(k => !k.deleted && !k.merged && !k.pruned);
     if (!kids.length) {
       if (depth > bestDepth || (depth === bestDepth && best &&
-          (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
+        (branches[id]?.created_at || "") > (branches[best]?.created_at || ""))) {
         best = id; bestDepth = depth;
       }
       return;
@@ -1558,78 +1564,78 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
   try {
 
-  const switchRes = await API.switchBranch(branchId);
-  if (!switchRes.ok) {
-    showAlert(switchRes.error || "切換分支失敗");
-    return;
-  }
-  currentBranchId = branchId;
-  updateBranchIndicator();
-  renderBranchList();
+    const switchRes = await API.switchBranch(branchId);
+    if (!switchRes.ok) {
+      showAlert(switchRes.error || "切換分支失敗");
+      return;
+    }
+    currentBranchId = branchId;
+    updateBranchIndicator();
+    renderBranchList();
 
-  if (scrollToIndex != null || preserveScroll) {
-    $messages.style.minHeight = $messages.scrollHeight + "px";
-  }
+    if (scrollToIndex != null || preserveScroll) {
+      $messages.style.minHeight = $messages.scrollHeight + "px";
+    }
 
-  if (isAutoBranch(branchId)) {
-    await loadMessages(branchId, { tail: 100 });
-  } else {
-    await loadMessages(branchId);
-  }
-  const status = await API.status(branchId);
-  renderCharacterStatus(status);
-  loadNpcs();
-  loadEvents();
-  loadDungeonProgress();
-  loadSummaries();
-  loadFateModeStatus();
-  loadDiceCheatStatus();
-  loadPistolModeStatus();
-
-  // Show/hide "load earlier" button for auto branches with truncated messages
-  if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
-    $loadBtn.style.display = "";
-    $loadBtn.onclick = async () => {
-      $loadBtn.style.display = "none";
-      await loadMessages(branchId);
-      scrollToBottom();
-    };
-  } else {
-    $loadBtn.style.display = "none";
-  }
-
-  if (isAutoBranch(branchId)) {
-    startLivePolling(branchId);
-  } else {
-    stopLivePolling();
-  }
-
-  if (forcePreserve) {
-    // Keep current scroll position — user may have scrolled during streaming
-    const currentScroll = container.scrollTop;
-    requestAnimationFrame(() => {
-      container.scrollTop = currentScroll;
-      $messages.style.minHeight = "";
-      fadeIn();
-    });
-    return;
-  }
-
-  if (preserveScroll) {
-    if (isAtBottom) {
-      scrollToBottom();
-      $messages.style.minHeight = "";
-      requestAnimationFrame(() => { fadeIn(); });
+    if (isAutoBranch(branchId)) {
+      await loadMessages(branchId, { tail: 100 });
     } else {
-      container.scrollTop = savedScrollTop;
+      await loadMessages(branchId);
+    }
+    const status = await API.status(branchId);
+    renderCharacterStatus(status);
+    loadNpcs();
+    loadEvents();
+    loadDungeonProgress();
+    loadSummaries();
+    loadFateModeStatus();
+    loadDiceCheatStatus();
+    loadPistolModeStatus();
+
+    // Show/hide "load earlier" button for auto branches with truncated messages
+    if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
+      $loadBtn.style.display = "";
+      $loadBtn.onclick = async () => {
+        $loadBtn.style.display = "none";
+        await loadMessages(branchId);
+        scrollToBottom();
+      };
+    } else {
+      $loadBtn.style.display = "none";
+    }
+
+    if (isAutoBranch(branchId)) {
+      startLivePolling(branchId);
+    } else {
+      stopLivePolling();
+    }
+
+    if (forcePreserve) {
+      // Keep current scroll position — user may have scrolled during streaming
+      const currentScroll = container.scrollTop;
       requestAnimationFrame(() => {
-        container.scrollTop = savedScrollTop;
+        container.scrollTop = currentScroll;
         $messages.style.minHeight = "";
         fadeIn();
       });
+      return;
     }
-    return;
-  }
+
+    if (preserveScroll) {
+      if (isAtBottom) {
+        scrollToBottom();
+        $messages.style.minHeight = "";
+        requestAnimationFrame(() => { fadeIn(); });
+      } else {
+        container.scrollTop = savedScrollTop;
+        requestAnimationFrame(() => {
+          container.scrollTop = savedScrollTop;
+          $messages.style.minHeight = "";
+          fadeIn();
+        });
+      }
+      return;
+    }
 
   } catch (err) {
     fadeIn();
@@ -2024,7 +2030,7 @@ function renderMessages(messages) {
       }
     }
 
-    if (msg.message_type === "debug_audit") {
+    if (msg.message_type === "debug_audit" || msg.role === "system") {
       $messages.appendChild(createDebugAuditMessageElement(msg));
       continue;
     }
@@ -3293,6 +3299,7 @@ function initAddonPanel() {
   });
   document.getElementById("debug-apply-btn")?.addEventListener("click", applyDebugChanges);
   document.getElementById("debug-undo-btn")?.addEventListener("click", undoDebugChanges);
+  document.getElementById("debug-clear-btn")?.addEventListener("click", clearDebugSession);
 }
 
 async function openAddonPanel() {
@@ -3311,6 +3318,14 @@ function closeAddonPanel() {
   if (btn) btn.setAttribute("aria-expanded", "false");
 }
 
+function stripDebugTags(text) {
+  if (!text) return "";
+  return text
+    .replace(/<!--DEBUG_ACTION[\s\S]*?DEBUG_ACTION-->/g, "")
+    .replace(/<!--DEBUG_DIRECTIVE[\s\S]*?DEBUG_DIRECTIVE-->/g, "")
+    .trim();
+}
+
 function _renderDebugChatMessages(messages) {
   const box = document.getElementById("debug-chat-messages");
   if (!box) return;
@@ -3322,7 +3337,8 @@ function _renderDebugChatMessages(messages) {
     role.className = "debug-chat-role";
     role.textContent = msg.role === "user" ? "玩家" : "Debug GM";
     const content = document.createElement("div");
-    content.innerHTML = markdownToHtml(msg.content || "");
+    const cleanContent = msg.role === "assistant" ? stripDebugTags(msg.content) : msg.content;
+    content.innerHTML = markdownToHtml(cleanContent || "");
     node.appendChild(role);
     node.appendChild(content);
     box.appendChild(node);
@@ -3330,82 +3346,6 @@ function _renderDebugChatMessages(messages) {
   box.scrollTop = box.scrollHeight;
 }
 
-function _createDebugItemNode(item, idx, kind) {
-  const wrap = document.createElement("div");
-  wrap.className = "debug-item";
-
-  const head = document.createElement("div");
-  head.className = "debug-item-head";
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = true;
-  checkbox.dataset.kind = kind;
-  checkbox.dataset.index = String(idx);
-
-  const label = document.createElement("span");
-  if (kind === "action") {
-    label.textContent = item.type || `action_${idx + 1}`;
-  } else {
-    label.textContent = `directive_${idx + 1}`;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.className = "debug-item-json";
-  textarea.dataset.kind = kind;
-  textarea.dataset.index = String(idx);
-  textarea.value = JSON.stringify(item, null, 2);
-
-  head.appendChild(checkbox);
-  head.appendChild(label);
-  wrap.appendChild(head);
-  wrap.appendChild(textarea);
-  return wrap;
-}
-
-function _renderDebugProposals() {
-  const actionsBox = document.getElementById("debug-proposals");
-  const directivesBox = document.getElementById("debug-directives");
-  if (!actionsBox || !directivesBox) return;
-
-  actionsBox.innerHTML = "";
-  directivesBox.innerHTML = "";
-
-  if (!_debugPendingProposals.length) {
-    actionsBox.textContent = "（目前無提案）";
-  } else {
-    _debugPendingProposals.forEach((item, idx) => {
-      actionsBox.appendChild(_createDebugItemNode(item, idx, "action"));
-    });
-  }
-
-  if (!_debugPendingDirectives.length) {
-    directivesBox.textContent = "（目前無指令）";
-  } else {
-    _debugPendingDirectives.forEach((item, idx) => {
-      directivesBox.appendChild(_createDebugItemNode(item, idx, "directive"));
-    });
-  }
-}
-
-function _collectDebugSelectedItems(kind) {
-  const modal = document.getElementById("debug-panel-modal");
-  if (!modal) return [];
-  const checked = modal.querySelectorAll(`input[type="checkbox"][data-kind="${kind}"]:checked`);
-  const items = [];
-  for (const cb of checked) {
-    const idx = cb.dataset.index;
-    const ta = modal.querySelector(`textarea.debug-item-json[data-kind="${kind}"][data-index="${idx}"]`);
-    if (!ta) continue;
-    try {
-      const parsed = JSON.parse(ta.value);
-      items.push(parsed);
-    } catch (e) {
-      throw new Error(`${kind} #${Number(idx) + 1} JSON 格式錯誤`);
-    }
-  }
-  return items;
-}
 
 async function _loadDebugSession(resetSuggestions = true) {
   const res = await API.debugSession(currentBranchId);
@@ -3418,7 +3358,6 @@ async function _loadDebugSession(resetSuggestions = true) {
     _debugPendingProposals = [];
     _debugPendingDirectives = [];
   }
-  _renderDebugProposals();
 }
 
 async function openDebugPanel() {
@@ -3456,11 +3395,12 @@ async function sendDebugChat() {
 
   const gmNode = document.createElement("div");
   gmNode.className = "debug-chat-msg assistant";
-  gmNode.innerHTML = `<div class="debug-chat-role">Debug GM</div><div class="debug-chat-stream"></div>`;
+  gmNode.innerHTML = `<div class="debug-chat-role">Debug GM</div><div class="debug-chat-stream"><span class="debug-thinking">Thinking...</span></div>`;
   box.appendChild(gmNode);
   box.scrollTop = box.scrollHeight;
 
   let streamed = "";
+  let isFirstChunk = true;
   try {
     await streamFromSSE(
       "/api/debug/chat/stream",
@@ -3468,16 +3408,27 @@ async function sendDebugChat() {
       (chunk) => {
         streamed += chunk;
         const target = gmNode.querySelector(".debug-chat-stream");
-        if (target) target.innerHTML = markdownToHtml(streamed);
+        if (target) {
+          if (isFirstChunk) {
+            target.innerHTML = "";
+            isFirstChunk = false;
+          }
+          target.innerHTML = markdownToHtml(stripDebugTags(streamed));
+        }
         box.scrollTop = box.scrollHeight;
       },
       async (data) => {
         const finalText = data.response || streamed;
         const target = gmNode.querySelector(".debug-chat-stream");
-        if (target) target.innerHTML = markdownToHtml(finalText);
+        if (target) {
+          if (isFirstChunk) {
+            target.innerHTML = "";
+            isFirstChunk = false;
+          }
+          target.innerHTML = markdownToHtml(stripDebugTags(finalText));
+        }
         _debugPendingProposals = data.proposals || [];
         _debugPendingDirectives = data.directives || [];
-        _renderDebugProposals();
         await _loadDebugSession(false);
       },
       (errMsg) => {
@@ -3494,9 +3445,7 @@ async function applyDebugChanges() {
   const result = document.getElementById("debug-apply-result");
   if (!result) return;
   try {
-    const actions = _collectDebugSelectedItems("action");
-    const directives = _collectDebugSelectedItems("directive");
-    const res = await API.debugApply(currentBranchId, actions, directives);
+    const res = await API.debugApply(currentBranchId, _debugPendingProposals, _debugPendingDirectives);
     if (!res.ok) {
       result.textContent = res.error || "套用失敗";
       return;
@@ -3504,6 +3453,7 @@ async function applyDebugChanges() {
     const failed = (res.results || []).filter(x => !x.ok);
     const failLines = failed.map(x => `- ${x.type}: ${x.error || "unknown error"}`);
     result.textContent = [res.audit_summary || "", ...failLines].filter(Boolean).join("\n");
+    showAlert(res.audit_summary || "變更套用成功！");
     await loadMessages(currentBranchId);
     await _loadDebugSession();
   } catch (e) {
@@ -3521,6 +3471,20 @@ async function undoDebugChanges() {
   }
   result.textContent = res.audit_summary || "已回滾";
   await loadMessages(currentBranchId);
+  await _loadDebugSession();
+}
+
+async function clearDebugSession() {
+  const result = document.getElementById("debug-apply-result");
+  if (!result) return;
+  if (!await showConfirm("確定要清空 Debug 對話紀錄嗎？（不影響已套用的改變）")) return;
+
+  const res = await API.debugClear(currentBranchId);
+  if (!res.ok) {
+    result.textContent = res.error || "清除失敗";
+    return;
+  }
+  result.textContent = res.audit_summary || "已清除";
   await _loadDebugSession();
 }
 
@@ -3788,7 +3752,7 @@ async function savePistolPrefs() {
     const prev = await fetch("/api/nsfw-preferences");
     const prevData = await prev.json();
     chipCounts = prevData.chip_counts || {};
-  } catch (_) {}
+  } catch (_) { }
   for (const c of chipsFlat) {
     chipCounts[c] = (chipCounts[c] || 0) + 1;
   }
@@ -4218,7 +4182,7 @@ function appendMessage(msg) {
     }
   }
 
-  if (msg.message_type === "debug_audit") {
+  if (msg.message_type === "debug_audit" || msg.role === "system") {
     $messages.appendChild(createDebugAuditMessageElement(msg));
     return;
   }

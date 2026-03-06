@@ -7565,6 +7565,24 @@ def api_debug_undo():
     _append_debug_audit_message(story_id, branch_id, audit_summary)
     return jsonify({"ok": True, "restored": True, "audit_summary": audit_summary})
 
+@app.route("/api/debug/clear", methods=["POST"])
+def api_debug_clear():
+    story_id = _active_story_id()
+    body = request.get_json(force=True)
+    branch_id = body.get("branch_id", "main")
+
+    tree = _load_tree(story_id)
+    if branch_id not in tree.get("branches", {}):
+        return jsonify({"ok": False, "error": "branch not found"}), 404
+
+    debug_unit_id = _resolve_debug_unit_id(story_id, branch_id)
+    
+    # 清除 chat 與 pending
+    _save_json(_debug_chat_path(story_id, debug_unit_id), [])
+    _clear_debug_directive(story_id, branch_id)
+    _clear_last_apply_backup(story_id, debug_unit_id)
+
+    return jsonify({"ok": True, "audit_summary": "已清除 Debug 對話與提案紀錄"})
 
 # ---------------------------------------------------------------------------
 # NPC API
