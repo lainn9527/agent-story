@@ -364,6 +364,55 @@ class TestSearchBranchLore:
         headers = [line for line in result.split("\n") if line.startswith("####")]
         assert len(headers) < 20  # Budget should limit output
 
+    def test_token_budget_uses_cjk_char_length(self, story_id, setup_story):
+        app_module._save_branch_lore(story_id, "main", [
+            {"category": "test", "topic": "設定A", "content": "設" * 220},
+            {"category": "test", "topic": "設定B", "content": "設" * 220},
+        ])
+        result = app_module._search_branch_lore(story_id, "main", "設定", token_budget=300)
+        headers = [line for line in result.split("\n") if line.startswith("####")]
+        assert len(headers) == 1
+
+    def test_ranks_stronger_bigram_overlap_ahead_of_weak_match(self, story_id, setup_story):
+        app_module._save_branch_lore(story_id, "main", [
+            {"category": "test", "topic": "弱命中", "content": "只有白鴉這一小段"},
+            {"category": "test", "topic": "強命中", "content": "白鴉提出獄門疆定位測試，要求封印神談判條件與座標校準"},
+        ])
+        result = app_module._search_branch_lore(
+            story_id,
+            "main",
+            "白鴉獄門疆封印神談判定位測試座標校準",
+            token_budget=60,
+        )
+        headers = [line for line in result.split("\n") if line.startswith("####")]
+        assert headers
+        assert "強命中" in headers[0]
+
+    def test_expanded_terms_boost_current_dungeon_entry(self, story_id, setup_story):
+        app_module._save_branch_lore(story_id, "main", [
+            {
+                "category": "副本世界觀",
+                "subcategory": "咒術迴戰",
+                "topic": "澀谷事變",
+                "content": "獄門疆與神王小隊的行動線索都在這裡。",
+            },
+            {
+                "category": "體系",
+                "subcategory": "萬象召喚",
+                "topic": "門之鑰：媒介定位",
+                "content": "舊裝備線的操作筆記。",
+            },
+        ])
+        result = app_module._search_branch_lore(
+            story_id,
+            "main",
+            "我願意提供 獄門疆 的情報\n咒術迴戰 白鴉 神王小隊 門之鑰",
+            context={"phase": "主神空間", "status": "", "dungeon": "咒術迴戰"},
+        )
+        headers = [line for line in result.split("\n") if line.startswith("####")]
+        assert headers
+        assert "澀谷事變" in headers[0]
+
     def test_no_match_returns_empty(self, story_id, setup_story):
         """Query with no match returns empty string."""
         app_module._save_branch_lore(story_id, "main", [
@@ -439,6 +488,60 @@ class TestBuildLoreTextWithBranch:
 
 
 class TestBuildAugmentedMessageWithBranchLore:
+    def test_select_lore_npc_terms_only_keeps_mentioned_active_npcs(self):
+        recent = [
+            {"role": "gm", "content": "白鴉已經到了，神王小隊也在附近待命。"},
+        ]
+        npcs = [
+            {"name": "白鴉"},
+            {"name": "小琳"},
+            {"name": "邁特凱"},
+        ]
+        terms = app_module._select_lore_npc_terms(
+            "我去找白鴉談獄門疆",
+            recent_messages=recent,
+            npcs=npcs,
+        )
+        assert terms == ["白鴉"]
+
+    def test_extract_user_lore_terms_requires_recent_overlap(self):
+        recent = [
+            {"role": "gm", "content": "白鴉提到獄門疆，但還沒談到封印神。"},
+        ]
+        terms = app_module._extract_user_lore_terms(
+            "我可以提供 獄門疆 的情報，封印神 的時候算我一個",
+            recent_messages=recent,
+        )
+        assert terms == ["獄門疆"]
+
+    @mock.patch("app._extract_recent_lore_terms", return_value=["神王小隊", "澀谷事變"])
+    @mock.patch("app.search_relevant_lore", return_value="[相關世界設定]\n咒術迴戰")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.roll_fate", return_value={"outcome": "順遂"})
+    @mock.patch("app.format_dice_context", return_value="[命運走向] 順遂")
+    def test_build_lore_search_query_expands_with_recent_context(
+        self, mock_fmt, mock_roll, mock_gm, mock_act, mock_evt, mock_lore, mock_recent,
+        story_id, setup_story
+    ):
+        text, _ = app_module._build_augmented_message(
+            story_id,
+            "main",
+            "我會提供 獄門疆 的情報",
+            {"current_phase": "主神空間", "current_dungeon": "咒術迴戰"},
+            npcs=[{"name": "白鴉"}, {"name": "邁特凱"}],
+            recent_messages=[{"role": "gm", "content": "白鴉與神王小隊準備進入澀谷事變。"}],
+        )
+        assert "[相關世界設定]" in text
+        called_query = mock_lore.call_args.args[1]
+        assert "咒術迴戰" in called_query
+        assert "白鴉" in called_query
+        assert "獄門疆" in called_query
+        assert "神王小隊" in called_query
+        assert "澀谷事變" in called_query
+        assert "邁特凱" not in called_query
+
     @mock.patch("app.search_relevant_lore", return_value="[相關世界設定]\n基因鎖")
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")

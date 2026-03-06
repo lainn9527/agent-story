@@ -26,6 +26,8 @@ _INLINE_META_RE = re.compile(r"\s*\[(?:tag|source):\s*[^\]]*\]")
 EMBEDDING_DIM = 768
 RRF_K = 60  # Reciprocal Rank Fusion constant
 DEFAULT_TOKEN_BUDGET = 3000  # ~3000 CJK chars ≈ 3000 tokens
+KEYWORD_SCORE_FLOOR = 3
+RRF_SCORE_FLOOR = 0.012
 
 
 def _db_path(story_id: str) -> str:
@@ -531,7 +533,7 @@ def search_lore(story_id: str, query: str, limit: int = 5) -> list[dict]:
                     score += 5
                 if kw in row['content']:
                     score += 1
-        if score > 0:
+        if score >= KEYWORD_SCORE_FLOOR:
             scored.append({
                 "id": row["id"],
                 "category": row["category"],
@@ -684,6 +686,8 @@ def search_hybrid(
     results = []
     tokens_used = 0
     for entry_id in sorted_ids:
+        if rrf_scores[entry_id] < RRF_SCORE_FLOOR:
+            break
         entry = candidates[entry_id]
         # Estimate: 1 CJK char ≈ 1 token, cap at 1200 (content is truncated at injection)
         content_len = min(len(entry.get("content", "")), 1200)
