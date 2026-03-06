@@ -4552,6 +4552,30 @@ function _updateDebugApplyButton() {
   }
 }
 
+function _buildPendingSummary() {
+  const parts = [];
+  for (const p of _debugPendingProposals) {
+    if (p.type === "state_patch") {
+      parts.push(`- 狀態修改: ${JSON.stringify(p.update)}`);
+    } else if (p.type === "npc_upsert") {
+      parts.push(`- 新增/覆寫 NPC: ${p.npc_id}`);
+    } else if (p.type === "npc_delete") {
+      parts.push(`- 刪除 NPC: ${p.npc_id}`);
+    } else if (p.type === "world_day_set") {
+      parts.push(`- 修改天數為: ${p.day}`);
+    } else if (p.type === "dungeon_patch") {
+      parts.push(`- 副本進度: ${JSON.stringify(p.update)}`);
+    } else {
+      parts.push(`- 其他修改: ${p.type}`);
+    }
+  }
+  for (const d of _debugPendingDirectives) {
+    const text = d.instruction || "";
+    parts.push(`- 寫入劇情設定: ${text.length > 50 ? text.substring(0, 50) + "..." : text}`);
+  }
+  return parts.join("\n");
+}
+
 async function _loadDebugSession(resetSuggestions = true) {
   const res = await API.debugSession(currentBranchId);
   if (!res.ok) throw new Error(res.error || "載入 debug session 失敗");
@@ -4650,6 +4674,15 @@ async function sendDebugChat() {
 async function applyDebugChanges() {
   const result = document.getElementById("debug-apply-result");
   if (!result) return;
+
+  const total = _debugPendingProposals.length + _debugPendingDirectives.length;
+  if (total === 0) return;
+
+  const summary = _buildPendingSummary();
+  if (!await showConfirm(`AI 準備了 ${total} 項內部修改，確定要套用嗎？\n\n${summary}`)) {
+    return;
+  }
+
   try {
     const res = await API.debugApply(currentBranchId, _debugPendingProposals, _debugPendingDirectives);
     if (!res.ok) {
@@ -4659,7 +4692,7 @@ async function applyDebugChanges() {
     const failed = (res.results || []).filter(x => !x.ok);
     const failLines = failed.map(x => `- ${x.type}: ${x.error || "unknown error"}`);
     result.textContent = [res.audit_summary || "", ...failLines].filter(Boolean).join("\n");
-    showAlert(res.audit_summary || "變更套用成功！");
+    showAlert(res.audit_summary || `變更套用成功！已套用 ${total} 筆修正`);
     await loadMessages(currentBranchId);
     await _loadDebugSession();
   } catch (e) {
