@@ -4948,6 +4948,7 @@ def api_send_stream():
                     log.info("/api/send/stream DONE total=%.1fs", time.time() - t_start)
                     yield _sse_event({
                         "type": "done",
+                        "user_msg": player_msg,
                         "gm_msg": gm_msg,
                         "branch": tree["branches"][branch_id],
                         "pruned_branches": pruned,

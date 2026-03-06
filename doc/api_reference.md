@@ -24,6 +24,10 @@
 - `{"type":"done", ...}`
 - `{"type":"error","message":"..."}`
 
+`/api/send/stream` 的 `done` payload 會包含：
+- `user_msg`: 後端實際落盤的玩家訊息（含 authoritative index）
+- `gm_msg`: 後端實際落盤的 GM 訊息
+
 ---
 
 ## 頁面與初始化

@@ -1139,6 +1139,7 @@ class TestSavesAPI:
         assert resp.status_code == 200
         data = resp.get_data(as_text=True)
         assert "\"type\": \"done\"" in data
+        assert "\"user_msg\"" in data
 
         messages = app_module._load_json(app_module._story_messages_path(story_id, "branch_gap_stream"), [])
         indices = sorted(m.get("index") for m in messages)
