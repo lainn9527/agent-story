@@ -4569,9 +4569,9 @@ function _renderDebugPendingOptions() {
   _debugPendingProposals.forEach((p, i) => {
     let text = "";
     if (p.type === "state_patch") text = `狀態修改: ${JSON.stringify(p.update)}`;
-    else if (p.type === "npc_upsert") text = `新增/覆寫 NPC: ${p.npc_id}`;
+    else if (p.type === "npc_upsert") text = `新增/覆寫 NPC: ${(p.npc && (p.npc.name || p.npc.id)) || '未命名'}`;
     else if (p.type === "npc_delete") text = `刪除 NPC: ${p.npc_id}`;
-    else if (p.type === "world_day_set") text = `修改天數為: ${p.day}`;
+    else if (p.type === "world_day_set") text = `修改天數為: ${p.day || p.world_day}`;
     else if (p.type === "dungeon_patch") text = `副本進度: ${JSON.stringify(p.update)}`;
     else text = `其他修改: ${p.type}`;
 
