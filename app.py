@@ -393,9 +393,8 @@ def _sync_message_image_ready(story_id: str, filename: str) -> bool:
     for branch_id in branches:
         if _mark_image_ready_in_branch_messages(story_id, branch_id, filename):
             changed = True
-    if changed:
-        with _SYNCED_IMAGE_READY_LOCK:
-            _SYNCED_IMAGE_READY.add(cache_key)
+    with _SYNCED_IMAGE_READY_LOCK:
+        _SYNCED_IMAGE_READY.add(cache_key)
     return changed
 
 

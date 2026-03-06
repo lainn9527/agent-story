@@ -1505,6 +1505,35 @@ class TestImageAPI:
         assert resp2.status_code == 200
         assert len(calls) == 1
 
+    def test_image_status_caches_sync_even_when_no_message_needed_update(
+        self, client, setup_story, story_id, monkeypatch
+    ):
+        with app_module._SYNCED_IMAGE_READY_LOCK:
+            app_module._SYNCED_IMAGE_READY.clear()
+        monkeypatch.setattr(
+            app_module,
+            "get_image_status",
+            lambda story_id_arg, filename_arg: {
+                "ready": True,
+                "filename": filename_arg,
+            },
+        )
+        calls = []
+        monkeypatch.setattr(
+            app_module,
+            "_mark_image_ready_in_branch_messages",
+            lambda story_id_arg, branch_id_arg, filename_arg: calls.append(
+                (story_id_arg, branch_id_arg, filename_arg)
+            ) or False,
+        )
+
+        resp = client.get("/api/images/status?filename=img_8_test.png")
+        resp2 = client.get("/api/images/status?filename=img_8_test.png")
+
+        assert resp.status_code == 200
+        assert resp2.status_code == 200
+        assert len(calls) == 1
+
 
 class TestStateAPI:
     def test_rebuild_state_endpoint(self, client, setup_story):
