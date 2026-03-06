@@ -1412,6 +1412,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 10px 12px;
+  white-space: normal;
 }
 
 .proposal-card.applied {
