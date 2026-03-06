@@ -24,6 +24,10 @@
 - `{"type":"done", ...}`
 - `{"type":"error","message":"..."}`
 
+`/api/send/stream` 的 `done` payload 會包含：
+- `user_msg`: 後端實際落盤的玩家訊息（含 authoritative index）
+- `gm_msg`: 後端實際落盤的 GM 訊息
+
 ---
 
 ## 頁面與初始化
@@ -67,6 +71,10 @@
 `/api/branches/<branch_id>/config` 回傳格式補充：
 - `config`: 該分支已保存的設定（僅使用者/系統曾寫入的 key）
 - `defaults`: 目前後端預設值（目前含 `image_gen_enabled=true`, `image_model`），前端可用來避免硬編碼 default 漂移
+
+`/api/branches/edit*` / `/api/branches/regenerate*` 補充：
+- `edit` 的 `branch_point_index + 1` 必須命中一則既有 `user` 訊息，否則回 `invalid_edit_target`
+- `regenerate` 的 `branch_point_index` 必須命中一則既有 `user` 訊息，且其下一則必須是 `gm`，否則回 `invalid_regenerate_target`
 
 ## 故事（Story）管理
 

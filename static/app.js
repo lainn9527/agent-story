@@ -3905,7 +3905,7 @@ async function sendMessage() {
 
   const playerMsg = { role: "user", content: text, index: allMessages.length, inherited: false, owner_branch_id: currentBranchId };
   allMessages.push(playerMsg);
-  appendMessage(playerMsg);
+  const playerEl = appendMessage(playerMsg);
   scrollToBottom();
 
   // Create GM bubble immediately for streaming
@@ -3965,6 +3965,18 @@ async function sendMessage() {
       async (data) => {
         container.removeEventListener('scroll', scrollHandler);
 
+        const userMsg = data.user_msg;
+        if (userMsg) {
+          userMsg.inherited = false;
+          userMsg.owner_branch_id = currentBranchId;
+          Object.assign(playerMsg, userMsg);
+          if (playerEl) {
+            playerEl.dataset.index = playerMsg.index;
+            const playerIndexLabel = playerEl.querySelector(".msg-index");
+            if (playerIndexLabel) playerIndexLabel.textContent = `#${playerMsg.index}`;
+          }
+        }
+
         const gmMsg = data.gm_msg;
         gmMsg.inherited = false;
         gmMsg.owner_branch_id = currentBranchId;
@@ -3975,6 +3987,7 @@ async function sendMessage() {
         makeGmOptionsClickable(contentEl);
 
         // Update index label with actual index
+        gmEl.dataset.index = gmMsg.index;
         gmIndexLabel.textContent = `#${gmMsg.index}`;
 
         // Add image if present
@@ -4152,6 +4165,7 @@ function appendMessage(msg) {
   el.appendChild(actionBtn);
   el.appendChild(reportBtn);
   $messages.appendChild(el);
+  return el;
 }
 
 function appendSystemError(text) {
