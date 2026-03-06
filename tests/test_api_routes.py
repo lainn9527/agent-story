@@ -1441,6 +1441,8 @@ class TestNPCsAPI:
 
 class TestImageAPI:
     def test_image_status_disables_cache_and_syncs_ready_flag(self, client, setup_story, story_id, monkeypatch):
+        with app_module._SYNCED_IMAGE_READY_LOCK:
+            app_module._SYNCED_IMAGE_READY.clear()
         messages_path = app_module._story_messages_path(story_id, "main")
         with open(messages_path, "w", encoding="utf-8") as f:
             json.dump([
@@ -1462,6 +1464,7 @@ class TestImageAPI:
         )
 
         resp = client.get("/api/images/status?filename=img_5_test.png")
+        resp2 = client.get("/api/images/status?filename=img_5_test.png")
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -1469,10 +1472,38 @@ class TestImageAPI:
         assert data["ready"] is True
         assert "no-store" in resp.headers["Cache-Control"]
         assert resp.headers["Pragma"] == "no-cache"
+        assert resp2.status_code == 200
 
         with open(messages_path, "r", encoding="utf-8") as f:
             messages = json.load(f)
         assert messages[0]["image"]["ready"] is True
+
+    def test_image_status_skips_repeat_sync_after_first_success(self, client, setup_story, story_id, monkeypatch):
+        with app_module._SYNCED_IMAGE_READY_LOCK:
+            app_module._SYNCED_IMAGE_READY.clear()
+        monkeypatch.setattr(
+            app_module,
+            "get_image_status",
+            lambda story_id_arg, filename_arg: {
+                "ready": True,
+                "filename": filename_arg,
+            },
+        )
+        calls = []
+        monkeypatch.setattr(
+            app_module,
+            "_mark_image_ready_in_branch_messages",
+            lambda story_id_arg, branch_id_arg, filename_arg: calls.append(
+                (story_id_arg, branch_id_arg, filename_arg)
+            ) or True,
+        )
+
+        resp = client.get("/api/images/status?filename=img_7_test.png")
+        resp2 = client.get("/api/images/status?filename=img_7_test.png")
+
+        assert resp.status_code == 200
+        assert resp2.status_code == 200
+        assert len(calls) == 1
 
 
 class TestStateAPI:
