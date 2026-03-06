@@ -111,6 +111,10 @@
 | GET | `/api/stories/<story_id>/images/<filename>` | 取圖片檔 | path params |
 | GET | `/api/npc-activities` | 取 NPC 活動紀錄 | `branch_id` |
 
+`/api/images/status` 回傳補充：
+- `warning`（optional）：圖片生成期間的提示訊息，目前可能出現
+  - `{"code":"free_quota_exhausted","message":"Gemini 免費圖片額度已用盡，已自動切換到下一把 API key。"}`。
+
 ## 存檔（Saves）
 
 | Method | Path | 說明 | 主要參數 |
