@@ -249,10 +249,10 @@
 - `promote`：保留 directive（同步到 parent 路徑）
 - 其他分支操作（create/blank/merge/delete/cleanup）：不複製 directive
 
-### 9.5 審計訊息
+### 9.5 UI 回饋
 
-- 每次 apply/undo 都會在主聊天寫一則 `message_type=debug_audit`
-- `debug_audit` 可見但不進 GM prompt、不進 compaction
+- `apply/undo/clear` 的摘要只保留在 Debug Panel API response 與面板內 UI
+- 主聊天不再插入 `debug_audit` 訊息，避免污染一般對話流
 
 ---
 

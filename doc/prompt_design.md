@@ -278,6 +278,12 @@
 
 - 修正提案：`<!--DEBUG_ACTION {...} DEBUG_ACTION-->`
   - `type` 支援：`state_patch` / `npc_upsert` / `npc_delete` / `world_day_set` / `dungeon_patch`
+  - frontend 會沿用後端的 normalization 思路處理 alias payload，歷史訊息重載時也適用
+  - 目前接受的 state 類 alias 包含：
+    - `{"type":"state_patch","update":{...}}`
+    - `{"update":{...}}`
+    - `{"action":"state_patch","patch":{...}}`
+    - `{"state_patch":{...}}`
 - 劇情指令：`<!--DEBUG_DIRECTIVE {"instruction":"..."} DEBUG_DIRECTIVE-->`
   - apply 後寫入 branch `debug_directive.json`
   - 下次主 GM 回合注入 `_build_augmented_message`

@@ -242,7 +242,7 @@ def test_debug_apply_partial_success_and_audit(client, setup_story):
     assert directive_path.exists()
 
     messages = json.loads((setup_story / "branches" / "main" / "messages.json").read_text(encoding="utf-8"))
-    assert any(m.get("message_type") == "debug_audit" for m in messages)
+    assert not any(m.get("message_type") == "debug_audit" for m in messages)
 
 
 def test_debug_apply_rejects_too_many_directives(client, setup_story):
@@ -329,9 +329,7 @@ def test_debug_undo_restores_snapshot_and_clears_directive(client, setup_story):
     assert not directive_path.exists()
 
     messages = json.loads((setup_story / "branches" / "main" / "messages.json").read_text(encoding="utf-8"))
-    audits = [m for m in messages if m.get("message_type") == "debug_audit"]
-    assert len(audits) == 2
-    assert "已回滾 Debug 修正" in audits[-1]["content"]
+    assert not any(m.get("message_type") == "debug_audit" for m in messages)
 
 
 def test_debug_undo_rejects_invalid_backup_world_day_without_partial_restore(client, setup_story):
