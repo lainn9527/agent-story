@@ -47,7 +47,7 @@
 
 ## 3. Fate（命運走向）機制
 
-檔案：`dice.py`
+檔案：`story_core/dice.py`
 
 ### 3.1 擲骰計算
 
@@ -69,7 +69,7 @@
 
 ## 4. Cheats（GM 指令）
 
-檔案：`gm_cheats.py`
+檔案：`story_core/gm_cheats.py`
 
 每分支獨立存於 `branches/<bid>/gm_cheats.json`。
 
@@ -116,7 +116,7 @@
 
 ## 6. World Time（world_day）
 
-檔案：`world_timer.py`
+檔案：`story_core/world_timer.py`
 
 - 每分支獨立 `world_day.json`
 - GM 回覆中的 `<!--TIME days:N TIME-->` 或 `hours:N` 會推進時間
@@ -268,7 +268,7 @@
 
 ## 11. 對話壓縮（Compaction）
 
-檔案：`compaction.py`
+檔案：`story_core/compaction.py`
 
 - 最近 10 則訊息保留原文
 - 更早內容壓成 `conversation_recap.json`
@@ -279,7 +279,7 @@
 
 ## 12. 副本系統（Dungeon）
 
-檔案：`dungeon_system.py` + `/api/dungeon/*`
+檔案：`story_core/dungeon_system.py` + `/api/dungeon/*`
 
 ### 11.1 進入副本
 
@@ -314,7 +314,7 @@
 
 ## 12. Auto-play 機制
 
-檔案：`auto_play.py`
+檔案：`story_core/auto_play.py`
 
 - 自動玩家會開新 `auto_*` 分支
 - 兩個 LLM 角色：

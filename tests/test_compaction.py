@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-import compaction
+from story_core import compaction
 
 
 @pytest.fixture(autouse=True)

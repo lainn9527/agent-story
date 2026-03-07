@@ -7,6 +7,17 @@ This repository uses a **single onboarding entrypoint** for all agents.
 1. Read `AGENTS.md` first.
 2. Then follow `doc/readme.md` for full docs navigation.
 
+## Quick Layout
+
+- `app.py`: Flask entrypoint
+- `story_core/`: primary internal backend package
+- `auto_play.py`: CLI wrapper for `story_core/auto_play.py`
+- `routes/`: Flask blueprints
+- `static/`: frontend
+- `scripts/`: grouped operational utilities
+
+If you are looking for server internals, check `story_core/` first rather than the repo root.
+
 ## Canonical Docs
 
 - `doc/architecture.md`

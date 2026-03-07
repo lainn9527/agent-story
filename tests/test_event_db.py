@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-import event_db
+from story_core import event_db
 
 
 @pytest.fixture(autouse=True)

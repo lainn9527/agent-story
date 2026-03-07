@@ -5,9 +5,9 @@ import json
 import pytest
 
 import app as app_module
-import event_db
-import state_cleanup
-import state_db
+from story_core import event_db
+from story_core import state_cleanup
+from story_core import state_db
 
 
 STORY_ID = "test_story"

@@ -9,7 +9,7 @@ import json
 import pytest
 
 import app as app_module
-import state_db
+from story_core import state_db
 
 
 @pytest.fixture(autouse=True)

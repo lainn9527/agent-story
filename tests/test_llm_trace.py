@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import llm_trace
+from story_core import llm_trace
 
 
 def test_write_trace_creates_partitioned_file(tmp_path):

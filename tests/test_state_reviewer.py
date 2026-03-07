@@ -73,7 +73,7 @@ class TestReviewerBasics:
             "reason": "修正 phase 為合法值",
         })
         with patch("app._review_state_update_llm.__module__", "app"):
-            with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+            with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
                 result = app_module._review_state_update_llm(
                     current_state=INITIAL_STATE,
                     schema=SCHEMA,
@@ -93,7 +93,7 @@ class TestReviewerBasics:
             "drop_keys": ["gene_lock"],
             "reason": "此欄位不應更新",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._review_state_update_llm(
                 current_state=INITIAL_STATE,
                 schema=SCHEMA,
@@ -105,33 +105,33 @@ class TestReviewerBasics:
         assert "gene_lock" not in result
 
     def test_reviewer_returns_none_on_empty_response(self):
-        with patch("llm_bridge.call_oneshot", return_value=""):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=""):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
 
     def test_reviewer_returns_none_on_malformed_json(self):
-        with patch("llm_bridge.call_oneshot", return_value="not json"):
+        with patch("story_core.llm_bridge.call_oneshot", return_value="not json"):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
 
     def test_reviewer_returns_none_on_non_dict_response(self):
-        with patch("llm_bridge.call_oneshot", return_value="[1, 2, 3]"):
+        with patch("story_core.llm_bridge.call_oneshot", return_value="[1, 2, 3]"):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
 
     def test_reviewer_returns_none_on_patch_not_dict(self):
         resp = json.dumps({"patch": "bad", "drop_keys": [], "reason": ""})
-        with patch("llm_bridge.call_oneshot", return_value=resp):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=resp):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
 
     def test_reviewer_returns_none_on_drop_keys_not_list(self):
         resp = json.dumps({"patch": {}, "drop_keys": "bad", "reason": ""})
-        with patch("llm_bridge.call_oneshot", return_value=resp):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=resp):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
@@ -140,7 +140,7 @@ class TestReviewerBasics:
         """LLM sometimes wraps response in ```json ... ```."""
         inner = json.dumps({"patch": {"current_phase": "副本中"}, "drop_keys": [], "reason": ""})
         resp = f"```json\n{inner}\n```"
-        with patch("llm_bridge.call_oneshot", return_value=resp):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=resp):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA,
                 {"current_phase": "戰鬥"},
@@ -158,7 +158,7 @@ class TestReviewerBasics:
             time.sleep(0.2)
             return "{}"
 
-        with patch("llm_bridge.call_oneshot", side_effect=slow_call):
+        with patch("story_core.llm_bridge.call_oneshot", side_effect=slow_call):
             # Set very short timeout
             old_timeout = app_module.STATE_REVIEW_LLM_TIMEOUT
             app_module.STATE_REVIEW_LLM_TIMEOUT = 0.01
@@ -196,7 +196,7 @@ class TestReviewerBasics:
         old_timeout = app_module.STATE_REVIEW_LLM_TIMEOUT
         app_module.STATE_REVIEW_LLM_TIMEOUT = 0.01
         try:
-            with patch("llm_bridge.call_oneshot", side_effect=slow_call):
+            with patch("story_core.llm_bridge.call_oneshot", side_effect=slow_call):
                 result = app_module._review_state_update_llm(
                     INITIAL_STATE, SCHEMA, {}, {}, [])
             # Wait for worker thread to exit and run its finally block.
@@ -208,7 +208,7 @@ class TestReviewerBasics:
         assert sem.release_calls == 1
 
     def test_reviewer_returns_none_on_exception(self):
-        with patch("llm_bridge.call_oneshot", side_effect=RuntimeError("API down")):
+        with patch("story_core.llm_bridge.call_oneshot", side_effect=RuntimeError("API down")):
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {}, {}, [])
         assert result is None
@@ -220,7 +220,7 @@ class TestReviewerBasics:
             "drop_keys": [],
             "reason": "修正",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._review_state_update_llm(
                 current_state=INITIAL_STATE,
                 schema=SCHEMA,
@@ -239,7 +239,7 @@ class TestReviewerBasics:
             "drop_keys": [],
             "reason": "",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             with patch.object(app_module, "_log_llm_usage") as mock_usage:
                 result = app_module._review_state_update_llm(
                     current_state=INITIAL_STATE,
@@ -260,7 +260,7 @@ class TestReviewerBasics:
                 return False
 
         monkeypatch.setattr(app_module, "_STATE_REVIEW_LLM_SEM", _BusySemaphore())
-        with patch("llm_bridge.call_oneshot") as mock_call:
+        with patch("story_core.llm_bridge.call_oneshot") as mock_call:
             result = app_module._review_state_update_llm(
                 INITIAL_STATE, SCHEMA, {"current_phase": "戰鬥"}, {}, [])
         assert result is None
@@ -296,7 +296,7 @@ class TestRunStateGateWithReviewer:
             "drop_keys": [],
             "reason": "修正 phase",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._run_state_gate(
                 {"current_phase": "戰鬥", "gene_lock": "第一階"},
                 SCHEMA, INITIAL_STATE)
@@ -321,7 +321,7 @@ class TestRunStateGateWithReviewer:
         monkeypatch.setattr(app_module, "STATE_REVIEW_MODE", "enforce")
         monkeypatch.setattr(app_module, "STATE_REVIEW_LLM", "on")
 
-        with patch("llm_bridge.call_oneshot", return_value=""):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=""):
             result = app_module._run_state_gate(
                 {"current_phase": "戰鬥", "gene_lock": "第一階"},
                 SCHEMA, INITIAL_STATE)
@@ -339,7 +339,7 @@ class TestRunStateGateWithReviewer:
             "drop_keys": [],
             "reason": "修正 phase 並加入場景",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._run_state_gate(
                 {"current_phase": "戰鬥", "gene_lock": "第一階"},
                 SCHEMA, INITIAL_STATE)
@@ -383,7 +383,7 @@ class TestRunStateGateWithReviewer:
             "drop_keys": [],
             "reason": "根據上下文修正為副本結算",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._run_state_gate(
                 {"current_phase": "結算中", "reward_points_delta": 1000},
                 SCHEMA, INITIAL_STATE)
@@ -401,7 +401,7 @@ class TestRunStateGateWithReviewer:
             "drop_keys": [],
             "reason": "修正 phase",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._run_state_gate(
                 {"current_phase": "戰鬥", "inventory_add": ["新道具"]},
                 SCHEMA, INITIAL_STATE)
@@ -417,7 +417,7 @@ class TestRunStateGateWithReviewer:
             "drop_keys": [],
             "reason": "修正",
         })
-        with patch("llm_bridge.call_oneshot", return_value=reviewer_response):
+        with patch("story_core.llm_bridge.call_oneshot", return_value=reviewer_response):
             result = app_module._run_state_gate(
                 {"current_phase": "戰鬥", "gene_lock": "第一階"},
                 SCHEMA, INITIAL_STATE)

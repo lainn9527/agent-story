@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-import lore_db
+from story_core import lore_db
 
 
 @pytest.fixture(autouse=True)

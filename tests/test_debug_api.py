@@ -5,9 +5,9 @@ import json
 import pytest
 
 import app as app_module
-import event_db
-import lore_db
-import state_db
+from story_core import event_db
+from story_core import lore_db
+from story_core import state_db
 
 
 @pytest.fixture(autouse=True)

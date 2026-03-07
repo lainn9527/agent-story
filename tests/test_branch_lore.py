@@ -12,9 +12,9 @@ from unittest import mock
 import pytest
 
 import app as app_module
-import event_db
-import lore_db
-import state_db
+from story_core import event_db
+from story_core import lore_db
+from story_core import state_db
 
 
 # ===================================================================
@@ -675,7 +675,7 @@ class TestLorePromoteAPI:
 
 
 class TestLorePromoteReviewAPI:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_review_returns_proposals(self, mock_llm, client, setup_story, story_id):
         """POST /api/lore/promote/review should return LLM proposals."""
         app_module._save_branch_lore(story_id, "main", [
@@ -695,7 +695,7 @@ class TestLorePromoteReviewAPI:
         assert data["proposals"][0]["topic"] == "世界規則"
         assert data["proposals"][1]["action"] == "reject"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_review_empty_branch_lore(self, mock_llm, client, setup_story):
         """Review with empty branch lore returns empty proposals."""
         resp = client.post("/api/lore/promote/review", json={"branch_id": "main"})
@@ -703,7 +703,7 @@ class TestLorePromoteReviewAPI:
         assert resp.get_json()["proposals"] == []
         mock_llm.assert_not_called()
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_review_malformed_llm_response(self, mock_llm, client, setup_story, story_id):
         """Malformed LLM response should be handled gracefully."""
         app_module._save_branch_lore(story_id, "main", [
@@ -713,7 +713,7 @@ class TestLorePromoteReviewAPI:
         resp = client.post("/api/lore/promote/review", json={"branch_id": "main"})
         assert resp.status_code == 500
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_review_markdown_fenced_json(self, mock_llm, client, setup_story, story_id):
         """LLM response wrapped in markdown fences should be parsed."""
         app_module._save_branch_lore(story_id, "main", [

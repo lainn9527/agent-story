@@ -10,6 +10,8 @@
 - 命運骰、GM cheats、存檔、副本進度系統
 - 多 LLM provider（Gemini / Claude CLI）與串流回應
 
+目前主要的 Python 內部模組已整理到 `story_core/`；entrypoints 仍維持在 repo root（例如 `app.py`、`auto_play.py`）。
+
 ## 快速開始
 
 1. 建立虛擬環境並安裝依賴

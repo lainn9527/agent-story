@@ -11,10 +11,10 @@ import os
 import pytest
 
 import app as app_module
-import event_db
-import lore_db
-import state_db
-import story_io
+from story_core import event_db
+from story_core import lore_db
+from story_core import state_db
+from story_core import story_io
 
 
 @pytest.fixture(autouse=True)

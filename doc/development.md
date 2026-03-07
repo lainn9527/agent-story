@@ -69,18 +69,19 @@ pytest tests/test_debug_api.py
 
 | 檔案 | 用途 |
 |---|---|
-| `deploy.sh` | Mac 生產機更新與重啟（port 5051） |
-| `deploy_wsl2.sh` | WSL2 環境更新與 systemd 重啟 |
-| `scripts/backfill_snapshots.py` | 回填歷史 GM 訊息 snapshot |
-| `scripts/backfill_branch_titles.py` | 回填分支標題 |
-| `scripts/backfill_npc_lifecycle.py` | 回填 NPC lifecycle + R1 去重 + 重建 `state.db` |
-| `scripts/migrate_current_dungeon.py` | 回填 `current_dungeon` |
-| `scripts/cleanup_character_state.py` | 清理/修復 state 汙染 |
-| `scripts/clean_state.py` | 移除 legacy 垃圾欄位 |
-| `scripts/lore_cleanup.py` | 一次性 lore 清理 |
-| `scripts/lore_merge.py` | lore 語意合併 |
+| `scripts/deploy/deploy.sh` | Mac 生產機更新與重啟（port 5051） |
+| `scripts/deploy/deploy_wsl2.sh` | WSL2 環境更新與 systemd 重啟 |
+| `scripts/backfill/backfill_snapshots.py` | 回填歷史 GM 訊息 snapshot |
+| `scripts/backfill/backfill_branch_titles.py` | 回填分支標題 |
+| `scripts/backfill/backfill_npc_lifecycle.py` | 回填 NPC lifecycle + R1 去重 + 重建 `state.db` |
+| `scripts/migrations/migrate_current_dungeon.py` | 回填 `current_dungeon` |
+| `scripts/state/cleanup_character_state.py` | 清理/修復 state 汙染 |
+| `scripts/state/clean_state.py` | 移除 legacy 垃圾欄位 |
+| `scripts/lore/lore_cleanup.py` | 一次性 lore 清理 |
+| `scripts/lore/lore_merge.py` | lore 語意合併 |
 
 多數腳本支援 `--dry-run`；先 dry-run 再 apply。
+腳本分類可參考 `scripts/README.md`。
 
 ## 5) 日常開發建議流程
 
@@ -151,10 +152,10 @@ git tag vX.Y.Z
 
 ### 8.3 部署
 
-- Mac production 更新腳本：`./deploy.sh`
-- WSL2 更新腳本：`./deploy_wsl2.sh`
+- Mac production 更新腳本：`./scripts/deploy/deploy.sh`
+- WSL2 更新腳本：`./scripts/deploy/deploy_wsl2.sh`
 
-`deploy.sh` 會在 `/Users/eddylai/story-prod` 拉最新並重啟 `5051`。  
+`scripts/deploy/deploy.sh` 會在 `/Users/eddylai/story-prod` 拉最新並重啟 `5051`。
 部署會重啟服務，建議先確認可接受短暫中斷。
 
 ## 9) Usage / Trace 觀測
@@ -217,7 +218,7 @@ ls -lah data/llm_traces/story_original/<YYYY-MM-DD>/<branch_id>/msg_000407/
 ### 問題：分支狀態看起來錯位
 
 - 確認目標分支 `messages.json` 內是否有對應 snapshot
-- 必要時使用 `scripts/backfill_snapshots.py --dry-run`
+- 必要時使用 `scripts/backfill/backfill_snapshots.py --dry-run`
 
 ### 問題：NPC/事件/道具欄髒亂（過多已結束副本角色、重複名稱、過時事件）
 

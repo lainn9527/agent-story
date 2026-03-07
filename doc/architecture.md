@@ -7,8 +7,8 @@
 ```text
 Browser (static/app.js, templates/index.html)
   -> Flask app (app.py)
-      -> LLM bridge (llm_bridge.py)
-          -> gemini_bridge.py 或 claude_bridge.py
+      -> LLM bridge (story_core/llm_bridge.py)
+          -> story_core/gemini_bridge.py 或 story_core/claude_bridge.py
       -> Lore / Event / Usage / State SQLite
       -> JSON runtime files (messages/state/npcs/branch tree/saves...)
       -> Background threads (tag extraction, compaction, NPC evolution, state cleanup, image gen)
@@ -21,33 +21,33 @@ Browser (static/app.js, templates/index.html)
   - 故事/分支管理
   - GM 回覆處理與 tag pipeline
   - branch timeline 合成、fork/merge/promote
-- `llm_bridge.py`
+- `story_core/llm_bridge.py`
   - 依 `llm_config.json` 分派 provider
   - 統一 non-stream/stream 介面
   - token usage metadata 擷取
-- `llm_trace.py`
+- `story_core/llm_trace.py`
   - 結構化落盤 LLM request/response trace
   - 依 story/date/branch/message 分區存檔
   - 內建 retention prune（按日期資料夾清理）
-- `gemini_bridge.py` / `claude_bridge.py`
+- `story_core/gemini_bridge.py` / `story_core/claude_bridge.py`
   - Gemini API 或 Claude CLI 的實際呼叫
-- `lore_db.py` / `event_db.py` / `usage_db.py`
+- `story_core/lore_db.py` / `story_core/event_db.py` / `story_core/usage_db.py`
   - 各自獨立 SQLite
-- `state_db.py`
+- `story_core/state_db.py`
   - 分支級角色狀態索引（`state.db`）
   - 把 inventory/ability/relationship/mission/system/npc 做可檢索化
   - 支援 lazy rebuild 與分類輸出 `[相關角色狀態]`
-- `dungeon_system.py`
+- `story_core/dungeon_system.py`
   - 副本模板、進度、成長限制與驗證
-- `compaction.py`
+- `story_core/compaction.py`
   - 長對話壓縮（recap）
-- `npc_evolution.py`
+- `story_core/npc_evolution.py`
   - NPC 近期活動演化
-- `state_cleanup.py`
+- `story_core/state_cleanup.py`
   - LLM 狀態審核：依階段/NPC/事件/道具/關係產出清理建議（歸檔 NPC、合併重複、解決事件、移除道具），背景執行；可由 phase 轉換、每 N 回合、或手動按鈕觸發
-- `world_timer.py`
+- `story_core/world_timer.py`
   - `world_day` 與 `<!--TIME ... TIME-->` 處理
-- `gm_cheats.py` / `dice.py`
+- `story_core/gm_cheats.py` / `story_core/dice.py`
   - 命運骰與金手指狀態
 
 ## 3) 資料分層
@@ -91,7 +91,7 @@ Browser (static/app.js, templates/index.html)
 `data/llm_traces/`
 
 - `<story_id>/<YYYY-MM-DD>/<branch_id>/<msg_tag>/<HHMMSS.mmm>_<stage>_<id>.json`
-- 由 `app.py` 與 `lore_organizer.py` 在 LLM request/response 前後寫入（best-effort）
+- 由 `app.py` 與 `story_core/lore_organizer.py` 在 LLM request/response 前後寫入（best-effort）
 
 ## 4) Timeline 與 Branch 模型
 

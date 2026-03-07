@@ -22,7 +22,7 @@ def _app():
 @lore_bp.route("/api/lore/search")
 def api_lore_search():
     """Search world lore. Query params: q, tags, limit."""
-    from lore_db import get_all_entries, search_by_tags, search_lore
+    from story_core.lore_db import get_all_entries, search_by_tags, search_lore
 
     app_module = _app()
     story_id = app_module._active_story_id()
@@ -218,7 +218,7 @@ def api_branch_lore_entry_delete():
 
 @lore_bp.route("/api/lore/promote/review", methods=["POST"])
 def api_lore_promote_review():
-    from llm_bridge import call_oneshot
+    from story_core.llm_bridge import call_oneshot
 
     app_module = _app()
     story_id = app_module._active_story_id()

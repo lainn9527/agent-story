@@ -143,7 +143,7 @@ nohup /usr/bin/python3 app.py >> server.log 2>&1 &
 ### Deploy script (pull latest + restart)
 
 ```bash
-./deploy_wsl2.sh
+./scripts/deploy/deploy_wsl2.sh
 ```
 
 This will:
@@ -162,7 +162,7 @@ This will:
 
 ## Notes
 
-- The default `CLAUDE_BIN` in `claude_bridge.py` is set to a Mac path (`/Users/eddylai/.local/bin/claude`). The `CLAUDE_BIN` env var overrides this for WSL2.
-- Production on Mac uses `deploy.sh`; WSL2 uses `deploy_wsl2.sh`.
+- The default `CLAUDE_BIN` in `story_core/claude_bridge.py` is set to a Mac path (`/Users/eddylai/.local/bin/claude`). The `CLAUDE_BIN` env var overrides this for WSL2.
+- Production on Mac uses `scripts/deploy/deploy.sh`; WSL2 uses `scripts/deploy/deploy_wsl2.sh`.
 - Data files (`data/`) are gitignored and not affected by deploys.
 - The `rpg-server` systemd service does not inherit shell env vars. If `PYTHONPATH` or `CLAUDE_BIN` are needed, add `Environment=` lines to the `[Service]` section.
