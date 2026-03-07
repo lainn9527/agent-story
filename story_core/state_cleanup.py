@@ -10,9 +10,9 @@ import re
 import threading
 import time
 
-from compaction import get_recap_text
-from dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit
-from event_db import get_active_events, get_event_title_map, update_event_status
+from story_core.compaction import get_recap_text
+from story_core.dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit
+from story_core.event_db import get_active_events, get_event_title_map, update_event_status
 
 log = logging.getLogger("rpg")
 
@@ -352,7 +352,7 @@ def should_run_cleanup(
 def _run_cleanup_core(story_id: str, branch_id: str) -> dict:
     """Core cleanup logic. Returns summary dict. Raises on error."""
     import app as app_module
-    from llm_bridge import call_oneshot
+    from story_core.llm_bridge import call_oneshot
 
     state = app_module._load_character_state(story_id, branch_id)
     npcs = app_module._load_npcs(story_id, branch_id, include_archived=False)

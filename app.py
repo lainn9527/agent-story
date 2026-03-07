@@ -46,7 +46,7 @@ from routes.debug_routes import debug_bp
 from routes.story_routes import story_bp
 from routes.misc_routes import misc_bp
 from routes.core_routes import core_bp, _sse_event
-from app_helpers import *  # noqa: F401,F403
+from story_core.app_helpers import *  # noqa: F401,F403
 
 # Flask App
 # ---------------------------------------------------------------------------

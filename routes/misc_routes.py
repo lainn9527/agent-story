@@ -83,7 +83,7 @@ def api_state_cleanup():
     if not branch_id:
         tree = app_module._load_tree(story_id)
         branch_id = tree.get("active_branch_id", "main")
-    from state_cleanup import run_state_cleanup_sync
+    from story_core.state_cleanup import run_state_cleanup_sync
 
     try:
         summary = run_state_cleanup_sync(story_id, branch_id)
@@ -386,7 +386,7 @@ def api_config_get():
     except Exception:
         cfg = {"provider": "claude_cli"}
 
-    from gemini_key_manager import load_keys
+    from story_core.gemini_key_manager import load_keys
 
     gemini_cfg = cfg.get("gemini", {})
     key_count = len(load_keys(gemini_cfg))
@@ -625,7 +625,7 @@ def api_dungeon_enter():
     app_module._save_character_state(story_id, branch_id, state)
 
     try:
-        from world_timer import advance_dungeon_enter
+        from story_core.world_timer import advance_dungeon_enter
 
         advance_dungeon_enter(story_id, branch_id, template["name"])
     except ImportError:
@@ -764,12 +764,12 @@ def api_dungeon_return():
     state["reward_points"] = state.get("reward_points", 0) + total_reward
     app_module._save_character_state(story_id, branch_id, state)
 
-    from state_cleanup import run_state_cleanup_async
+    from story_core.state_cleanup import run_state_cleanup_async
 
     run_state_cleanup_async(story_id, branch_id, force=True)
 
     try:
-        from world_timer import advance_dungeon_exit
+        from story_core.world_timer import advance_dungeon_exit
 
         advance_dungeon_exit(story_id, branch_id)
     except ImportError:

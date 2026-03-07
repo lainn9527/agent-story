@@ -3,12 +3,12 @@
 import copy
 import logging
 
-from character_state import _load_character_schema, _load_character_state
-from dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit, validate_dungeon_progression
-from event_db import get_active_events, insert_event, update_event_status
-from npc_helpers import _sync_state_db_from_state
-from story_io import _save_json, _story_character_state_path
-from tag_extraction import _NORMALIZE_DASHES_RE, _NORMALIZE_DOTS_RE, _extract_item_base_name
+from story_core.character_state import _load_character_schema, _load_character_state
+from story_core.dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit, validate_dungeon_progression
+from story_core.event_db import get_active_events, insert_event, update_event_status
+from story_core.npc_helpers import _sync_state_db_from_state
+from story_core.story_io import _save_json, _story_character_state_path
+from story_core.tag_extraction import _NORMALIZE_DASHES_RE, _NORMALIZE_DOTS_RE, _extract_item_base_name
 
 log = logging.getLogger("rpg")
 
@@ -570,7 +570,7 @@ def _apply_state_update(story_id: str, branch_id: str, update: dict):
     current_state = _load_character_state(story_id, branch_id)
     old_state = copy.deepcopy(current_state)
 
-    from gm_pipeline import _normalize_state_async, _run_state_gate
+    from story_core.gm_pipeline import _normalize_state_async, _run_state_gate
 
     update = _run_state_gate(
         update, schema, current_state,

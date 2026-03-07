@@ -18,7 +18,7 @@ import time
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
-from llm_bridge import call_oneshot
+from story_core.llm_bridge import call_oneshot
 
 logging.basicConfig(
     format="[%(asctime)s] %(message)s",

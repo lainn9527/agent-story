@@ -5,14 +5,14 @@ import os
 import shutil
 from datetime import datetime, timezone
 
-import story_io
-from character_state import _load_character_schema
-from dungeon_system import ensure_dungeon_templates
-from event_db import delete_events_for_branch
-from lore_db import rebuild_index as rebuild_lore_index
-from parser import parse_conversation, save_parsed
-from prompts import SYSTEM_PROMPT_TEMPLATE
-from story_io import (
+from story_core import story_io
+from story_core.character_state import _load_character_schema
+from story_core.dungeon_system import ensure_dungeon_templates
+from story_core.event_db import delete_events_for_branch
+from story_core.lore_db import rebuild_index as rebuild_lore_index
+from story_core.parser import parse_conversation, save_parsed
+from story_core.prompts import SYSTEM_PROMPT_TEMPLATE
+from story_core.story_io import (
     _branch_dir,
     _ensure_data_dir,
     _load_json,
@@ -142,7 +142,7 @@ def _migrate_to_stories():
         with open(prompt_path, "w", encoding="utf-8") as f:
             f.write(SYSTEM_PROMPT_TEMPLATE)
 
-    from app_helpers import DEFAULT_CHARACTER_SCHEMA, DEFAULT_CHARACTER_STATE
+    from story_core.app_helpers import DEFAULT_CHARACTER_SCHEMA, DEFAULT_CHARACTER_STATE
 
     schema_path = _story_character_schema_path(story_id)
     if not os.path.exists(schema_path):

@@ -3,7 +3,7 @@ import io
 import json
 import urllib.error
 
-import image_gen
+from story_core import image_gen
 
 
 def test_extract_gemini_image_bytes_inline_data():

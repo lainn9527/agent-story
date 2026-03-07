@@ -8,7 +8,7 @@ import time
 
 log = logging.getLogger("rpg")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")

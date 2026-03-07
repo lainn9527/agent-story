@@ -297,7 +297,7 @@ def _parse_json_array(text: str) -> list[dict]:
 
 def split_long_entries(lore: list[dict], delay: float = 3.0, dry_run: bool = False) -> list[dict]:
     """Split entries >2000 chars via LLM calls."""
-    from llm_bridge import call_oneshot
+    from story_core.llm_bridge import call_oneshot
 
     long_entries = [(i, e) for i, e in enumerate(lore) if len(e.get("content", "")) > 2000]
     if not long_entries:
@@ -434,7 +434,7 @@ def validate_and_save(story_id: str, lore: list[dict], dry_run: bool = False):
     _save_lore(story_id, deduped)
     log.info("  Saved world_lore.json (%d entries)", len(deduped))
 
-    from lore_db import rebuild_index
+    from story_core.lore_db import rebuild_index
     rebuild_index(story_id)
     log.info("  Rebuilt SQLite FTS index")
 
@@ -449,11 +449,11 @@ def organize_orphans(story_id: str, delay: float = 3.0, dry_run: bool = False):
     Phase 1: Rule-based matching (starts-with / exact prefix match)
     Phase 2: LLM classification (closed-option, batched)
     """
-    from lore_organizer import (
+    from story_core.lore_organizer import (
         build_prefix_registry, try_classify_topic, find_orphans,
         get_lore_lock, rename_lore_topic, invalidate_prefix_cache,
     )
-    from llm_bridge import call_oneshot
+    from story_core.llm_bridge import call_oneshot
 
     orphans = find_orphans(story_id)
     log.info("Phase 6: Organize orphans — %d orphan topics found", len(orphans))
@@ -629,7 +629,7 @@ def main():
     args = parser.parse_args()
 
     # Force provider for script — avoids burning Gemini quota
-    from llm_bridge import set_provider
+    from story_core.llm_bridge import set_provider
     set_provider(args.provider)
 
     story_id = args.story_id
@@ -653,7 +653,7 @@ def main():
 
         if not effective_dry_run:
             # Rebuild SQLite index after renames
-            from lore_db import rebuild_index
+            from story_core.lore_db import rebuild_index
             rebuild_index(story_id)
             log.info("Rebuilt SQLite FTS index")
 

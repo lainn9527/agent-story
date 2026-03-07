@@ -15,8 +15,8 @@ from datetime import datetime, timezone
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
-import state_db
-from npc_lifecycle import (
+from story_core import state_db
+from story_core.npc_lifecycle import (
     NPC_LIFECYCLE_ACTIVE,
     NPC_LIFECYCLE_ARCHIVED,
     parse_npc_lifecycle_status,

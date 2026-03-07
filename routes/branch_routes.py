@@ -115,7 +115,7 @@ def api_branches_blank():
     app_module.rebuild_state_db_from_json(story_id, branch_id, state=blank_state, npcs=blank_npcs)
     app_module._save_branch_messages(story_id, branch_id, [])
 
-    from dungeon_system import _save_dungeon_progress
+    from story_core.dungeon_system import _save_dungeon_progress
 
     _save_dungeon_progress(
         story_id,

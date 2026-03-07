@@ -1,12 +1,12 @@
 import json
 
 import app as app_module
-import dungeon_system
-import event_db
-import llm_bridge
-import state_cleanup
-import state_db
-import world_timer
+from story_core import dungeon_system
+from story_core import event_db
+from story_core import llm_bridge
+from story_core import state_cleanup
+from story_core import state_db
+from story_core import world_timer
 
 
 STORY_ID = "test_story"

@@ -362,7 +362,7 @@ def _parse_json_array(text: str) -> list[dict] | None:
 
 def _merge_one_group(group_idx: int, group: list[dict], delay: float, total: int) -> tuple[int, list[dict] | None, str]:
     """Merge one group via LLM. Returns (group_idx, merged_entries, error_msg)."""
-    from llm_bridge import call_oneshot
+    from story_core.llm_bridge import call_oneshot
 
     if delay > 0:
         time.sleep(delay * (group_idx % 4))  # stagger start times
@@ -492,7 +492,7 @@ def validate_and_save(
     log.info("  Saved world_lore.json (%d entries)", len(deduped))
 
     # Rebuild index
-    from lore_db import rebuild_index
+    from story_core.lore_db import rebuild_index
     rebuild_index(story_id)
     log.info("  Rebuilt SQLite FTS index")
     return deduped

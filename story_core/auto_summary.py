@@ -8,11 +8,11 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from story_utils import get_character_name
+from story_core.story_utils import get_character_name
 
 log = logging.getLogger("auto_play")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
 SUMMARY_INTERVAL = 5        # every N turns
@@ -109,8 +109,8 @@ def generate_summary_async(
                 '"key_events": ["事件1", "事件2", ...]}\n'
             )
 
-            from llm_bridge import call_oneshot
-            import usage_db
+            from story_core.llm_bridge import call_oneshot
+            from story_core import usage_db
             t0 = time.time()
             response_text = call_oneshot(prompt)
             usage_db.log_from_bridge(story_id, "auto_summary", time.time() - t0, branch_id=branch_id)

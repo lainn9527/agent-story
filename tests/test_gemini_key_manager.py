@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-import gemini_key_manager
+from story_core import gemini_key_manager
 
 
 @pytest.fixture(autouse=True)

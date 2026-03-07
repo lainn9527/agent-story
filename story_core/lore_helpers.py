@@ -6,9 +6,9 @@ import os
 import re
 import threading
 
-from lore_db import get_category_summary, get_entry_count, upsert_entry as upsert_lore_entry
-from lore_organizer import get_lore_lock, try_classify_topic
-from story_io import _branch_dir, _load_json, _save_json, _story_design_dir
+from story_core.lore_db import get_category_summary, get_entry_count, upsert_entry as upsert_lore_entry
+from story_core.lore_organizer import get_lore_lock, try_classify_topic
+from story_core.story_io import _branch_dir, _load_json, _save_json, _story_design_dir
 
 
 log = logging.getLogger("rpg")

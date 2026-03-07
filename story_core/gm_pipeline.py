@@ -7,7 +7,7 @@ import re
 import threading
 import time
 
-from state_updates import _EVENT_STATUS_ORDER, _INSTRUCTION_KEYS, _SCENE_KEYS, _is_numeric_value
+from story_core.state_updates import _EVENT_STATUS_ORDER, _INSTRUCTION_KEYS, _SCENE_KEYS, _is_numeric_value
 
 log = logging.getLogger("rpg")
 
@@ -102,7 +102,7 @@ def _review_state_update_llm(
 ) -> dict | None:
     """Ask the LLM reviewer to repair invalid state keys."""
     app_module = _app()
-    from llm_bridge import call_oneshot
+    from story_core.llm_bridge import call_oneshot
 
     schema_summary_lines = []
     for field in schema.get("fields", []):
@@ -294,7 +294,7 @@ def _normalize_state_async(story_id: str, branch_id: str, update: dict, known_ke
         return
 
     def _do_normalize():
-        from llm_bridge import call_oneshot
+        from story_core.llm_bridge import call_oneshot
 
         prompt = (
             "你是一個 JSON 欄位正規化工具。以下是一個 RPG 角色狀態更新 JSON，"
@@ -382,8 +382,8 @@ def _extract_tags_async(
     run_ctx = app_module.get_current_run_context(story_id, branch_id)
 
     def _do_extract():
-        from event_db import get_event_title_map, get_event_titles
-        from llm_bridge import call_oneshot
+        from story_core.event_db import get_event_title_map, get_event_titles
+        from story_core.llm_bridge import call_oneshot
 
         try:
             toc = app_module.get_lore_toc(story_id)
@@ -856,7 +856,7 @@ def _process_gm_response(
     if state_updates:
         new_state = app_module._load_character_state(story_id, branch_id)
         if old_phase_before_state in ("副本中", "副本結算") and new_state.get("current_phase") == "主神空間":
-            from state_cleanup import run_state_cleanup_async
+            from story_core.state_cleanup import run_state_cleanup_async
 
             run_state_cleanup_async(story_id, branch_id, force=True)
 
@@ -914,7 +914,7 @@ def _process_gm_response(
         skip_time=had_time_tags,
     )
 
-    from state_cleanup import run_state_cleanup_async, should_run_cleanup
+    from story_core.state_cleanup import run_state_cleanup_async, should_run_cleanup
 
     cleanup_turn = turn_count if turn_count is not None else msg_index
     if should_run_cleanup(story_id, branch_id, cleanup_turn):

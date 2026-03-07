@@ -6,17 +6,17 @@ import logging
 import os
 import re
 
-from dungeon_system import build_dungeon_context
-from gm_cheats import get_fate_mode, get_pistol_mode
-from npc_helpers import (
+from story_core.dungeon_system import build_dungeon_context
+from story_core.gm_cheats import get_fate_mode, get_pistol_mode
+from story_core.npc_helpers import (
     _build_npc_summary_text,
     _classify_npc,
     _load_npcs,
     _normalize_npc_tier,
     _rel_to_str,
 )
-from prompts import build_system_prompt
-from story_io import (
+from story_core.prompts import build_system_prompt
+from story_core.story_io import (
     _get_image_model,
     _is_image_gen_enabled,
     _load_branch_config,
@@ -30,7 +30,7 @@ from story_io import (
     _story_dir,
     _story_system_prompt_path,
 )
-from world_timer import get_world_day
+from story_core.world_timer import get_world_day
 
 log = logging.getLogger("rpg")
 

@@ -13,7 +13,7 @@ import threading
 from datetime import datetime, timezone
 
 log = logging.getLogger("rpg")
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ---------------------------------------------------------------------------
 # TIME tag regex — extracted in _process_gm_response()

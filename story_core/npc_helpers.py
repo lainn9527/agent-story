@@ -4,19 +4,19 @@ import logging
 import re
 import unicodedata
 
-from npc_lifecycle import parse_npc_lifecycle_status
-from state_db import (
+from story_core.npc_lifecycle import parse_npc_lifecycle_status
+from story_core.state_db import (
     build_npc_content as build_state_npc_content,
     replace_categories_batch as replace_state_categories_batch,
     upsert_entry as upsert_state_entry,
 )
-from story_io import (
+from story_core.story_io import (
     _load_json,
     _save_json,
     _story_character_state_path,
     _story_npcs_path,
 )
-from tag_extraction import _extract_item_base_name
+from story_core.tag_extraction import _extract_item_base_name
 
 log = logging.getLogger("rpg")
 

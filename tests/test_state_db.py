@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-import state_db
+from story_core import state_db
 
 
 @pytest.fixture(autouse=True)

@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-import usage_db
+from story_core import usage_db
 
 
 @pytest.fixture(autouse=True)
@@ -217,7 +217,7 @@ class TestLogFromBridge:
         assert summary["total"]["calls"] == 1
         assert summary["total"]["total_tokens"] == 150
 
-    @mock.patch("llm_bridge.get_last_usage", return_value=None)
+    @mock.patch("story_core.llm_bridge.get_last_usage", return_value=None)
     def test_none_usage_returns_early(self, mock_get, story_id):
         # If usage is None AND get_last_usage returns None, should not log
         usage_db.log_from_bridge(story_id, "compaction", 1.0, usage=None)

@@ -15,7 +15,7 @@ log = logging.getLogger("rpg")
 # Thread-local storage for last usage metadata (populated after each call)
 _tls = threading.local()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
 
 # ---------------------------------------------------------------------------
@@ -68,10 +68,10 @@ def _capture_usage(provider: str, model: str):
     """Read usage from the bridge module and store in our thread-local."""
     _tls.last_usage = None
     if provider == "gemini":
-        from gemini_bridge import get_last_usage as _gemini_usage
+        from story_core.gemini_bridge import get_last_usage as _gemini_usage
         usage = _gemini_usage()
     else:
-        from claude_bridge import get_last_usage as _claude_usage
+        from story_core.claude_bridge import get_last_usage as _claude_usage
         usage = _claude_usage()
     if usage:
         _tls.last_usage = {**usage, "provider": provider, "model": model}
@@ -92,7 +92,7 @@ def call_claude_gm(
     provider = get_provider()
 
     if provider == "gemini":
-        from gemini_bridge import call_gemini_gm
+        from story_core.gemini_bridge import call_gemini_gm
         g = cfg.get("gemini", {})
         model = g.get("model", "gemini-2.0-flash")
         result = call_gemini_gm(
@@ -105,7 +105,7 @@ def call_claude_gm(
 
     # Default: Claude CLI
     model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
-    from claude_bridge import call_claude_gm as _claude
+    from story_core.claude_bridge import call_claude_gm as _claude
     result = _claude(user_message, system_prompt, recent_messages, session_id=session_id)
     _capture_usage(provider, model)
     return result
@@ -131,7 +131,7 @@ def call_claude_gm_stream(
     provider = get_provider()
 
     if provider == "gemini":
-        from gemini_bridge import call_gemini_gm_stream
+        from story_core.gemini_bridge import call_gemini_gm_stream
         g = cfg.get("gemini", {})
         model = g.get("model", "gemini-2.0-flash")
         for event_type, payload in call_gemini_gm_stream(
@@ -150,7 +150,7 @@ def call_claude_gm_stream(
     if tools:
         log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
     model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
-    from claude_bridge import call_claude_gm_stream as _stream
+    from story_core.claude_bridge import call_claude_gm_stream as _stream
     yield from _stream(user_message, system_prompt, recent_messages, session_id=session_id)
 
 
@@ -169,7 +169,7 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
         provider = get_provider()
 
     if provider == "gemini":
-        from gemini_bridge import call_gemini_oneshot
+        from story_core.gemini_bridge import call_gemini_oneshot
         g = cfg.get("gemini", {})
         model = g.get("model", "gemini-2.0-flash")
         result = call_gemini_oneshot(
@@ -182,7 +182,7 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
 
     # Claude CLI one-shot
     _tls.last_usage = None
-    from claude_bridge import CLAUDE_BIN, _CLEAN_ENV
+    from story_core.claude_bridge import CLAUDE_BIN, _CLEAN_ENV
     model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     cmd = [CLAUDE_BIN, "-p", "--output-format", "json", "--model", model]
     if system_prompt:
@@ -254,7 +254,7 @@ def _get_gemini_cfg() -> dict | None:
         return None
     cfg = _get_config()
     g = cfg.get("gemini", {})
-    from gemini_key_manager import load_keys
+    from story_core.gemini_key_manager import load_keys
     if not load_keys(g):
         return None
     return g
@@ -273,7 +273,7 @@ def web_search(query: str) -> str:
     g = _get_gemini_cfg()
     if not g:
         return ""
-    from gemini_bridge import call_gemini_grounded_search
+    from story_core.gemini_bridge import call_gemini_grounded_search
     model = g.get("model", "gemini-2.5-flash")
     result = call_gemini_grounded_search(query, gemini_cfg=g, model=model)
     _capture_usage("gemini", model)

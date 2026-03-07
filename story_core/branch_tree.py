@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from story_io import (
+from story_core.story_io import (
     _load_branch_messages,
     _load_json,
     _load_tree,

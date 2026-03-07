@@ -12,10 +12,10 @@ from unittest import mock
 import pytest
 
 import app as app_module
-import event_db
-import lore_db
-import state_db
-import world_timer
+from story_core import event_db
+from story_core import lore_db
+from story_core import state_db
+from story_core import world_timer
 
 REAL_THREAD = threading.Thread
 
@@ -118,7 +118,7 @@ def setup_story(tmp_path, story_id):
 
 
 class TestAsyncExtractionParsing:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_valid_json_parsed(self, mock_llm, story_id, setup_story):
         """Valid JSON response should be parsed and applied."""
         llm_response = json.dumps({
@@ -138,7 +138,7 @@ class TestAsyncExtractionParsing:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["current_status"] == "探索中"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_markdown_fenced_json(self, mock_llm, story_id, setup_story):
         """JSON wrapped in markdown code fences should be stripped and parsed."""
         inner = json.dumps({
@@ -155,20 +155,20 @@ class TestAsyncExtractionParsing:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["current_phase"] == "副本中"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_empty_llm_response_no_crash(self, mock_llm, story_id, setup_story):
         """Empty LLM response should not crash."""
         mock_llm.return_value = ""
         # Should not raise
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_none_llm_response_no_crash(self, mock_llm, story_id, setup_story):
         """None LLM response should not crash."""
         mock_llm.return_value = None
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_skip_state_flag(self, mock_llm, story_id, setup_story):
         """When skip_state=True, state changes should be ignored."""
         llm_response = json.dumps({
@@ -184,7 +184,7 @@ class TestAsyncExtractionParsing:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state.get("current_status") != "不應該被套用"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_state_ops_preferred_over_legacy_state(self, mock_llm, story_id, setup_story):
         llm_response = json.dumps({
             "state_ops": {
@@ -202,13 +202,13 @@ class TestAsyncExtractionParsing:
         assert state["current_status"] == "依 state_ops 套用"
         assert state["reward_points"] == 5120
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_short_text_skipped(self, mock_llm, story_id, setup_story):
         """GM text shorter than 200 chars should skip extraction entirely."""
         app_module._extract_tags_async(story_id, "main", "短文字", msg_index=1)
         mock_llm.assert_not_called()
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_malformed_json_fallback(self, mock_llm, story_id, setup_story):
         """Malformed JSON should try regex fallback to extract first JSON object."""
         inner = json.dumps({"state": {"current_status": "回退解析"}})
@@ -220,7 +220,7 @@ class TestAsyncExtractionParsing:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["current_status"] == "回退解析"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_snapshot_synced_after_async_updates(self, mock_llm, story_id, setup_story):
         """Async extraction should refresh the GM message snapshot to canonical state."""
         msg_path = setup_story / "branches" / "main" / "messages.json"
@@ -260,7 +260,7 @@ class TestAsyncExtractionParsing:
         assert "snapshot_async_synced_at" in synced
         assert (story_id, "main", 1) not in app_module._PENDING_EXTRACT
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_pending_extract_cleared_when_gm_message_missing(self, mock_llm, story_id, setup_story):
         """Pending extraction marker should always clear even if snapshot target is missing."""
         mock_llm.return_value = json.dumps({"state": {"current_status": "略"}})
@@ -343,7 +343,7 @@ class TestAsyncExtractionParsing:
 
 
 class TestAsyncEventDedup:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_duplicate_event_not_inserted_twice(self, mock_llm, story_id, setup_story):
         """Events with same title and same status should not create duplicates."""
         # Insert existing event
@@ -368,7 +368,7 @@ class TestAsyncEventDedup:
         count = sum(1 for e in events if e["title"] == "已存在事件")
         assert count == 1  # Only the original
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_event_status_updated_on_advancement(self, mock_llm, story_id, setup_story):
         """Events with same title but advanced status should update, not skip (C1)."""
         # Insert existing event as "planted"
@@ -391,7 +391,7 @@ class TestAsyncEventDedup:
         assert len(matching) == 1  # Still only one event
         assert matching[0]["status"] == "triggered"  # Status updated
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_event_status_no_backward_transition(self, mock_llm, story_id, setup_story):
         """Event status should not go backwards (resolved → planted)."""
         event_db.insert_event(story_id, {
@@ -413,7 +413,7 @@ class TestAsyncEventDedup:
 
 
 class TestAsyncEventOps:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_event_ops_update_by_id(self, mock_llm, story_id, setup_story):
         event_id = event_db.insert_event(story_id, {
             "event_type": "伏筆", "title": "舊標題", "description": "d", "status": "planted"
@@ -429,7 +429,7 @@ class TestAsyncEventOps:
         updated = event_db.get_event_by_id(story_id, event_id)
         assert updated["status"] == "resolved"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_events_ops_plural_backward_compat(self, mock_llm, story_id, setup_story):
         event_id = event_db.insert_event(story_id, {
             "event_type": "伏筆", "title": "兼容事件", "description": "d", "status": "planted"
@@ -445,7 +445,7 @@ class TestAsyncEventOps:
         updated = event_db.get_event_by_id(story_id, event_id)
         assert updated["status"] == "triggered"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_event_ops_create_dedup_only_advances_status(self, mock_llm, story_id, setup_story):
         event_db.insert_event(story_id, {
             "event_type": "伏筆", "title": "重複事件", "description": "old", "status": "planted"
@@ -472,7 +472,7 @@ class TestAsyncEventOps:
 
 
 class TestAsyncLoreExtraction:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_new_lore_saved_to_branch(self, mock_llm, story_id, setup_story, tmp_path):
         """New auto-extracted lore should be saved to branch_lore.json (not base)."""
         llm_response = json.dumps({
@@ -496,7 +496,7 @@ class TestAsyncLoreExtraction:
         base_lore = json.loads((design_dir / "world_lore.json").read_text(encoding="utf-8"))
         assert len(base_lore) == 0
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_user_edited_lore_protected(self, mock_llm, story_id, setup_story, tmp_path):
         """Lore entries marked as user-edited should not be overwritten."""
         # Pre-populate with user-edited entry
@@ -524,7 +524,7 @@ class TestAsyncLoreExtraction:
 
 
 class TestAsyncTimeAdvancement:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_time_hours_advanced(self, mock_llm, story_id, setup_story):
         """Time hours should advance world day."""
         # Set up world_day.json (float format: total days)
@@ -540,7 +540,7 @@ class TestAsyncTimeAdvancement:
 
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
 
-        from world_timer import get_world_day
+        from story_core.world_timer import get_world_day
         wd = get_world_day(story_id, "main")
         # Started at 1.0, advanced by 24h = 1 day → 2.0
         assert wd == 2.0
@@ -552,7 +552,7 @@ class TestAsyncTimeAdvancement:
 
 
 class TestAsyncBranchTitle:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_branch_title_saved(self, mock_llm, story_id, setup_story):
         """branch_title should be saved to timeline_tree."""
         llm_response = json.dumps({
@@ -566,7 +566,7 @@ class TestAsyncBranchTitle:
         tree = json.loads(tree_path.read_text(encoding="utf-8"))
         assert tree["branches"]["main"].get("title") == "初次探索"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_branch_title_set_once(self, mock_llm, story_id, setup_story):
         """branch_title should not overwrite existing title."""
         # Pre-set title
@@ -592,7 +592,7 @@ class TestAsyncBranchTitle:
 
 
 class TestAsyncGmPlanExtraction:
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_prompt_includes_previous_plan_context(self, mock_llm, story_id, setup_story):
         plan_path = setup_story / "branches" / "main" / "gm_plan.json"
         plan_path.write_text(json.dumps({
@@ -613,7 +613,7 @@ class TestAsyncGmPlanExtraction:
         assert "舊弧線" in prompt
         assert "舊節點" in prompt
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_plan_saved_with_event_relink(self, mock_llm, story_id, setup_story):
         event_id = event_db.insert_event(story_id, {
             "event_type": "伏筆", "title": "神秘符文", "description": "d", "status": "planted"
@@ -638,7 +638,7 @@ class TestAsyncGmPlanExtraction:
         assert plan["must_payoff"][0]["event_id"] == event_id
         assert plan["must_payoff"][0]["created_at_index"] == 12
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_same_payoff_keeps_original_created_at_index(self, mock_llm, story_id, setup_story):
         event_id = event_db.insert_event(story_id, {
             "event_type": "伏筆", "title": "神秘符文", "description": "d", "status": "planted"
@@ -669,7 +669,7 @@ class TestAsyncGmPlanExtraction:
         assert plan["updated_at_index"] == 13
         assert plan["must_payoff"][0]["created_at_index"] == 5
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_pistol_mode_skips_plan_write(self, mock_llm, story_id, setup_story, monkeypatch):
         plan_path = setup_story / "branches" / "main" / "gm_plan.json"
         original = {
@@ -718,7 +718,7 @@ class TestNpcTier:
             None,
         )
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_extract_prompt_includes_tier_schema(self, mock_llm, story_id, setup_story):
         """Extraction prompt should ask for tier field with allowlist format."""
         mock_llm.return_value = json.dumps({"npcs": []})
@@ -904,7 +904,7 @@ class TestNpcTier:
         assert npcs[0]["origin_dungeon_id"] == "naruto"
         assert npcs[0]["origin_run_id"] == "run-1"
 
-    @mock.patch("llm_bridge.call_oneshot")
+    @mock.patch("story_core.llm_bridge.call_oneshot")
     def test_extract_tags_async_uses_current_run_context_for_same_run_reactivation(
         self,
         mock_llm,

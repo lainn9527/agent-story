@@ -17,17 +17,17 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("rpg")
 
-from llm_bridge import call_claude_gm, call_claude_gm_stream, get_last_usage, get_provider
-import usage_db
-from event_db import (
+from story_core.llm_bridge import call_claude_gm, call_claude_gm_stream, get_last_usage, get_provider
+from story_core import usage_db
+from story_core.event_db import (
     insert_event, search_relevant_events, get_events, get_event_by_id,
     update_event_status, search_events as search_events_db,
     get_active_events,
     copy_events_for_fork, merge_events_into, delete_events_for_branch,
 )
-from image_gen import generate_image_async, get_image_status, get_image_path
-from lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry, get_entry_count, get_category_summary, get_embedding_stats, find_duplicates
-from state_db import (
+from story_core.image_gen import generate_image_async, get_image_status, get_image_path
+from story_core.lore_db import rebuild_index as rebuild_lore_index, search_relevant_lore, upsert_entry as upsert_lore_entry, get_toc as get_lore_toc, delete_entry as delete_lore_entry, get_entry_count, get_category_summary, get_embedding_stats, find_duplicates
+from story_core.state_db import (
     rebuild_from_json as rebuild_state_db_from_json,
     search_state as search_state_entries,
     get_summary as get_state_summary,
@@ -36,28 +36,28 @@ from state_db import (
     upsert_entry as upsert_state_entry,
     delete_entry as delete_state_entry,
 )
-from npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
-from auto_summary import get_summaries
-from dice import roll_fate, format_dice_context
-from parser import parse_conversation, save_parsed
-from prompts import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
-from compaction import (
+from story_core.npc_evolution import should_run_evolution, run_npc_evolution_async, get_recent_activities, get_all_activities
+from story_core.auto_summary import get_summaries
+from story_core.dice import roll_fate, format_dice_context
+from story_core.parser import parse_conversation, save_parsed
+from story_core.prompts import SYSTEM_PROMPT_TEMPLATE, build_system_prompt
+from story_core.compaction import (
     load_recap, save_recap, get_recap_text, should_compact, compact_async,
     get_context_window, copy_recap_to_branch, RECENT_WINDOW as RECENT_MESSAGE_COUNT,
 )
-from world_timer import process_time_tags, get_world_day, set_world_day, copy_world_day, advance_world_day, TIME_RE
-from lore_organizer import (
+from story_core.world_timer import process_time_tags, get_world_day, set_world_day, copy_world_day, advance_world_day, TIME_RE
+from story_core.lore_organizer import (
     get_lore_lock, try_classify_topic, build_prefix_registry, invalidate_prefix_cache,
     should_organize, organize_lore_async,
 )
-from llm_trace import write_trace as write_llm_trace
-from gm_cheats import (
+from story_core.llm_trace import write_trace as write_llm_trace
+from story_core.gm_cheats import (
     is_gm_command, apply_dice_command, get_dice_modifier, copy_cheats,
     get_dice_always_success, set_dice_always_success,
     get_fate_mode, set_fate_mode,
     get_pistol_mode, set_pistol_mode,
 )
-from dungeon_system import (
+from story_core.dungeon_system import (
     ensure_dungeon_templates, initialize_dungeon_progress, archive_current_dungeon,
     update_dungeon_progress, update_dungeon_area, validate_dungeon_progression,
     build_dungeon_context, copy_dungeon_progress, get_dungeon_progress_snapshot,
@@ -65,18 +65,18 @@ from dungeon_system import (
     _load_dungeon_templates, _load_dungeon_template, _load_dungeon_progress,
     _parse_rank,
 )
-from npc_lifecycle import parse_npc_lifecycle_status
-from character_state import *  # noqa: F401,F403
-from npc_helpers import *  # noqa: F401,F403
-from story_io import *  # noqa: F401,F403
-from tag_extraction import *  # noqa: F401,F403
-from branch_tree import *  # noqa: F401,F403
-from lore_helpers import *  # noqa: F401,F403
-from gm_plan import *  # noqa: F401,F403
-from migrations import *  # noqa: F401,F403
-from state_updates import *  # noqa: F401,F403
-from debug_helpers import *  # noqa: F401,F403
-from gm_pipeline import *  # noqa: F401,F403
+from story_core.npc_lifecycle import parse_npc_lifecycle_status
+from story_core.character_state import *  # noqa: F401,F403
+from story_core.npc_helpers import *  # noqa: F401,F403
+from story_core.story_io import *  # noqa: F401,F403
+from story_core.tag_extraction import *  # noqa: F401,F403
+from story_core.branch_tree import *  # noqa: F401,F403
+from story_core.lore_helpers import *  # noqa: F401,F403
+from story_core.gm_plan import *  # noqa: F401,F403
+from story_core.migrations import *  # noqa: F401,F403
+from story_core.state_updates import *  # noqa: F401,F403
+from story_core.debug_helpers import *  # noqa: F401,F403
+from story_core.gm_pipeline import *  # noqa: F401,F403
 
 # ---------------------------------------------------------------------------
 # Config

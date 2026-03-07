@@ -17,7 +17,7 @@ Testing strategy for the Story RPG project, covering backend unit tests, integra
 
 Pure logic and isolated modules — no Flask app context needed.
 
-### 1.1 Tag Extraction Regex (`test_tag_extraction.py`)
+### 1.1 Tag Extraction Regex (`tests/test_tag_extraction.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -29,7 +29,7 @@ Pure logic and isolated modules — no Flask app context needed.
 | Mixed tags | STATE + LORE + NPC + EVENT + IMG in single response |
 | Tag stripping | surrounding text intact after extraction |
 
-### 1.2 World Timer (`test_world_timer.py`)
+### 1.2 World Timer (`tests/test_world_timer.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -39,7 +39,7 @@ Pure logic and isolated modules — no Flask app context needed.
 | `copy_world_day()` | parent → child copy, zero value skips write |
 | Dungeon helpers | `advance_dungeon_enter()` (+3 days), `advance_dungeon_exit()` (+1 day) |
 
-### 1.3 Lore Search (`test_lore_db.py`)
+### 1.3 Lore Search (`tests/test_lore_db.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -51,7 +51,7 @@ Pure logic and isolated modules — no Flask app context needed.
 | Category boosting | phase-based category prioritization |
 | Token budget | results respect 3000-token cap |
 
-### 1.4 Event Search (`test_event_db.py`)
+### 1.4 Event Search (`tests/test_event_db.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -62,7 +62,7 @@ Pure logic and isolated modules — no Flask app context needed.
 | `update_event_status()` | planted → triggered → resolved |
 | `get_active_foreshadowing()` | only planted events |
 
-### 1.5 Gemini Key Manager (`test_gemini_key_manager.py`)
+### 1.5 Gemini Key Manager (`tests/test_gemini_key_manager.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -71,7 +71,7 @@ Pure logic and isolated modules — no Flask app context needed.
 | `mark_rate_limited()` | 60s cooldown, re-available after expiry |
 | Edge cases | all keys cooled down → empty list, single key pool |
 
-### 1.6 Usage DB (`test_usage_db.py`)
+### 1.6 Usage DB (`tests/test_usage_db.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -85,7 +85,7 @@ Pure logic and isolated modules — no Flask app context needed.
 
 Tests requiring multiple modules working together, Flask test client, or mocked LLM calls.
 
-### 2.1 Branch Tree Logic (`test_branch_tree.py`)
+### 2.1 Branch Tree Logic (`tests/test_branch_tree.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -107,7 +107,7 @@ Tests requiring multiple modules working together, Flask test client, or mocked 
 | Edge cases | remove item not in inventory, negative delta, combined multi-field |
 | Relationships | relationship map merge semantics |
 
-### 2.3 Compaction Logic (`test_compaction.py`)
+### 2.3 Compaction Logic (`tests/test_compaction.py`)
 
 | Function | Test Cases |
 |----------|------------|
@@ -238,7 +238,7 @@ Bugs and gaps discovered during Phase 1+2 test writing. Listed here for future p
 - **`/api/messages` response shape** — missing assertions for `fork_points`, `sibling_groups`, `world_day`, `original_count`, `branch_id` fields that frontend destructures
 - **Reward points floor** — `reward_points_delta` can result in negative points (no `max(0, ...)` clamp)
 - **Death state transition** — `current_phase: "死亡"`, `current_status: "end"` path untested
-- **Auto-play pure functions** — `analyze_response`, `update_phase`, `should_stop` in `auto_play.py`
+- **Auto-play pure functions** — `analyze_response`, `update_phase`, `should_stop` in `story_core/auto_play.py`
 - **Save/load system** — 5 endpoints (list, create, load, delete, rename)
 - **Branch promote/merge** — complex state transitions
 

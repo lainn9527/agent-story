@@ -4,8 +4,8 @@ import copy
 import logging
 import os
 
-from event_db import get_active_events
-from story_io import _branch_dir, _load_json, _save_json
+from story_core.event_db import get_active_events
+from story_core.story_io import _branch_dir, _load_json, _save_json
 
 log = logging.getLogger("rpg")
 

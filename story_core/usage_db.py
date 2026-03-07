@@ -10,7 +10,7 @@ log = logging.getLogger("rpg")
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
 
@@ -107,7 +107,7 @@ def log_from_bridge(
     then calls log_usage() with the standard field mapping.
     """
     if usage is None:
-        from llm_bridge import get_last_usage
+        from story_core.llm_bridge import get_last_usage
         usage = get_last_usage()
     if usage is None:
         return

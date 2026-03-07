@@ -13,11 +13,11 @@ import re
 import threading
 from datetime import datetime, timezone
 
-from story_utils import get_character_name
+from story_core.story_utils import get_character_name
 
 log = logging.getLogger("rpg")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 
@@ -224,8 +224,8 @@ def compact_async(story_id: str, branch_id: str, full_timeline: list[dict]):
 def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
     """Actually perform compaction (runs in background thread)."""
     import time as _time
-    from llm_bridge import call_oneshot
-    import usage_db
+    from story_core.llm_bridge import call_oneshot
+    from story_core import usage_db
 
     recap = load_recap(story_id, branch_id)
     compacted_through = recap.get("compacted_through_index", -1)

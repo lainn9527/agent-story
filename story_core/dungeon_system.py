@@ -222,7 +222,7 @@ def initialize_dungeon_progress(
 
     # Get current world day (import from world_timer if available)
     try:
-        from world_timer import get_world_day
+        from story_core.world_timer import get_world_day
         current_world_day = get_world_day(story_id, branch_id)
     except ImportError:
         current_world_day = {"day": 1, "hour": 0}
@@ -386,7 +386,7 @@ def update_dungeon_progress(story_id: str, branch_id: str, update: dict):
 
         # Update current world day
         try:
-            from world_timer import get_world_day
+            from story_core.world_timer import get_world_day
             world_day = get_world_day(story_id, branch_id)
             current["current_world_day"] = world_day.get("day", 1) if isinstance(world_day, dict) else 1
         except ImportError:

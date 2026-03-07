@@ -18,7 +18,7 @@
 ### 2.1 來源與模板
 
 - 優先讀取：`story_design/<story_id>/system_prompt.txt`
-- 若不存在，退回：`prompts.py::SYSTEM_PROMPT_TEMPLATE`
+- 若不存在，退回：`story_core/prompts.py::SYSTEM_PROMPT_TEMPLATE`
 - 組裝函式：`app.py::_build_story_system_prompt()`
 
 ### 2.2 主 prompt 注入資料
@@ -84,7 +84,7 @@
 ### 2.5 戰力等級一致性（Tier Consistency）
 
 - `system_prompt.txt` 內新增「戰力等級敘事指南（演出落地）」：五大等級 D/C/B/A/S 的具體演出維度與反面檢查。
-- `prompts.py` fallback 模板同步保留精簡版等級框架，避免 fallback 路徑退化。
+- `story_core/prompts.py` fallback 模板同步保留精簡版等級框架，避免 fallback 路徑退化。
 - NPC tier 採 15 個 sub-tier：`D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+`。
 - `_save_npc()` 會做 tier allowlist 正規化；不合法值直接忽略、不覆蓋既有合法值。
 - NPC metadata 新增 `lifecycle_status` / `archived_reason` / `archive_kind` / `origin_dungeon_id` / `origin_run_id`；缺省視為 active，archived NPC 預設不進常駐 prompt。
@@ -92,7 +92,7 @@
 
 ### 2.6 State RAG（角色狀態按需注入）
 
-- state index 來源：`state_db.py`（branch 級 `state.db`）。
+- state index 來源：`story_core/state_db.py`（branch 級 `state.db`）。
 - 預設 token 預算：`STATE_RAG_TOKEN_BUDGET=2000`（最小 200）。
 - 類別覆蓋：inventory / ability / relationship / mission / system / npc。
 - `must_include_keys` 會從玩家輸入提取已知實體名做保底納入（忽略長度 < 2 的 key，避免噪音）。
@@ -187,7 +187,7 @@
 
 ## 6. Auto-play Prompt 設計
 
-檔案：`auto_play.py`
+檔案：`story_core/auto_play.py`
 
 ### 6.1 角色生成 prompt
 
@@ -201,9 +201,9 @@
 
 ### 6.3 Auto summary prompt
 
-- 檔案：`auto_summary.py`
+- 檔案：`story_core/auto_summary.py`
 - 每 5 回合或 phase 轉換時，背景生成 JSON 摘要
-- 對話壓縮（`compaction.py`）在送摘要前也會移除非玩家訊息尾端的選項區塊（含 `- **「...」：**` 形式），但保留 `當前處境` 等敘事內容，避免選項被固化進長期 recap。
+- 對話壓縮（`story_core/compaction.py`）在送摘要前也會移除非玩家訊息尾端的選項區塊（含 `- **「...」：**` 形式），但保留 `當前處境` 等敘事內容，避免選項被固化進長期 recap。
 
 ---
 
@@ -254,7 +254,7 @@
    - `tests/test_tag_extraction.py`
 5. 若調整 tier 或 relationship 正規化規則，需同步更新：
    - `app.py::_normalize_npc_tier()` / `_rel_to_str()`
-   - `state_db.py` 內對應 helper（目前為避免循環 import 採 duplicated logic）
+   - `story_core/state_db.py` 內對應 helper（目前為避免循環 import 採 duplicated logic）
 
 ---
 

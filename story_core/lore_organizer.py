@@ -17,14 +17,14 @@ import threading
 import time as _time
 from datetime import datetime, timezone, timedelta
 
-from llm_trace import write_trace as write_llm_trace
+from story_core.llm_trace import write_trace as write_llm_trace
 
 log = logging.getLogger("rpg")
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
@@ -244,7 +244,7 @@ def _save_state(story_id: str, state: dict):
 
 def rename_lore_topic(story_id: str, old_topic: str, new_topic: str, subcategory: str = ""):
     """Rename a lore topic in world_lore.json + SQLite index. Must be called within lore lock."""
-    from lore_db import delete_entry as delete_lore_entry, upsert_entry as upsert_lore_entry
+    from story_core.lore_db import delete_entry as delete_lore_entry, upsert_entry as upsert_lore_entry
 
     lore_file = _lore_path(story_id)
     if not os.path.exists(lore_file):
@@ -348,8 +348,8 @@ def _organize_orphans_llm(story_id: str):
     Uses the current global provider from llm_bridge.
     """
     import time as _time
-    from llm_bridge import call_oneshot
-    import usage_db
+    from story_core.llm_bridge import call_oneshot
+    from story_core import usage_db
 
     lock = get_lore_lock(story_id)
     state = _load_state(story_id)

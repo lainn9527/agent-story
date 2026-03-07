@@ -11,11 +11,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from gemini_key_manager import get_available_keys, mark_rate_limited
+from story_core.gemini_key_manager import get_available_keys, mark_rate_limited
 
 log = logging.getLogger("rpg")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 LLM_CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
 

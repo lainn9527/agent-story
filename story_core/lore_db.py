@@ -15,7 +15,7 @@ log = logging.getLogger("rpg")
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
@@ -391,7 +391,7 @@ def _embed_single_async(story_id: str, topic: str, content: str, subcategory: st
     """Embed a single entry in a background daemon thread."""
     def _do():
         try:
-            from llm_bridge import embed_text
+            from story_core.llm_bridge import embed_text
             text = f"{topic}\n{content}"
             vec = embed_text(text)
             if vec and len(vec) == EMBEDDING_DIM:
@@ -437,7 +437,7 @@ def _embed_all_if_needed(story_id: str):
 
 def embed_all_entries(story_id: str):
     """Batch-embed all entries that are missing embeddings. Blocking call."""
-    from llm_bridge import embed_texts_batch
+    from story_core.llm_bridge import embed_texts_batch
     import time
 
     conn = _get_conn(story_id)
@@ -560,7 +560,7 @@ def _search_embedding(story_id: str, query: str, limit: int = 20) -> list[dict]:
     if cache is None:
         return []
 
-    from llm_bridge import embed_text
+    from story_core.llm_bridge import embed_text
     query_vec = embed_text(query)
     if not query_vec or len(query_vec) != EMBEDDING_DIM:
         return []

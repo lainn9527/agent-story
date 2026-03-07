@@ -132,12 +132,12 @@ SAMPLE_NPCS = [
 def _patch_paths_all_modules(monkeypatch, tmp_path, stories_dir, design_dir, app_module=None):
     """Patch shared path constants across app and extracted helper modules."""
     import app as imported_app_module
-    import app_helpers
-    import event_db
-    import lore_db
-    import migrations
-    import state_db
-    import story_io
+    from story_core import app_helpers
+    from story_core import event_db
+    from story_core import lore_db
+    from story_core import migrations
+    from story_core import state_db
+    from story_core import story_io
 
     app_target = app_module or imported_app_module
     data_dir = tmp_path / "data"

@@ -23,9 +23,9 @@ import time
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
-from llm_bridge import call_oneshot
-from event_db import insert_event, get_event_titles
-from lore_db import get_toc as get_lore_toc, upsert_entry as upsert_lore_entry
+from story_core.llm_bridge import call_oneshot
+from story_core.event_db import insert_event, get_event_titles
+from story_core.lore_db import get_toc as get_lore_toc, upsert_entry as upsert_lore_entry
 
 logging.basicConfig(
     format="[%(asctime)s] %(message)s",

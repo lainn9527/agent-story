@@ -8,7 +8,7 @@ import time
 
 log = logging.getLogger("rpg")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CLAUDE_TIMEOUT = 300  # seconds (5 min, allows for complex responses)
 CLEAN_CWD = "/tmp"    # avoid loading project CLAUDE.md into context

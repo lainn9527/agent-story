@@ -9,14 +9,14 @@ import time
 import urllib.error
 import urllib.request
 
-from gemini_key_manager import get_available_keys, mark_rate_limited
+from story_core.gemini_key_manager import get_available_keys, mark_rate_limited
 
 log = logging.getLogger("rpg")
 
 # Thread-local storage for last usage metadata
 _tls = threading.local()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 GEMINI_TIMEOUT = 120  # seconds (connection timeout)
 GEMINI_READ_TIMEOUT = 90  # seconds (per-chunk read timeout for SSE stream)

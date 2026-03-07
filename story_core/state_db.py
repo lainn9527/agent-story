@@ -8,13 +8,13 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from npc_lifecycle import (
+from story_core.npc_lifecycle import (
     NPC_LIFECYCLE_ACTIVE,
     NPC_LIFECYCLE_ARCHIVED,
     parse_npc_lifecycle_status,
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
 _CATEGORY_LABELS = {

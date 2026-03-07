@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-import world_timer
+from story_core import world_timer
 
 
 @pytest.fixture(autouse=True)

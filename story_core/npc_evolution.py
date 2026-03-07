@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("rpg")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORIES_DIR = os.path.join(BASE_DIR, "data", "stories")
 
 NPC_EVOLUTION_INTERVAL = 3       # every N player turns
@@ -79,8 +79,8 @@ def run_npc_evolution_async(
                 "只輸出 JSON，不要其他文字。"
             )
 
-            from llm_bridge import call_oneshot
-            import usage_db
+            from story_core.llm_bridge import call_oneshot
+            from story_core import usage_db
             t0 = time.time()
             response_text = call_oneshot(prompt)
             usage_db.log_from_bridge(story_id, "npc_evolution", time.time() - t0, branch_id=branch_id)
