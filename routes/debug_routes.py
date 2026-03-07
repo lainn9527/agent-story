@@ -236,16 +236,6 @@ def api_debug_apply():
     audit_summary = app_module._build_debug_apply_audit_summary(
         results, directive_result.get("applied", 0)
     )
-    try:
-        app_module._append_debug_audit_message(story_id, branch_id, audit_summary)
-    except Exception as exc:
-        log.warning(
-            "debug apply audit append failed: story=%s branch=%s error=%s",
-            story_id,
-            branch_id,
-            exc,
-        )
-
     return jsonify(
         {
             "ok": True,
@@ -316,15 +306,6 @@ def api_debug_undo():
     app_module._clear_last_apply_backup(story_id, debug_unit_id)
 
     audit_summary = "已回滾 Debug 修正（還原至套用前）"
-    try:
-        app_module._append_debug_audit_message(story_id, branch_id, audit_summary)
-    except Exception as exc:
-        log.warning(
-            "debug undo audit append failed: story=%s branch=%s error=%s",
-            story_id,
-            branch_id,
-            exc,
-        )
     return jsonify({"ok": True, "restored": True, "audit_summary": audit_summary})
 
 

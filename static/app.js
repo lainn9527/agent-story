@@ -4762,6 +4762,217 @@ init();
 // Debug Panel Layout
 // ==========================================
 
+const _DEBUG_ACTION_TYPES = new Set([
+  "state_patch",
+  "npc_upsert",
+  "npc_delete",
+  "world_day_set",
+  "dungeon_patch",
+]);
+
+const _DEBUG_DUNGEON_KEYS = [
+  "progress_delta",
+  "mainline_progress_delta",
+  "completed_nodes",
+  "discovered_areas",
+  "explored_area_updates",
+];
+
+function _normalizeDebugActionPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+
+  const data = { ...payload };
+  if (data.action && typeof data.action === "object" && !Array.isArray(data.action)) {
+    const nested = _normalizeDebugActionPayload(data.action);
+    if (nested) return nested;
+  }
+
+  const actionType = String(
+    data.type ||
+    data.action_type ||
+    data.kind ||
+    (typeof data.action === "string" ? data.action : "") ||
+    ""
+  ).trim();
+
+  if (_DEBUG_ACTION_TYPES.has(actionType)) {
+    const normalized = { ...data, type: actionType };
+    const payloadObj = normalized.payload;
+    if (payloadObj && typeof payloadObj === "object" && !Array.isArray(payloadObj)) {
+      Object.entries(payloadObj).forEach(([key, value]) => {
+        if (!(key in normalized)) normalized[key] = value;
+      });
+    }
+
+    if (actionType === "state_patch") {
+      const stateObj = normalized.state_patch;
+      const patchObj = normalized.patch;
+      const patchDataObj = normalized.patch_data;
+      if (!normalized.update || typeof normalized.update !== "object" || Array.isArray(normalized.update)) {
+        if (stateObj && typeof stateObj === "object" && !Array.isArray(stateObj)) {
+          normalized.update = stateObj;
+        } else if (patchObj && typeof patchObj === "object" && !Array.isArray(patchObj)) {
+          normalized.update = patchObj;
+        } else if (patchDataObj && typeof patchDataObj === "object" && !Array.isArray(patchDataObj)) {
+          normalized.update = patchDataObj;
+        } else {
+          const extras = {};
+          Object.entries(normalized).forEach(([key, value]) => {
+            if (![
+              "type",
+              "action_type",
+              "kind",
+              "action",
+              "payload",
+              "state_patch",
+              "patch",
+              "patch_data",
+            ].includes(key)) {
+              extras[key] = value;
+            }
+          });
+          if (Object.keys(extras).length > 0) normalized.update = extras;
+        }
+      }
+    } else if (actionType === "npc_upsert") {
+      const npcObj = normalized.npc_upsert;
+      if ((!normalized.npc || typeof normalized.npc !== "object" || Array.isArray(normalized.npc))
+        && npcObj && typeof npcObj === "object" && !Array.isArray(npcObj)) {
+        normalized.npc = npcObj;
+      }
+    } else if (actionType === "npc_delete") {
+      if (!String(normalized.npc_id || "").trim()) {
+        const npcDeleteVal = normalized.npc_delete;
+        if (typeof npcDeleteVal === "string" && npcDeleteVal.trim()) {
+          normalized.npc_id = npcDeleteVal.trim();
+        }
+      }
+    } else if (actionType === "world_day_set") {
+      if (!("world_day" in normalized) && ("value" in normalized)) {
+        normalized.world_day = normalized.value;
+      }
+    } else if (actionType === "dungeon_patch") {
+      const dungeonObj = normalized.dungeon_patch;
+      if (dungeonObj && typeof dungeonObj === "object" && !Array.isArray(dungeonObj)) {
+        Object.entries(dungeonObj).forEach(([key, value]) => {
+          if (!(key in normalized)) normalized[key] = value;
+        });
+      }
+    }
+
+    return normalized;
+  }
+
+  if (data.update && typeof data.update === "object" && !Array.isArray(data.update)) {
+    return { type: "state_patch", update: data.update };
+  }
+  if (data.patch && typeof data.patch === "object" && !Array.isArray(data.patch)) {
+    return { type: "state_patch", update: data.patch };
+  }
+  if (data.patch_data && typeof data.patch_data === "object" && !Array.isArray(data.patch_data)) {
+    return { type: "state_patch", update: data.patch_data };
+  }
+  if ("world_day" in data) {
+    return { type: "world_day_set", world_day: data.world_day };
+  }
+  if (data.npc && typeof data.npc === "object" && !Array.isArray(data.npc)) {
+    return { type: "npc_upsert", npc: data.npc };
+  }
+
+  const npcId = String(data.npc_id || "").trim();
+  if (npcId) {
+    return { type: "npc_delete", npc_id: npcId };
+  }
+
+  if (_DEBUG_DUNGEON_KEYS.some((key) => key in data)) {
+    const out = { type: "dungeon_patch" };
+    _DEBUG_DUNGEON_KEYS.forEach((key) => {
+      if (key in data) out[key] = data[key];
+    });
+    return out;
+  }
+
+  for (const key of _DEBUG_ACTION_TYPES) {
+    if (!(key in data)) continue;
+    const value = data[key];
+
+    if (key === "state_patch") {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        if (value.update && typeof value.update === "object" && !Array.isArray(value.update)) {
+          return { type: "state_patch", update: value.update };
+        }
+        return { type: "state_patch", update: value };
+      }
+      return null;
+    }
+
+    if (key === "npc_upsert") {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        if (value.npc && typeof value.npc === "object" && !Array.isArray(value.npc)) {
+          return { type: "npc_upsert", npc: value.npc };
+        }
+        return { type: "npc_upsert", npc: value };
+      }
+      return null;
+    }
+
+    if (key === "npc_delete") {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const nestedId = String(value.npc_id || "").trim();
+        if (nestedId) return { type: "npc_delete", npc_id: nestedId };
+        return null;
+      }
+      if (typeof value === "string" && value.trim()) {
+        return { type: "npc_delete", npc_id: value.trim() };
+      }
+      return null;
+    }
+
+    if (key === "world_day_set") {
+      if (value && typeof value === "object" && !Array.isArray(value) && ("world_day" in value)) {
+        return { type: "world_day_set", world_day: value.world_day };
+      }
+      return { type: "world_day_set", world_day: value };
+    }
+
+    if (key === "dungeon_patch") {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const out = { type: "dungeon_patch" };
+        _DEBUG_DUNGEON_KEYS.forEach((dungeonKey) => {
+          if (dungeonKey in value) out[dungeonKey] = value[dungeonKey];
+        });
+        return out;
+      }
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function _splitDebugProposals(proposals) {
+  const out = [];
+
+  (proposals || []).forEach((proposal) => {
+    const normalized = _normalizeDebugActionPayload(proposal);
+    if (!normalized) return;
+
+    if (normalized.type === "state_patch") {
+      const updateObj = normalized.update || normalized.patch;
+      if (updateObj && typeof updateObj === "object" && !Array.isArray(updateObj)) {
+        Object.entries(updateObj).forEach(([key, value]) => {
+          out.push({ type: "state_patch", update: { [key]: value } });
+        });
+      }
+      return;
+    }
+
+    out.push(normalized);
+  });
+
+  return out;
+}
+
 function _parseDebugContent(text) {
   if (!text) return { cleanText: "", proposals: [], directives: [] };
   const proposals = [];
@@ -4770,18 +4981,7 @@ function _parseDebugContent(text) {
   // Extract actions
   let cleanText = text.replace(/<!--DEBUG_ACTION\s+([\s\S]*?)\s+DEBUG_ACTION-->/g, (match, jsonStr) => {
     try {
-      const p = JSON.parse(jsonStr);
-      // Support both 'update' and 'patch' keys for state_patch
-      if (p.type === "state_patch") {
-        const updateObj = p.update || p.patch;
-        if (updateObj && typeof updateObj === "object") {
-          for (const [key, value] of Object.entries(updateObj)) {
-            proposals.push({ type: "state_patch", update: { [key]: value } });
-          }
-        }
-      } else {
-        proposals.push(p);
-      }
+      proposals.push(..._splitDebugProposals([JSON.parse(jsonStr)]));
     } catch (e) {
       console.warn("Failed to parse debug action:", e);
     }
@@ -4848,7 +5048,7 @@ function _renderInlineProposalCards(container, proposals, directives) {
   proposals.forEach((p, i) => {
     let badgeClass = "edit";
     let badgeText = "狀態";
-    let topic = p.type;
+    let topic = p.type || "未分類";
     let contentHtml = "";
 
     if (p.type === "state_patch") {
@@ -4874,7 +5074,9 @@ function _renderInlineProposalCards(container, proposals, directives) {
     } else if (p.type === "dungeon_patch") {
       badgeClass = "edit"; badgeText = "副本";
       topic = "推進進度";
-      contentHtml = `變更為: ${JSON.stringify(p.update)}`;
+      contentHtml = `變更為: ${JSON.stringify(p)}`;
+    } else {
+      contentHtml = JSON.stringify(p);
     }
 
     const card = document.createElement("div");
@@ -5060,20 +5262,7 @@ async function sendDebugChat() {
           target.innerHTML = markdownToHtml(stripDebugTags(finalText));
         }
 
-        const rawProposals = data.proposals || [];
-        const splitProposals = [];
-        rawProposals.forEach(p => {
-          if (p.type === "state_patch") {
-            const updateObj = p.update || p.patch;
-            if (updateObj && typeof updateObj === "object") {
-              for (const [key, value] of Object.entries(updateObj)) {
-                splitProposals.push({ type: "state_patch", update: { [key]: value } });
-              }
-            }
-          } else {
-            splitProposals.push(p);
-          }
-        });
+        const splitProposals = _splitDebugProposals(data.proposals || []);
 
         _debugPendingProposals = splitProposals;
         _debugPendingDirectives = data.directives || [];
