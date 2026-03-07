@@ -140,6 +140,7 @@ class TestBuildAugmentedMessage:
         # User text should be after the separator
         assert text.endswith("原始訊息")
         assert "---\n原始訊息" in text
+        assert "[續場提醒]" not in text
 
     @mock.patch("app.search_relevant_lore", return_value="")
     @mock.patch("app.format_sticky_events", return_value="[長期關鍵事件]\n- 神王追索")
@@ -435,6 +436,24 @@ class TestCriticalFactsAnchors:
         monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
         app_module._process_gm_response("一般回覆內容", story_id, "main", msg_index=1)
         assert not directive_path.exists()
+
+    def test_process_gm_response_strips_actions_before_async_extraction(self, story_id, setup_story, monkeypatch):
+        captured = {}
+
+        def _fake_extract(story_id_arg, branch_id_arg, gm_response_arg, msg_index_arg, **kwargs):
+            captured["gm_response"] = gm_response_arg
+
+        monkeypatch.setattr(app_module, "_extract_tags_async", _fake_extract)
+        clean, _image_info, _snapshots = app_module._process_gm_response(
+            "房門反鎖。\n\n<!--ACTIONS-->\n1. 休息\n2. 吃東西",
+            story_id,
+            "main",
+            msg_index=2,
+        )
+
+        assert "<!--ACTIONS-->" in clean
+        assert "1. 休息" in clean
+        assert captured["gm_response"] == "房門反鎖。"
 
 
 # ===================================================================

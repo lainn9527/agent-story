@@ -1018,11 +1018,12 @@ def _process_gm_response(
 
     had_time_tags = bool(app_module.TIME_RE.search(gm_response))
     gm_response = app_module.process_time_tags(gm_response, story_id, branch_id)
+    gm_response_for_async = app_module._strip_choice_block(gm_response)
 
     app_module._extract_tags_async(
         story_id,
         branch_id,
-        gm_response,
+        gm_response_for_async,
         msg_index,
         skip_state=False,
         skip_time=had_time_tags,

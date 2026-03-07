@@ -3,9 +3,11 @@
 import pytest
 
 from app import (
+    _ACTIONS_BLOCK_RE,
     _CHOICE_BLOCK_RE,
     _FATE_LABEL_RE,
     _sanitize_recent_messages,
+    _strip_choice_block,
     _strip_fate_from_messages,
 )
 
@@ -92,6 +94,16 @@ def test_choice_block_regex_matches_trailing_options():
     assert _CHOICE_BLOCK_RE.search(text)
 
 
+def test_choice_block_regex_rejects_plain_numbered_list_without_heading():
+    text = "你開始清點戰利品：\n1. 殘劍\n2. 魂玉"
+    assert not _CHOICE_BLOCK_RE.search(text)
+
+
+def test_actions_marker_regex_matches_tail_block_without_heading():
+    text = "房門反鎖。\n\n<!--ACTIONS-->\n1. 休息\n2. 吃東西"
+    assert _ACTIONS_BLOCK_RE.search(text)
+
+
 def test_sanitize_recent_removes_gm_choice_block_but_keeps_user_text():
     messages = [
         {"role": "gm", "content": "你踏進走廊。\n\n**可選行動：**\n1. 前進\n2. 後退"},
@@ -110,3 +122,37 @@ def test_sanitize_recent_removes_assistant_choice_block_for_legacy_history():
     result = _sanitize_recent_messages(messages, strip_fate=False)
     assert result[0]["content"] == "你站起身。"
     assert result[1]["content"] == "我先觀察"
+
+
+def test_sanitize_recent_keeps_numbered_loot_and_scene_but_removes_real_options():
+    messages = [
+        {
+            "role": "gm",
+            "content": (
+                "你開始清點戰利品：\n"
+                "1. 殘劍\n"
+                "2. 魂玉\n\n"
+                "房門反鎖。這裡是你唯一的避風港。\n\n"
+                "**可選行動：**\n"
+                "1. 休息\n"
+                "2. 吃東西"
+            ),
+        }
+    ]
+    result = _sanitize_recent_messages(messages, strip_fate=False)
+    assert result[0]["content"] == (
+        "你開始清點戰利品：\n"
+        "1. 殘劍\n"
+        "2. 魂玉\n\n"
+        "房門反鎖。這裡是你唯一的避風港。"
+    )
+
+
+def test_strip_choice_block_prefers_actions_marker_even_without_heading():
+    text = (
+        "房門反鎖。這裡是你唯一的避風港。\n\n"
+        "<!--ACTIONS-->\n"
+        "1. 休息\n"
+        "2. 吃東西"
+    )
+    assert _strip_choice_block(text) == "房門反鎖。這裡是你唯一的避風港。"

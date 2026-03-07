@@ -38,7 +38,11 @@
 - `fate_mode = false`：
   - 會把「命運走向」段落從 system prompt 移除
   - 最近訊息會先做 fate label 清理（避免模型模仿）
-- 最近訊息（`recent`）一律會先移除非玩家訊息（`gm`/legacy `assistant`）尾端的選項區塊（含 `可選行動` 編號列與 `- **「...」：**` 選項列），避免選項文字反覆回灌造成上下文污染；`當前處境` 這類敘事段落會保留。
+- 最近訊息（`recent`）一律會先移除非玩家訊息（`gm`/legacy `assistant`）尾端的選項區塊。
+  - 若 GM 依契約在選項區塊前輸出 `<!--ACTIONS-->`，系統會優先從該 marker 起裁掉尾端選項。
+  - 編號選項列只有在明確帶 `可選行動` / `你打算` 標頭時才會剝除，避免一般戰利品清單、步驟列舉被誤判。
+  - `- **「...」：**` 形式的選項列仍會照舊移除。
+  - `當前處境` 這類敘事段落會保留。
 - `pistol_mode = true`：
   - 追加「親密場景指示」段落
   - 追加 NSFW 偏好（chips/custom）
@@ -84,6 +88,7 @@
   - 再附加 `current_dungeon`。
   - 再附加「最近幾則 GM 回覆或玩家輸入中明確提到」的 active NPC 名稱。
   - 再附加 recent GM 回覆中的高訊號 CJK terms（優先保留副本名、NPC 名、事件名、術式/道具名）。
+- GM 的可選行動區塊契約：在尾端選項前先輸出 `<!--ACTIONS-->`，再接 `**可選行動：**` 或 `**你打算：**` 與編號選項。`<!--ACTIONS-->` 會保留在 runtime 訊息中供 recent/compaction 清理使用，但前端顯示時會隱藏。
 - `[相關世界設定]` 會用這個 expanded query 做 keyword + embedding 混合排序，並套用最低 keyword/RRF 分數門檻，避免弱命中條目塞滿 token budget。
 - `[相關分支設定]` 會用同一份 expanded query 做 normalized bigram overlap 搜尋，並額外考慮 query terms 對 `topic/subcategory/content` 的命中；budget 估算以 CJK 約 1 char ≈ 1 token 計，避免低相關的舊分支設定過量注入。
 
@@ -129,6 +134,7 @@
 - 移除模型回聲的 context 區塊（`[相關世界設定]` 等）
 - 移除 fate label（安全網）
 - 去重複獎勵提示（保留最後一條）
+- `ACTIONS` marker 不會在此步移除；它保留在訊息內供後續 recent/compaction 清理使用，但 `_extract_tags_async()` 會吃去掉尾端選項後的版本。
 
 ### 3.3 Snapshot
 
@@ -212,7 +218,7 @@
 
 - 檔案：`story_core/auto_summary.py`
 - 每 5 回合或 phase 轉換時，背景生成 JSON 摘要
-- 對話壓縮（`story_core/compaction.py`）在送摘要前也會移除非玩家訊息尾端的選項區塊（含 `- **「...」：**` 形式），但保留 `當前處境` 等敘事內容，避免選項被固化進長期 recap。
+- 對話壓縮（`story_core/compaction.py`）在送摘要前也會移除非玩家訊息尾端的選項區塊；優先使用 `<!--ACTIONS-->` marker，否則編號列同樣要求明確 `可選行動` / `你打算` 標頭才會剝除，避免一般清單被固化成錯誤刪除。
 
 ---
 

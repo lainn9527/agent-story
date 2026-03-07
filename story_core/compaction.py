@@ -9,10 +9,10 @@ Storage: branches/<bid>/conversation_recap.json
 import json
 import logging
 import os
-import re
 import threading
 from datetime import datetime, timezone
 
+from story_core.tag_extraction import _strip_choice_block
 from story_core.story_utils import get_character_name
 
 log = logging.getLogger("rpg")
@@ -62,33 +62,6 @@ _META_COMPACT_PROMPT = """\
 ---
 {recap}
 """
-
-# Strip GM choice scaffolding from recap source so it doesn't become long-term memory.
-_CHOICE_BLOCK_RE = re.compile(
-    r"""
-    (?:
-        (?:\n|^)
-        (?:
-            \*{0,2}[^\n]*(?:可選行動|你打算)[^\n]*\*{0,2}\s*\n
-        )?
-        (?:
-            \s*(?:\d+[.)、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*.+(?:\n|$)
-        ){2,}
-        \s*\Z
-    )
-    |
-    (?:
-        (?:\n|^)
-        (?:
-            \s*-\s*\*{0,2}[「『][^\n」』]{1,80}[」』]\s*[:：]\*{0,2}\s*.+(?:\n|$)
-            (?:\s*\n)*
-        ){2,}
-        \s*\Z
-    )
-    """,
-    re.DOTALL | re.VERBOSE,
-)
-
 
 # ---------------------------------------------------------------------------
 # Storage
@@ -195,7 +168,7 @@ def _format_messages(messages: list[dict]) -> str:
         prefix = "【玩家】" if msg.get("role") == "user" else "【GM】"
         content = msg.get("content", "")
         if msg.get("role") != "user":
-            content = _CHOICE_BLOCK_RE.sub("", content).rstrip()
+            content = _strip_choice_block(content)
         # Truncate very long messages
         if len(content) > 1000:
             content = content[:1000] + "…（略）"
