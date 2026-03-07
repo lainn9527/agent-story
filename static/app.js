@@ -471,15 +471,15 @@ function getDefaultMessageTail(branchId) {
 }
 
 function _topVisibleMessageAnchor() {
-  const container = document.getElementById("messages");
+  const scrollContainer = document.getElementById("messages");
   const nodes = Array.from($messages.querySelectorAll(".message[data-index]"));
-  if (!container || nodes.length === 0) return null;
+  if (!scrollContainer || nodes.length === 0) return null;
 
   for (const node of nodes) {
-    if (node.offsetTop + node.offsetHeight > container.scrollTop + 1) {
+    if (node.offsetTop + node.offsetHeight > scrollContainer.scrollTop + 1) {
       return {
         index: Number(node.dataset.index),
-        offset: node.offsetTop - container.scrollTop,
+        offset: node.offsetTop - scrollContainer.scrollTop,
       };
     }
   }
@@ -487,16 +487,16 @@ function _topVisibleMessageAnchor() {
   const last = nodes[nodes.length - 1];
   return {
     index: Number(last.dataset.index),
-    offset: last.offsetTop - container.scrollTop,
+    offset: last.offsetTop - scrollContainer.scrollTop,
   };
 }
 
 function _restoreMessageAnchor(anchor) {
   if (!anchor) return false;
-  const container = document.getElementById("messages");
+  const scrollContainer = document.getElementById("messages");
   const target = $messages.querySelector(`.message[data-index="${anchor.index}"]`);
-  if (!container || !target) return false;
-  container.scrollTop = Math.max(0, target.offsetTop - anchor.offset);
+  if (!scrollContainer || !target) return false;
+  scrollContainer.scrollTop = Math.max(0, target.offsetTop - anchor.offset);
   return true;
 }
 
@@ -517,7 +517,7 @@ function updateLoadEarlierButton(branchId) {
       try {
         await loadAllMessagesPreservingViewport(branchId);
       } finally {
-        $loadBtn.disabled = false;
+        if (currentBranchId === branchId) $loadBtn.disabled = false;
       }
     };
     return;
@@ -612,7 +612,7 @@ function startIncompletePolling(branchId) {
   const poll = async () => {
     if (_incompletePollBranchId !== branchId) return;
     try {
-      const data = await API.messages(branchId, 0, 99999);
+      const data = await API.messages(branchId, 0, 99999, null, 1);
       if (_incompletePollBranchId !== branchId) return;
 
       if (!data.incomplete) {

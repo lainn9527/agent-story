@@ -979,6 +979,13 @@ class TestMessagesAPI:
         messages = data["messages"]
         assert all(m["index"] > 2 for m in messages)
 
+    def test_get_messages_with_tail(self, client, setup_story):
+        resp = client.get("/api/messages?tail=2")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total"] == 4
+        assert [m["index"] for m in data["messages"]] == [2, 3]
+
     def test_no_incomplete_banner_for_user_only_mid_route_with_child(self, client, setup_story):
         tree_path = setup_story / "timeline_tree.json"
         tree = json.loads(tree_path.read_text(encoding="utf-8"))
