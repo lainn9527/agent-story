@@ -12,6 +12,13 @@ from flask import Blueprint, Response, jsonify, render_template, request, stream
 
 log = logging.getLogger("rpg")
 core_bp = Blueprint("core", __name__)
+_MESSAGE_RESPONSE_STRIP_KEYS = {
+    "state_snapshot",
+    "npcs_snapshot",
+    "world_day_snapshot",
+    "dungeon_progress_snapshot",
+    "snapshot_async_synced_at",
+}
 
 
 def _app():
@@ -23,6 +30,12 @@ def _app():
 def _sse_event(data: dict) -> str:
     """Format a dict as an SSE data line."""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _serialize_message_for_response(message: dict) -> dict:
+    return {
+        key: value for key, value in message.items() if key not in _MESSAGE_RESPONSE_STRIP_KEYS
+    }
 
 
 @core_bp.route("/")
@@ -122,6 +135,7 @@ def api_messages():
         page = [message for message in timeline if message.get("index", 0) > after_index]
     else:
         page = timeline[offset : offset + limit]
+    page = [_serialize_message_for_response(message) for message in page]
     fork_points = app_module._get_fork_points(story_id, branch_id)
     sibling_groups = app_module._get_sibling_groups(story_id, branch_id)
 
