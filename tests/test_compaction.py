@@ -173,6 +173,43 @@ class TestFormatMessages:
         assert "可選行動" not in text
         assert "你站在門口。" in text
 
+    def test_keeps_numbered_loot_and_scene_when_only_tail_has_real_options(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "content": (
+                    "你開始清點戰利品：\n"
+                    "1. 殘劍\n"
+                    "2. 魂玉\n\n"
+                    "房門反鎖。這裡是你唯一的避風港。\n\n"
+                    "**可選行動：**\n"
+                    "1. 休息\n"
+                    "2. 吃東西"
+                ),
+            }
+        ]
+        text = compaction._format_messages(msgs)
+        assert "1. 殘劍" in text
+        assert "房門反鎖。這裡是你唯一的避風港。" in text
+        assert "可選行動" not in text
+
+    def test_strips_actions_marker_block_without_heading(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "content": (
+                    "你靠在沙發上，慢慢把呼吸調勻。\n\n"
+                    "<!--ACTIONS-->\n"
+                    "1. 看著小琳說話\n"
+                    "2. 先去洗澡"
+                ),
+            }
+        ]
+        text = compaction._format_messages(msgs)
+        assert "你靠在沙發上，慢慢把呼吸調勻。" in text
+        assert "<!--ACTIONS-->" not in text
+        assert "看著小琳說話" not in text
+
     def test_skips_debug_audit_messages(self):
         msgs = [
             {"role": "system", "message_type": "debug_audit", "content": "已套用 2/3 項修正"},

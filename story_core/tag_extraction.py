@@ -19,15 +19,15 @@ _CONTEXT_ECHO_RE = re.compile(
     re.DOTALL,
 )
 
+_ACTIONS_BLOCK_RE = re.compile(r"(?:\n|^)<!--ACTIONS\s*-->\s*\n?(?:.|\n)*\Z")
+
 _CHOICE_BLOCK_RE = re.compile(
     r"""
     (?:
         (?:\n|^)
+        \*{0,2}[^\n]*(?:可選行動|你打算)[^\n]*\*{0,2}\s*\n
         (?:
-            \*{0,2}[^\n]*(?:可選行動|你打算)[^\n]*\*{0,2}\s*\n
-        )?
-        (?:
-            \s*(?:\d+[.)、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*.+(?:\n|$)
+            \s*(?:\d+[.)、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*[^\n]+(?:\n|$)
         ){2,}
         \s*\Z
     )
@@ -35,13 +35,13 @@ _CHOICE_BLOCK_RE = re.compile(
     (?:
         (?:\n|^)
         (?:
-            \s*-\s*\*{0,2}[「『][^\n」』]{1,80}[」』]\s*[:：]\*{0,2}\s*.+(?:\n|$)
+            \s*-\s*\*{0,2}[「『][^\n」』]{1,80}[」』]\s*[:：]\*{0,2}\s*[^\n]+(?:\n|$)
             (?:\s*\n)*
         ){2,}
         \s*\Z
     )
     """,
-    re.DOTALL | re.VERBOSE,
+    re.VERBOSE,
 )
 
 _FATE_LABEL_RE = re.compile(
@@ -331,6 +331,8 @@ def _strip_choice_block(text: str) -> str:
     """Remove trailing '可選行動' section from a GM message."""
     if not text:
         return text
+    if _ACTIONS_BLOCK_RE.search(text):
+        return _ACTIONS_BLOCK_RE.sub("", text).rstrip()
     return _CHOICE_BLOCK_RE.sub("", text).rstrip()
 
 
@@ -378,6 +380,7 @@ __all__ = [
     "_DEBUG_DIRECTIVE_RE",
     "_DEBUG_ACTION_TYPES",
     "_CONTEXT_ECHO_RE",
+    "_ACTIONS_BLOCK_RE",
     "_CHOICE_BLOCK_RE",
     "_FATE_LABEL_RE",
     "_REWARD_HINT_RE",

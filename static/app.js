@@ -2350,6 +2350,7 @@ function stripHiddenTags(text) {
   text = text.replace(/<!--NPC\s*[\s\S]*?NPC-->/g, "");
   text = text.replace(/<!--EVENT\s*[\s\S]*?EVENT-->/g, "");
   text = text.replace(/<!--IMG\s*[\s\S]*?IMG-->/g, "");
+  text = text.replace(/<!--ACTIONS\s*-->/g, "");
   // Truncate any unclosed tag at the end (partial tag still streaming)
   const partialTagIdx = text.lastIndexOf("<!--");
   if (partialTagIdx !== -1) {
@@ -2506,6 +2507,7 @@ function showReportModal(msg) {
 
 function markdownToHtml(text) {
   if (!text) return "";
+  text = stripHiddenTags(text);
   let html = escapeHtml(text);
 
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
