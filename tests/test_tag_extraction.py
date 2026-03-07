@@ -10,6 +10,7 @@ import re
 import pytest
 
 from app import (
+    _CONTEXT_ECHO_RE,
     _extract_state_tag,
     _extract_lore_tag,
     _extract_npc_tag,
@@ -324,3 +325,13 @@ class TestRegexPatterns:
     def test_dotall_multiline(self):
         text = '<!--STATE {\n"a": 1\n} STATE-->'
         assert _STATE_RE.search(text) is not None
+
+    def test_context_echo_re_strips_sticky_events_block(self):
+        text = (
+            "[長期關鍵事件]\n"
+            "- [伏筆] 神王追索（已觸發）：仍在追索\n"
+            "---\n"
+            "玩家真正看到的回覆"
+        )
+        clean = _CONTEXT_ECHO_RE.sub("", text).strip()
+        assert clean == "---\n玩家真正看到的回覆"
