@@ -22,7 +22,8 @@ from story_core import usage_db
 from story_core.event_db import (
     insert_event, search_relevant_events, get_events, get_event_by_id,
     update_event_status, search_events as search_events_db,
-    get_active_events,
+    get_active_events, get_sticky_events, format_sticky_events,
+    update_event_sticky_priority,
     copy_events_for_fork, merge_events_into, delete_events_for_branch,
 )
 from story_core.image_gen import generate_image_async, get_image_status, get_image_path

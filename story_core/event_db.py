@@ -29,6 +29,44 @@ def _get_conn(story_id: str) -> sqlite3.Connection:
 # Schema
 # ---------------------------------------------------------------------------
 
+_STATUS_LABELS = {
+    "planted": "已埋",
+    "triggered": "已觸發",
+    "resolved": "已解決",
+    "abandoned": "已廢棄",
+}
+
+
+def _parse_sticky_flag(raw_flag: object) -> bool | None:
+    if raw_flag is None:
+        return None
+    if isinstance(raw_flag, bool):
+        return raw_flag
+    if isinstance(raw_flag, (int, float)):
+        return raw_flag != 0
+    if isinstance(raw_flag, str):
+        value = raw_flag.strip().lower()
+        if value in {"", "none", "null"}:
+            return None
+        if value in {"1", "true", "yes", "y", "on"}:
+            return True
+        if value in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(raw_flag)
+
+
+def _normalize_sticky_priority(raw_priority: object, raw_sticky: object | None = None) -> int:
+    if raw_priority is None:
+        sticky_flag = _parse_sticky_flag(raw_sticky)
+        if sticky_flag is not None:
+            raw_priority = 1 if sticky_flag else 0
+    try:
+        priority = int(raw_priority or 0)
+    except (TypeError, ValueError):
+        priority = 0
+    return max(0, min(3, priority))
+
+
 def _ensure_tables(conn: sqlite3.Connection):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS events (
@@ -41,9 +79,14 @@ def _ensure_tables(conn: sqlite3.Connection):
             status          TEXT NOT NULL DEFAULT 'planted',
             tags            TEXT NOT NULL DEFAULT '',
             related_titles  TEXT NOT NULL DEFAULT '',
-            created_at      TEXT NOT NULL
+            created_at      TEXT NOT NULL,
+            sticky_priority INTEGER NOT NULL DEFAULT 0
         );
     """)
+    try:
+        conn.execute("ALTER TABLE events ADD COLUMN sticky_priority INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -56,10 +99,14 @@ def insert_event(story_id: str, event: dict, branch_id: str) -> int:
     _ensure_tables(conn)
 
     now = datetime.now(timezone.utc).isoformat()
+    sticky_priority = _normalize_sticky_priority(
+        event.get("sticky_priority"),
+        event.get("sticky"),
+    )
     cur = conn.execute(
         """INSERT INTO events (event_type, title, description, message_index,
-           branch_id, status, tags, related_titles, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           branch_id, status, tags, related_titles, created_at, sticky_priority)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             event.get("event_type", "遭遇"),
             event.get("title", ""),
@@ -70,6 +117,7 @@ def insert_event(story_id: str, event: dict, branch_id: str) -> int:
             event.get("tags", ""),
             event.get("related_titles", ""),
             now,
+            sticky_priority,
         ),
     )
     conn.commit()
@@ -83,6 +131,18 @@ def update_event_status(story_id: str, event_id: int, new_status: str):
     conn = _get_conn(story_id)
     _ensure_tables(conn)
     conn.execute("UPDATE events SET status = ? WHERE id = ?", (new_status, event_id))
+    conn.commit()
+    conn.close()
+
+
+def update_event_sticky_priority(story_id: str, event_id: int, sticky_priority: int):
+    """Update an event's sticky priority (0-3)."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    conn.execute(
+        "UPDATE events SET sticky_priority = ? WHERE id = ?",
+        (_normalize_sticky_priority(sticky_priority), event_id),
+    )
     conn.commit()
     conn.close()
 
@@ -132,7 +192,7 @@ def copy_events_for_fork(story_id: str, source_branch_id: str, target_branch_id:
     if branch_point_index is None:
         rows = conn.execute(
             """SELECT event_type, title, description, message_index,
-               status, tags, related_titles, created_at
+               status, tags, related_titles, created_at, sticky_priority
                FROM events
                WHERE branch_id = ?
                ORDER BY id""",
@@ -141,7 +201,7 @@ def copy_events_for_fork(story_id: str, source_branch_id: str, target_branch_id:
     else:
         rows = conn.execute(
             """SELECT event_type, title, description, message_index,
-               status, tags, related_titles, created_at
+               status, tags, related_titles, created_at, sticky_priority
                FROM events
                WHERE branch_id = ?
                  AND (message_index <= ? OR message_index IS NULL)
@@ -155,8 +215,8 @@ def copy_events_for_fork(story_id: str, source_branch_id: str, target_branch_id:
 
     conn.executemany(
         """INSERT INTO events (event_type, title, description, message_index,
-           branch_id, status, tags, related_titles, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           branch_id, status, tags, related_titles, created_at, sticky_priority)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 row["event_type"],
@@ -168,6 +228,7 @@ def copy_events_for_fork(story_id: str, source_branch_id: str, target_branch_id:
                 row["tags"],
                 row["related_titles"],
                 row["created_at"],
+                _normalize_sticky_priority(row["sticky_priority"]),
             )
             for row in rows
         ],
@@ -190,7 +251,7 @@ def merge_events_into(story_id: str, src_branch_id: str, dst_branch_id: str):
 
     src_rows = conn.execute(
         """SELECT event_type, title, description, message_index,
-           status, tags, related_titles, created_at
+           status, tags, related_titles, created_at, sticky_priority
            FROM events
            WHERE branch_id = ?
            ORDER BY id""",
@@ -201,10 +262,16 @@ def merge_events_into(story_id: str, src_branch_id: str, dst_branch_id: str):
         return
 
     dst_rows = conn.execute(
-        "SELECT id, title FROM events WHERE branch_id = ?",
+        "SELECT id, title, sticky_priority FROM events WHERE branch_id = ?",
         (dst_branch_id,),
     ).fetchall()
-    dst_title_to_id = {row["title"]: row["id"] for row in dst_rows}
+    dst_title_to_meta = {
+        row["title"]: {
+            "id": row["id"],
+            "sticky_priority": _normalize_sticky_priority(row["sticky_priority"]),
+        }
+        for row in dst_rows
+    }
 
     # Keep latest src row per title in case src contains historical duplicates.
     src_by_title = {}
@@ -214,8 +281,8 @@ def merge_events_into(story_id: str, src_branch_id: str, dst_branch_id: str):
     inserts = []
     updates = []
     for title, row in src_by_title.items():
-        dst_id = dst_title_to_id.get(title)
-        if dst_id is None:
+        dst_meta = dst_title_to_meta.get(title)
+        if dst_meta is None:
             inserts.append(
                 (
                     row["event_type"],
@@ -227,21 +294,28 @@ def merge_events_into(story_id: str, src_branch_id: str, dst_branch_id: str):
                     row["tags"],
                     row["related_titles"],
                     row["created_at"],
+                    _normalize_sticky_priority(row["sticky_priority"]),
                 )
             )
         else:
-            updates.append((row["status"], dst_id))
+            updates.append(
+                (
+                    row["status"],
+                    _normalize_sticky_priority(row["sticky_priority"]),
+                    dst_meta["id"],
+                )
+            )
 
     if inserts:
         conn.executemany(
             """INSERT INTO events (event_type, title, description, message_index,
-               branch_id, status, tags, related_titles, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               branch_id, status, tags, related_titles, created_at, sticky_priority)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             inserts,
         )
     if updates:
         conn.executemany(
-            "UPDATE events SET status = ? WHERE id = ?",
+            "UPDATE events SET status = ?, sticky_priority = ? WHERE id = ?",
             updates,
         )
 
@@ -319,8 +393,41 @@ def search_relevant_events(story_id: str, user_message: str, branch_id: str, lim
 
     lines = ["[相關事件追蹤]"]
     for e in results:
-        status_label = {"planted": "已埋", "triggered": "已觸發", "resolved": "已解決", "abandoned": "已廢棄"}.get(e["status"], e["status"])
+        status_label = _STATUS_LABELS.get(e["status"], e["status"])
         lines.append(f"- [{e['event_type']}] {e['title']}（{status_label}）：{e['description'][:200]}")
+    return "\n".join(lines)
+
+
+def get_sticky_events(story_id: str, branch_id: str, limit: int = 4) -> list[dict]:
+    """Return always-on sticky events for prompt injection."""
+    conn = _get_conn(story_id)
+    _ensure_tables(conn)
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM events
+        WHERE branch_id = ? AND sticky_priority > 0
+        ORDER BY sticky_priority DESC, id DESC
+        LIMIT ?
+        """,
+        (branch_id, limit),
+    ).fetchall()
+    results = [dict(r) for r in rows]
+    conn.close()
+    return results
+
+
+def format_sticky_events(story_id: str, branch_id: str, limit: int = 4) -> str:
+    """Return formatted always-on sticky events for GM prompt injection."""
+    results = get_sticky_events(story_id, branch_id, limit=limit)
+    if not results:
+        return ""
+    lines = ["[長期關鍵事件]"]
+    for event in results:
+        status_label = _STATUS_LABELS.get(event["status"], event["status"])
+        lines.append(
+            f"- [{event['event_type']}] {event['title']}（{status_label}）：{event['description'][:200]}"
+        )
     return "\n".join(lines)
 
 
@@ -341,9 +448,16 @@ def get_event_title_map(story_id: str, branch_id: str) -> dict[str, dict]:
     conn = _get_conn(story_id)
     _ensure_tables(conn)
     rows = conn.execute(
-        "SELECT id, title, status FROM events WHERE branch_id = ?", (branch_id,)
+        "SELECT id, title, status, sticky_priority FROM events WHERE branch_id = ?", (branch_id,)
     ).fetchall()
-    result = {r["title"]: {"id": r["id"], "status": r["status"]} for r in rows}
+    result = {
+        r["title"]: {
+            "id": r["id"],
+            "status": r["status"],
+            "sticky_priority": _normalize_sticky_priority(r["sticky_priority"]),
+        }
+        for r in rows
+    }
     conn.close()
     return result
 

@@ -15,7 +15,7 @@ _DEBUG_DIRECTIVE_RE = re.compile(r"<!--DEBUG_DIRECTIVE\s*(.*?)\s*DEBUG_DIRECTIVE
 _DEBUG_ACTION_TYPES = {"state_patch", "npc_upsert", "npc_delete", "world_day_set", "dungeon_patch"}
 
 _CONTEXT_ECHO_RE = re.compile(
-    r"\[(?:命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態|GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）|Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
+    r"\[(?:長期關鍵事件|命運走向|命運判定|命運骰結果|相關世界設定|相關事件追蹤|NPC 近期動態|GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）|Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）)\].*?(?=\n---\n|\n\n[^\[\n]|\Z)",
     re.DOTALL,
 )
 

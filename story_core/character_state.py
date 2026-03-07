@@ -59,10 +59,36 @@ _TEAM_RULES = {
     ),
 }
 _STATE_CORE_EXTRA_KEYS = ("base_power_level", "health", "spirit_status")
+STORY_ANCHOR_LIMIT = 10
 
 
 def _is_numeric_value(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _normalize_story_anchor_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^[\-\*\u2022\u2027]+\s*", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text[:160].strip()
+
+
+def _normalize_story_anchors(raw_anchors: object, limit: int = STORY_ANCHOR_LIMIT) -> list[str]:
+    if not isinstance(raw_anchors, list):
+        return []
+    normalized = []
+    seen = set()
+    for item in raw_anchors:
+        text = _normalize_story_anchor_text(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+        if len(normalized) >= limit:
+            break
+    return normalized
 
 
 def _load_nsfw_preferences(story_id: str) -> dict:
@@ -117,6 +143,7 @@ def _blank_character_state(story_id: str) -> dict:
             state[key] = {}
         else:
             state[key] = []
+    state["story_anchors"] = []
     return state
 
 
@@ -165,6 +192,14 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
             state[key] = _migrate_list_to_map(value)
             dirty = True
             log.info("    auto-migrate: converted %s from list to map in %s/%s", key, story_id, branch_id)
+
+    anchors = _normalize_story_anchors(state.get("story_anchors", []))
+    if anchors != state.get("story_anchors"):
+        state["story_anchors"] = anchors
+        dirty = True
+    elif "story_anchors" not in state:
+        state["story_anchors"] = []
+        dirty = True
 
     needs_persist = dirty or not os.path.exists(path)
     if dirty:
@@ -244,6 +279,13 @@ def _build_critical_facts(story_id: str, branch_id: str, state: dict, npcs: list
     elif relationships:
         rel_parts = [f"{name}（{_rel_to_str(rel)}）" for name, rel in relationships.items()]
         lines.append(f"- 人際關係：{'、'.join(rel_parts)}")
+
+    anchors = _normalize_story_anchors(state.get("story_anchors", []))
+    if anchors:
+        lines.append("")
+        lines.append("### 長期記憶")
+        for anchor in anchors[:STORY_ANCHOR_LIMIT]:
+            lines.append(f"- {anchor}")
 
     if not lines:
         return "（尚無關鍵事實記錄）"
@@ -420,6 +462,8 @@ __all__ = [
     "_blank_character_state",
     "_load_character_state",
     "_TEAM_RULES",
+    "STORY_ANCHOR_LIMIT",
+    "_normalize_story_anchors",
     "_build_critical_facts",
     "_format_state_core_value",
     "_build_core_state_text",

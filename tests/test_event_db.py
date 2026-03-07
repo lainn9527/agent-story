@@ -117,6 +117,15 @@ class TestInsertEvent:
         fetched = event_db.get_event_by_id(story_id, eid)
         assert fetched["tags"] == "重要,劇情"
 
+    def test_insert_with_sticky_priority(self, story_id):
+        eid = event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "長期壓力", "description": "d", "sticky_priority": 2},
+            "main",
+        )
+        fetched = event_db.get_event_by_id(story_id, eid)
+        assert fetched["sticky_priority"] == 2
+
 
 # ===================================================================
 # get_events
@@ -229,6 +238,7 @@ class TestSearchRelevantEvents:
         assert "[相關事件追蹤]" in text
         assert "神秘組織的暗示" in text
         assert "已埋" in text  # status=planted
+        assert "[長期關鍵事件]" not in text
 
     def test_empty_result(self, story_id):
         text = event_db.search_relevant_events(story_id, "不存在", "main")
@@ -244,6 +254,51 @@ class TestSearchRelevantEvents:
         text = event_db.search_relevant_events(story_id, "長描述", "main")
         # Description should be truncated at 200 chars
         assert len(text) < 500
+
+
+class TestStickyEvents:
+    def test_get_sticky_events_returns_only_positive_priority(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "一般事件", "description": "d", "sticky_priority": 0},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "長期威脅", "description": "d", "sticky_priority": 2},
+            "main",
+        )
+        results = event_db.get_sticky_events(story_id, "main")
+        assert [row["title"] for row in results] == ["長期威脅"]
+
+    def test_get_sticky_events_orders_by_priority_then_newest(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "優先度1", "description": "d", "sticky_priority": 1},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "優先度3舊", "description": "d", "sticky_priority": 3},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "優先度3新", "description": "d", "sticky_priority": 3},
+            "main",
+        )
+        results = event_db.get_sticky_events(story_id, "main", limit=3)
+        assert [row["title"] for row in results] == ["優先度3新", "優先度3舊", "優先度1"]
+
+    def test_format_sticky_events_heading(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "神王追索", "description": "仍在追查", "sticky_priority": 2},
+            "main",
+        )
+        text = event_db.format_sticky_events(story_id, "main")
+        assert "[長期關鍵事件]" in text
+        assert "神王追索" in text
 
 
 # ===================================================================
@@ -323,6 +378,16 @@ class TestCopyEventsForFork:
         titles = {e["title"] for e in copied}
         assert titles == {"事件一", "事件二"}
 
+    def test_preserves_sticky_priority(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "神王追索", "description": "d", "sticky_priority": 3},
+            "main",
+        )
+        event_db.copy_events_for_fork(story_id, "main", "branch_a", None)
+        copied = event_db.get_events(story_id, branch_id="branch_a", limit=20)
+        assert copied[0]["sticky_priority"] == 3
+
 
 class TestMergeEventsInto:
     def test_inserts_new_titles_into_destination(self, story_id):
@@ -352,6 +417,23 @@ class TestMergeEventsInto:
         match = [e for e in merged if e["title"] == "同標題事件"]
         assert len(match) == 1
         assert match[0]["status"] == "resolved"
+
+    def test_preserves_sticky_priority_on_update(self, story_id):
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "長期威脅", "description": "d", "status": "planted", "sticky_priority": 0},
+            "main",
+        )
+        event_db.insert_event(
+            story_id,
+            {"event_type": "伏筆", "title": "長期威脅", "description": "d", "status": "triggered", "sticky_priority": 2},
+            "child",
+        )
+        event_db.merge_events_into(story_id, "child", "main")
+        merged = event_db.get_events(story_id, branch_id="main", limit=20)
+        match = [e for e in merged if e["title"] == "長期威脅"]
+        assert len(match) == 1
+        assert match[0]["sticky_priority"] == 2
 
 
 class TestDeleteEventsForBranch:
