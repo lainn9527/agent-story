@@ -1585,6 +1585,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
 
     const switchRes = await API.switchBranch(branchId);
     if (!switchRes.ok) {
+      fadeIn();
       showAlert(switchRes.error || "切換分支失敗");
       return;
     }
@@ -1592,7 +1593,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
     updateBranchIndicator();
     renderBranchList();
 
-    if (scrollToIndex != null || preserveScroll) {
+    if (scrollToIndex != null || preserveScroll || forcePreserve) {
       $messages.style.minHeight = $messages.scrollHeight + "px";
     }
 
@@ -1630,18 +1631,7 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
       stopLivePolling();
     }
 
-    if (forcePreserve) {
-      // Keep current scroll position — user may have scrolled during streaming
-      const currentScroll = container.scrollTop;
-      requestAnimationFrame(() => {
-        container.scrollTop = currentScroll;
-        $messages.style.minHeight = "";
-        fadeIn();
-      });
-      return;
-    }
-
-    if (preserveScroll) {
+    if (forcePreserve || preserveScroll) {
       if (isAtBottom) {
         scrollToBottom();
         $messages.style.minHeight = "";
@@ -4024,6 +4014,88 @@ function handleImageWarning(filename, res, storyId = "") {
   showAlert(message);
 }
 
+function _imagePollKey(storyId, filename) {
+  return `${storyId || "story"}:${filename}`;
+}
+
+function _clearImagePoller(key) {
+  const state = _imagePollers[key];
+  if (!state) return;
+  if (state.timerId) clearTimeout(state.timerId);
+  delete _imagePollers[key];
+}
+
+function _pruneImagePollTargets(state) {
+  state.targets = state.targets.filter(({ imgEl }) => {
+    const wrapper = imgEl?.parentElement;
+    return wrapper && wrapper.isConnected;
+  });
+  return state.targets.length;
+}
+
+function _scheduleImagePoll(state, delay = state.interval) {
+  if (_imagePollers[state.key] !== state) return;
+  if (state.timerId) clearTimeout(state.timerId);
+  state.timerId = setTimeout(() => {
+    state.timerId = null;
+    void _pollImageStatus(state);
+  }, Math.max(0, delay));
+}
+
+function _applyImageReadyToTarget({ imgEl, onReady }, res, storyId, filename) {
+  const wrapper = imgEl?.parentElement;
+  if (!wrapper || !wrapper.isConnected) return;
+  if (typeof onReady === "function") {
+    onReady(res);
+    return;
+  }
+  imgEl.src = `/api/stories/${storyId}/images/${filename}`;
+  imgEl.style.display = "";
+  wrapper.querySelector(".msg-image-placeholder")?.remove();
+}
+
+function _handleImagePollTimeout(state) {
+  for (const { imgEl, removeWrapperOnTimeout } of state.targets) {
+    const wrapper = imgEl?.parentElement;
+    if (!wrapper || !wrapper.isConnected) continue;
+    wrapper.querySelector(".msg-image-placeholder")?.remove();
+    if (removeWrapperOnTimeout) wrapper.remove();
+  }
+}
+
+async function _pollImageStatus(state) {
+  if (_imagePollers[state.key] !== state) return;
+  if (!_pruneImagePollTargets(state)) {
+    _clearImagePoller(state.key);
+    return;
+  }
+  if (Date.now() > state.deadline) {
+    _handleImagePollTimeout(state);
+    _clearImagePoller(state.key);
+    return;
+  }
+  if (state.inFlight) return;
+  state.inFlight = true;
+  try {
+    const res = await API.imageStatus(state.filename);
+    handleImageWarning(state.filename, res, state.storyId);
+    if (res.ready) {
+      for (const target of state.targets) {
+        _applyImageReadyToTarget(target, res, state.storyId, state.filename);
+      }
+      _clearImagePoller(state.key);
+      return;
+    }
+  } catch (e) {
+    // Ignore transient polling failures and retry until timeout.
+  } finally {
+    state.inFlight = false;
+  }
+  if (_imagePollers[state.key] === state) {
+    _scheduleImagePoll(state);
+  }
+}
+
 function startImagePolling(storyId, filename, imgEl, {
   maxWait = 60000,
   interval = 3000,
@@ -4031,41 +4103,37 @@ function startImagePolling(storyId, filename, imgEl, {
   removeWrapperOnTimeout = false,
   onReady = null,
 } = {}) {
-  if (_imagePollers[filename]) return;
+  const key = _imagePollKey(storyId, filename);
+  let state = _imagePollers[key];
+  if (!state) {
+    state = {
+      key,
+      storyId,
+      filename,
+      targets: [],
+      timerId: null,
+      inFlight: false,
+      interval,
+      deadline: 0,
+    };
+    _imagePollers[key] = state;
+  }
 
-  const startTime = Date.now();
+  state.interval = Math.min(state.interval, interval);
+  state.deadline = Math.max(state.deadline, Date.now() + maxWait);
 
-  const poll = async () => {
-    const wrapper = imgEl.parentElement;
-    if (!wrapper) {
-      delete _imagePollers[filename];
-      return;
-    }
-    if (Date.now() - startTime > maxWait) {
-      delete _imagePollers[filename];
-      wrapper.querySelector(".msg-image-placeholder")?.remove();
-      if (removeWrapperOnTimeout) wrapper.remove();
-      return;
-    }
-    try {
-      const res = await API.imageStatus(filename);
-      handleImageWarning(filename, res, storyId);
-      if (res.ready) {
-        delete _imagePollers[filename];
-        if (typeof onReady === "function") onReady(res);
-        imgEl.src = `/api/stories/${storyId}/images/${filename}`;
-        imgEl.style.display = "";
-        wrapper.querySelector(".msg-image-placeholder")?.remove();
-        return;
-      }
-    } catch (e) { /* ignore */ }
-    _imagePollers[filename] = setTimeout(poll, interval);
-  };
-  if (immediate) {
-    _imagePollers[filename] = true;
-    poll();
+  const existingTarget = state.targets.find(target => target.imgEl === imgEl);
+  if (existingTarget) {
+    existingTarget.onReady = onReady;
+    existingTarget.removeWrapperOnTimeout = existingTarget.removeWrapperOnTimeout || removeWrapperOnTimeout;
   } else {
-    _imagePollers[filename] = setTimeout(poll, interval);
+    state.targets.push({ imgEl, onReady, removeWrapperOnTimeout });
+  }
+
+  if (immediate) {
+    _scheduleImagePoll(state, 0);
+  } else if (!state.timerId && !state.inFlight) {
+    _scheduleImagePoll(state, state.interval);
   }
 }
 
@@ -4091,8 +4159,14 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
     placeholder.className = "msg-image-placeholder";
     placeholder.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div><span>生成插圖中…</span>';
     wrapper.appendChild(placeholder);
+  }
+
+  wrapper.appendChild(img);
+  parentEl.appendChild(wrapper);
+
+  if (!msg.image.ready) {
     if (fresh) {
-      // Just generated — poll for completion
+      // Start after the wrapper is in the DOM so the shared poller can keep new renders in sync.
       startImagePolling(storyId, msg.image.filename, img, {
         immediate: true,
         onReady: showReadyImage,
@@ -4115,9 +4189,6 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
       });
     }
   }
-
-  wrapper.appendChild(img);
-  parentEl.appendChild(wrapper);
 }
 
 // ---------------------------------------------------------------------------
