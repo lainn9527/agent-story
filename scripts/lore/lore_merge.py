@@ -12,9 +12,9 @@ Phases:
   5. Validate + save + rebuild SQLite index
 
 Usage:
-  python scripts/lore_merge.py --dry-run          # analyze groups only
-  python scripts/lore_merge.py                    # full run
-  python scripts/lore_merge.py --workers 6        # more parallelism
+  python scripts/lore/lore_merge.py --dry-run          # analyze groups only
+  python scripts/lore/lore_merge.py                    # full run
+  python scripts/lore/lore_merge.py --workers 6        # more parallelism
 """
 
 import argparse
@@ -30,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 # Add project root to path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 logging.basicConfig(

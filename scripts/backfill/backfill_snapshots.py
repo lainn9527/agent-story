@@ -17,8 +17,8 @@ Strategy:
   so this is a reasonable approximation).
 
 Usage:
-    python scripts/backfill_snapshots.py              # apply changes
-    python scripts/backfill_snapshots.py --dry-run    # preview only
+    python scripts/backfill/backfill_snapshots.py              # apply changes
+    python scripts/backfill/backfill_snapshots.py --dry-run    # preview only
 """
 
 import json
@@ -26,7 +26,7 @@ import logging
 import os
 import sys
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 logging.basicConfig(

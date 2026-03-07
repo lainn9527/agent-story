@@ -1,22 +1,22 @@
 #!/bin/bash
 # Deploy latest main to WSL2 (in-place)
-# Usage: ./deploy_wsl2.sh
+# Usage: ./scripts/deploy/deploy_wsl2.sh
 #
 # Requirements:
 #   - Python packages installed: ~/.local/lib/python3.12/site-packages
 #   - Claude CLI installed: ~/.npm-global/bin/claude
 #   - systemd service: sudo systemctl enable rpg-server (see doc/wsl2_setup.md)
-#   - Run from the repo root directory
+#   - Run from anywhere inside the repo checkout
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="/usr/bin/python3"
 PYTHONPATH_WSL="$HOME/.local/lib/python3.12/site-packages"
 PORT="${PORT:-5051}"
 
 echo "==> Pulling latest main..."
-cd "$SCRIPT_DIR"
+cd "$ROOT"
 git fetch origin main
 git checkout FETCH_HEAD
 

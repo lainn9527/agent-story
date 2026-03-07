@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy latest main to production (story-prod)
-# Usage: ./deploy.sh
+# Usage: ./scripts/deploy/deploy.sh
 
 set -e
 

@@ -11,9 +11,9 @@ Phases:
   5. Validate + save + rebuild SQLite index
 
 Usage:
-  python scripts/lore_cleanup.py --dry-run          # analyze only
-  python scripts/lore_cleanup.py                    # full run
-  python scripts/lore_cleanup.py --skip-split       # dedup + remap only, no LLM
+  python scripts/lore/lore_cleanup.py --dry-run          # analyze only
+  python scripts/lore/lore_cleanup.py                    # full run
+  python scripts/lore/lore_cleanup.py --skip-split       # dedup + remap only, no LLM
 """
 
 import argparse
@@ -27,7 +27,7 @@ import time
 from datetime import datetime
 
 # Add project root to path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 logging.basicConfig(

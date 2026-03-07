@@ -6,7 +6,7 @@ infers the dungeon name from the last 5 副本世界觀 entries in branch_lore.j
 (majority vote of subcategory).
 
 Usage:
-    python scripts/migrate_current_dungeon.py [--dry-run]
+    python scripts/migrations/migrate_current_dungeon.py [--dry-run]
 """
 
 import json
@@ -16,9 +16,10 @@ from collections import Counter
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 
 

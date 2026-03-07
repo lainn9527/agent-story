@@ -6,7 +6,7 @@ For each branch without a title, takes the last 1-2 GM messages and calls
 call_oneshot() to generate a 4-8 character Chinese action summary.
 
 Usage:
-    python scripts/backfill_branch_titles.py [--story STORY_ID] [--dry-run]
+    python scripts/backfill/backfill_branch_titles.py [--story STORY_ID] [--dry-run]
 """
 
 import json
@@ -15,7 +15,7 @@ import os
 import sys
 import time
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 from llm_bridge import call_oneshot

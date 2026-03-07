@@ -8,16 +8,17 @@ Removes:
 - Known garbage keys that are not in the character schema
 
 Usage:
-    python scripts/clean_state.py                    # dry-run (default)
-    python scripts/clean_state.py --apply            # actually write changes
-    python scripts/clean_state.py --story story_id   # specific story only
+    python scripts/state/clean_state.py                    # dry-run (default)
+    python scripts/state/clean_state.py --apply            # actually write changes
+    python scripts/state/clean_state.py --story story_id   # specific story only
 """
 import json
 import os
 import sys
 import glob
 
-BASE = os.path.join(os.path.dirname(__file__), "..", "data", "stories")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+BASE = os.path.join(PROJECT_ROOT, "data", "stories")
 
 # Keys that belong in character_state (from schema + known valid extras)
 VALID_KEYS = {
