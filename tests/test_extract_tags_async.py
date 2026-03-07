@@ -28,21 +28,14 @@ class _SyncThread(threading.Thread):
 
 
 @pytest.fixture(autouse=True)
-def patch_all_paths(tmp_path, monkeypatch):
+def patch_all_paths(tmp_path, monkeypatch, patch_paths_all_modules):
     """Redirect all module paths to tmp_path."""
     stories_dir = tmp_path / "data" / "stories"
     stories_dir.mkdir(parents=True)
     design_dir = tmp_path / "story_design"
     design_dir.mkdir()
-    monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
-    monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
-    monkeypatch.setattr(event_db, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
-    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
+    patch_paths_all_modules(monkeypatch, tmp_path, stories_dir, design_dir, app_module=app_module)
     monkeypatch.setattr(world_timer, "BASE_DIR", str(tmp_path))
-    lore_db._embedding_cache.clear()
     return stories_dir
 
 

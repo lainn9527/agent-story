@@ -14,27 +14,18 @@ import app as app_module
 import event_db
 import lore_db
 import state_db
+import story_io
 
 
 @pytest.fixture(autouse=True)
-def patch_app_paths(tmp_path, monkeypatch):
+def patch_app_paths(tmp_path, monkeypatch, patch_paths_all_modules):
     """Redirect all app paths to tmp_path."""
     data_dir = tmp_path / "data"
     stories_dir = data_dir / "stories"
     stories_dir.mkdir(parents=True)
     design_dir = tmp_path / "story_design"
     design_dir.mkdir()
-    monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
-    monkeypatch.setattr(app_module, "DATA_DIR", str(data_dir))
-    monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
-    monkeypatch.setattr(app_module, "STORIES_REGISTRY_PATH", str(data_dir / "stories.json"))
-    monkeypatch.setattr(app_module, "_LLM_CONFIG_PATH", str(tmp_path / "llm_config.json"))
-    monkeypatch.setattr(event_db, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(lore_db, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(lore_db, "STORY_DESIGN_DIR", str(design_dir))
-    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
-    lore_db._embedding_cache.clear()
+    patch_paths_all_modules(monkeypatch, tmp_path, stories_dir, design_dir, app_module=app_module)
     return stories_dir
 
 
@@ -1511,6 +1502,13 @@ class TestImageAPI:
                 (story_id_arg, branch_id_arg, filename_arg)
             ) or True,
         )
+        monkeypatch.setattr(
+            story_io,
+            "_mark_image_ready_in_branch_messages",
+            lambda story_id_arg, branch_id_arg, filename_arg: calls.append(
+                (story_id_arg, branch_id_arg, filename_arg)
+            ) or True,
+        )
 
         resp = client.get("/api/images/status?filename=img_7_test.png")
         resp2 = client.get("/api/images/status?filename=img_7_test.png")
@@ -1535,6 +1533,13 @@ class TestImageAPI:
         calls = []
         monkeypatch.setattr(
             app_module,
+            "_mark_image_ready_in_branch_messages",
+            lambda story_id_arg, branch_id_arg, filename_arg: calls.append(
+                (story_id_arg, branch_id_arg, filename_arg)
+            ) or False,
+        )
+        monkeypatch.setattr(
+            story_io,
             "_mark_image_ready_in_branch_messages",
             lambda story_id_arg, branch_id_arg, filename_arg: calls.append(
                 (story_id_arg, branch_id_arg, filename_arg)

@@ -270,7 +270,7 @@
 
 檔案：`compaction.py`
 
-- 最近 20 則訊息保留原文
+- 最近 10 則訊息保留原文
 - 更早內容壓成 `conversation_recap.json`
 - 超過閾值後背景觸發（non-blocking）
 - recap 過長時會再做一次 meta-compaction

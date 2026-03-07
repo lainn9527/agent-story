@@ -330,16 +330,13 @@ class TestValidateMultipleViolations:
 
 
 @pytest.fixture(autouse=True)
-def patch_app_paths(tmp_path, monkeypatch):
+def patch_app_paths(tmp_path, monkeypatch, patch_paths_all_modules):
     """Redirect app.py paths to tmp_path."""
     stories_dir = tmp_path / "data" / "stories"
     stories_dir.mkdir(parents=True)
     design_dir = tmp_path / "story_design"
     design_dir.mkdir()
-    monkeypatch.setattr(app_module, "STORIES_DIR", str(stories_dir))
-    monkeypatch.setattr(app_module, "STORY_DESIGN_DIR", str(design_dir))
-    monkeypatch.setattr(app_module, "BASE_DIR", str(tmp_path))
-    monkeypatch.setattr(state_db, "STORIES_DIR", str(stories_dir))
+    patch_paths_all_modules(monkeypatch, tmp_path, stories_dir, design_dir, app_module=app_module)
     return stories_dir
 
 

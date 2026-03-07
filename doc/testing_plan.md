@@ -111,9 +111,9 @@ Tests requiring multiple modules working together, Flask test client, or mocked 
 
 | Function | Test Cases |
 |----------|------------|
-| `should_compact()` | >20 uncompacted → True, <=20 → False |
+| `should_compact()` | >10 uncompacted → True, <=10 → False |
 | `_format_messages()` | 【玩家】/【GM】 formatting, 1000-char truncation |
-| `get_context_window()` | returns last 20 messages |
+| `get_context_window()` | returns last 10 messages |
 | `load_recap()` / `save_recap()` | round-trip, missing file → None |
 | `copy_recap_to_branch()` | parent recap copied to new branch |
 | Meta-compaction | recap >8000 chars → re-summarize |
