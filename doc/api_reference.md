@@ -42,7 +42,7 @@
 
 | Method | Path | 說明 | 主要參數 |
 |---|---|---|---|
-| GET | `/api/messages` | 取得分支完整 timeline（含 fork/sibling/world_day） | `branch_id`, `offset`, `limit`, `after_index`, `tail` |
+| GET | `/api/messages` | 取得分支完整 timeline（含 fork/sibling/world_day；不含 per-message snapshot 欄位） | `branch_id`, `offset`, `limit`, `after_index`, `tail` |
 | POST | `/api/send` | 送出玩家訊息，取得完整 GM 回覆 | body: `message`, `branch_id` |
 | POST | `/api/send/stream` | `send` 的 SSE 版本 | body: `message`, `branch_id` |
 | GET | `/api/status` | 取得角色狀態（含 world_day、cheat 狀態） | `branch_id` |

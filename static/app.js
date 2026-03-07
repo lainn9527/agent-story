@@ -428,6 +428,9 @@ let _incompletePollBranchId = null;
 let _debugSession = null;
 let _debugPendingProposals = [];
 let _debugPendingDirectives = [];
+const DEFAULT_BRANCH_TAIL = 50;
+const AUTO_BRANCH_TAIL = 100;
+const RECENT_IMAGE_POLL_COUNT = 10;
 
 function isAutoBranch(branchId) {
   return branchId && branchId.startsWith("auto_");
@@ -461,6 +464,68 @@ function updateWorldDayDisplay(worldDay) {
   else period = "夜晚";
 
   el.textContent = `✦ 世界第 ${day} 天 · ${period}`;
+}
+
+function getDefaultMessageTail(branchId) {
+  return isAutoBranch(branchId) ? AUTO_BRANCH_TAIL : DEFAULT_BRANCH_TAIL;
+}
+
+function _topVisibleMessageAnchor() {
+  const container = document.getElementById("messages");
+  const nodes = Array.from($messages.querySelectorAll(".message[data-index]"));
+  if (!container || nodes.length === 0) return null;
+
+  for (const node of nodes) {
+    if (node.offsetTop + node.offsetHeight > container.scrollTop + 1) {
+      return {
+        index: Number(node.dataset.index),
+        offset: node.offsetTop - container.scrollTop,
+      };
+    }
+  }
+
+  const last = nodes[nodes.length - 1];
+  return {
+    index: Number(last.dataset.index),
+    offset: last.offsetTop - container.scrollTop,
+  };
+}
+
+function _restoreMessageAnchor(anchor) {
+  if (!anchor) return false;
+  const container = document.getElementById("messages");
+  const target = $messages.querySelector(`.message[data-index="${anchor.index}"]`);
+  if (!container || !target) return false;
+  container.scrollTop = Math.max(0, target.offsetTop - anchor.offset);
+  return true;
+}
+
+async function loadAllMessagesPreservingViewport(branchId) {
+  const anchor = _topVisibleMessageAnchor();
+  await loadMessages(branchId, { loadAll: true });
+  _restoreMessageAnchor(anchor);
+}
+
+function updateLoadEarlierButton(branchId) {
+  if (!$loadBtn) return;
+  if (allMessages.length < totalMessages) {
+    $loadBtn.style.display = "";
+    $loadBtn.disabled = false;
+    $loadBtn.onclick = async () => {
+      if (currentBranchId !== branchId) return;
+      $loadBtn.disabled = true;
+      try {
+        await loadAllMessagesPreservingViewport(branchId);
+      } finally {
+        $loadBtn.disabled = false;
+      }
+    };
+    return;
+  }
+
+  $loadBtn.style.display = "none";
+  $loadBtn.disabled = false;
+  $loadBtn.onclick = null;
 }
 
 function startLivePolling(branchId) {
@@ -704,11 +769,7 @@ async function init() {
 
     // 4. Load messages for active branch
     updateInitStatus("載入對話紀錄…");
-    if (isAutoBranch(currentBranchId)) {
-      await loadMessages(currentBranchId, { tail: 100 });
-    } else {
-      await loadMessages(currentBranchId);
-    }
+    await loadMessages(currentBranchId);
 
     // 5. Load character status
     updateInitStatus("載入角色狀態…");
@@ -733,23 +794,17 @@ async function init() {
       // Clean URL without reloading
       window.history.replaceState({}, "", "/");
     } else if (!isNaN(paramMsg) && paramMsg >= 0) {
-      const target = document.querySelector(`.message[data-index="${paramMsg}"]`);
+      let target = document.querySelector(`.message[data-index="${paramMsg}"]`);
+      if (!target && allMessages.length < totalMessages) {
+        await loadMessages(currentBranchId, { loadAll: true });
+        target = document.querySelector(`.message[data-index="${paramMsg}"]`);
+      }
       if (target) target.scrollIntoView({ block: "center" });
       window.history.replaceState({}, "", "/");
     }
 
     removeInitOverlay();
     if (!paramBranch && isNaN(paramMsg)) scrollToBottom();
-
-    // Show "load earlier" button for auto branches with truncated messages
-    if (isAutoBranch(currentBranchId) && allMessages.length < totalMessages) {
-      $loadBtn.style.display = "";
-      $loadBtn.onclick = async () => {
-        $loadBtn.style.display = "none";
-        await loadMessages(currentBranchId);
-        scrollToBottom();
-      };
-    }
 
     // Init addon panel
     initAddonPanel();
@@ -1597,10 +1652,12 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
       $messages.style.minHeight = $messages.scrollHeight + "px";
     }
 
-    if (isAutoBranch(branchId)) {
-      await loadMessages(branchId, { tail: 100 });
-    } else {
-      await loadMessages(branchId);
+    await loadMessages(branchId);
+    if (scrollToIndex != null) {
+      const target = $messages.querySelector(`.message[data-index="${scrollToIndex}"]`);
+      if (!target && allMessages.length < totalMessages) {
+        await loadMessages(branchId, { loadAll: true });
+      }
     }
     const status = await API.status(branchId);
     renderCharacterStatus(status);
@@ -1612,18 +1669,6 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
     loadDiceCheatStatus();
     loadPistolModeStatus();
     loadImageGenAddonState();
-
-    // Show/hide "load earlier" button for auto branches with truncated messages
-    if (isAutoBranch(branchId) && allMessages.length < totalMessages) {
-      $loadBtn.style.display = "";
-      $loadBtn.onclick = async () => {
-        $loadBtn.style.display = "none";
-        await loadMessages(branchId);
-        scrollToBottom();
-      };
-    } else {
-      $loadBtn.style.display = "none";
-    }
 
     if (isAutoBranch(branchId)) {
       startLivePolling(branchId);
@@ -1671,9 +1716,10 @@ async function switchToBranch(branchId, { scrollToIndex, scrollBlock, preserveSc
   scrollToBottom();
 }
 
-async function loadMessages(branchId, { tail } = {}) {
-  const msgResult = tail
-    ? await API.messages(branchId, 0, 99999, null, tail)
+async function loadMessages(branchId, { tail, loadAll } = {}) {
+  const effectiveTail = loadAll ? null : (tail ?? getDefaultMessageTail(branchId));
+  const msgResult = effectiveTail != null
+    ? await API.messages(branchId, 0, 99999, null, effectiveTail)
     : await API.messages(branchId, 0, 99999);
   totalMessages = msgResult.total;
   allMessages = msgResult.messages;
@@ -1681,6 +1727,7 @@ async function loadMessages(branchId, { tail } = {}) {
   forkPoints = msgResult.fork_points || {};
   siblingGroups = msgResult.sibling_groups || {};
   renderMessages(allMessages);
+  updateLoadEarlierButton(branchId);
   updateWorldDayDisplay(msgResult.world_day);
 
   // Handle incomplete branch (edit/regen interrupted before GM response)
@@ -1852,7 +1899,7 @@ async function submitEdit(msg, newText) {
         if (errMsg !== "AbortError") {
           if (errMsg === "no_change") {
             // Content unchanged — restore DOM to pre-edit state
-            loadMessages();
+            loadMessages(currentBranchId);
             showToast("內容未變更");
           } else {
             loadBranches().then(() => renderBranchList());
@@ -2046,6 +2093,8 @@ function renderMessages(messages) {
   const currentBranch = branches[currentBranchId];
   const branchPointIndex = currentBranch ? currentBranch.branch_point_index : null;
   let branchDividerInserted = false;
+  const recentStart = Math.max(0, messages.length - RECENT_IMAGE_POLL_COUNT);
+  const recentThreshold = messages[recentStart]?.index ?? -1;
 
   for (const msg of messages) {
     if (!dividerInserted && currentBranchId === "main" && msg.index >= originalCount && originalCount > 0) {
@@ -2159,7 +2208,7 @@ function renderMessages(messages) {
 
     // Render image if present
     if (msg.image && currentStoryId) {
-      renderMessageImage(el, msg, currentStoryId);
+      renderMessageImage(el, msg, currentStoryId, { recent: msg.index >= recentThreshold });
     }
 
     el.appendChild(actionsContainer);
@@ -4137,7 +4186,7 @@ function startImagePolling(storyId, filename, imgEl, {
   }
 }
 
-function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
+function renderMessageImage(parentEl, msg, storyId, { fresh = false, recent = true } = {}) {
   if (!msg.image) return;
   const wrapper = document.createElement("div");
   wrapper.className = "msg-image-wrapper";
@@ -4172,17 +4221,19 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false } = {}) {
         onReady: showReadyImage,
       });
     } else {
-      // Page load — check once, then briefly retry in case the file finished moments later.
+      // Historical page load — old pending images do a single probe only.
       API.imageStatus(msg.image.filename).then(res => {
         handleImageWarning(msg.image.filename, res, storyId);
         if (res.ready) {
           showReadyImage();
-        } else {
+        } else if (recent) {
           startImagePolling(storyId, msg.image.filename, img, {
             maxWait: 15000,
             removeWrapperOnTimeout: true,
             onReady: showReadyImage,
           });
+        } else {
+          wrapper.remove();
         }
       }).catch(() => {
         wrapper.remove();
@@ -4204,13 +4255,16 @@ async function sendMessage() {
   $input.value = "";
   $input.style.height = "auto";
 
-  const playerMsg = { role: "user", content: text, index: allMessages.length, inherited: false, owner_branch_id: currentBranchId };
+  const lastIdx = allMessages.length > 0
+    ? Number(allMessages[allMessages.length - 1].index ?? -1)
+    : -1;
+  const playerMsg = { role: "user", content: text, index: lastIdx + 1, inherited: false, owner_branch_id: currentBranchId };
   allMessages.push(playerMsg);
   const playerEl = appendMessage(playerMsg);
   scrollToBottom();
 
   // Create GM bubble immediately for streaming
-  const gmMsgIndex = allMessages.length;
+  const gmMsgIndex = lastIdx + 2;
   const gmEl = document.createElement("div");
   gmEl.className = "message gm";
   gmEl.dataset.index = gmMsgIndex;

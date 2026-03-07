@@ -13,6 +13,7 @@ else:
     __version__ = "0.0.0"
 
 from flask import Flask
+from flask_compress import Compress
 
 # ---------------------------------------------------------------------------
 # Logging — console + rotating file
@@ -51,6 +52,8 @@ from story_core.app_helpers import *  # noqa: F401,F403
 # Flask App
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
+app.config["COMPRESS_STREAMS"] = False
+Compress(app)
 app.register_blueprint(lore_bp)
 app.register_blueprint(branch_bp)
 app.register_blueprint(debug_bp)
