@@ -60,24 +60,24 @@ def _make_timeline(n, start_index=0):
 class TestShouldCompact:
     def test_no_compaction_needed(self):
         recap = {"compacted_through_index": -1}
-        # 40 messages, RECENT_WINDOW=20 → recent_start=20, uncompacted=20-0=20
-        # MIN_UNCOMPACTED_FOR_TRIGGER=20 → NOT > 20 → False
-        assert compaction.should_compact(recap, 40) is False
+        # 20 messages, RECENT_WINDOW=10 → recent_start=10, uncompacted=10-0=10
+        # MIN_UNCOMPACTED_FOR_TRIGGER=10 → NOT > 10 → False
+        assert compaction.should_compact(recap, 20) is False
 
     def test_compaction_needed(self):
         recap = {"compacted_through_index": -1}
-        # 50 messages → recent_start=30, uncompacted=30-0=30 > 20 → True
-        assert compaction.should_compact(recap, 50) is True
+        # 22 messages → recent_start=12, uncompacted=12-0=12 > 10 → True
+        assert compaction.should_compact(recap, 22) is True
 
     def test_after_previous_compaction(self):
         recap = {"compacted_through_index": 19}
-        # 60 messages → recent_start=40, uncompacted=40-20=20 → NOT > 20 → False
-        assert compaction.should_compact(recap, 60) is False
+        # 40 messages → recent_start=30, uncompacted=30-20=10 → NOT > 10 → False
+        assert compaction.should_compact(recap, 40) is False
 
     def test_after_previous_compaction_more_messages(self):
         recap = {"compacted_through_index": 19}
-        # 61 messages → recent_start=41, uncompacted=41-20=21 > 20 → True
-        assert compaction.should_compact(recap, 61) is True
+        # 41 messages → recent_start=31, uncompacted=31-20=11 > 10 → True
+        assert compaction.should_compact(recap, 41) is True
 
     def test_small_timeline(self):
         recap = {"compacted_through_index": -1}
@@ -86,12 +86,12 @@ class TestShouldCompact:
     def test_empty_recap(self):
         recap = {}
         # Default compacted_through_index = -1
-        assert compaction.should_compact(recap, 50) is True
+        assert compaction.should_compact(recap, 22) is True
 
     def test_exact_threshold(self):
         recap = {"compacted_through_index": -1}
-        # 41 messages → recent_start=21, uncompacted=21-0=21 > 20 → True
-        assert compaction.should_compact(recap, 41) is True
+        # 20 messages → recent_start=10, uncompacted=10-0=10 → NOT > 10 → False
+        assert compaction.should_compact(recap, 20) is False
 
 
 # ===================================================================
@@ -100,11 +100,11 @@ class TestShouldCompact:
 
 
 class TestGetContextWindow:
-    def test_returns_last_20(self):
+    def test_returns_last_10(self):
         timeline = _make_timeline(50)
         window = compaction.get_context_window(timeline)
-        assert len(window) == 20
-        assert window[0]["index"] == 30
+        assert len(window) == 10
+        assert window[0]["index"] == 40
         assert window[-1]["index"] == 49
 
     def test_short_timeline(self):
@@ -116,10 +116,10 @@ class TestGetContextWindow:
         window = compaction.get_context_window([])
         assert window == []
 
-    def test_exactly_20(self):
-        timeline = _make_timeline(20)
+    def test_exactly_10(self):
+        timeline = _make_timeline(10)
         window = compaction.get_context_window(timeline)
-        assert len(window) == 20
+        assert len(window) == 10
 
 
 # ===================================================================
@@ -276,10 +276,10 @@ class TestCopyRecapToBranch:
 
 class TestConstants:
     def test_recent_window(self):
-        assert compaction.RECENT_WINDOW == 20
+        assert compaction.RECENT_WINDOW == 10
 
     def test_min_uncompacted_trigger(self):
-        assert compaction.MIN_UNCOMPACTED_FOR_TRIGGER == 20
+        assert compaction.MIN_UNCOMPACTED_FOR_TRIGGER == 10
 
     def test_recap_char_cap(self):
         assert compaction.RECAP_CHAR_CAP == 8000
