@@ -137,12 +137,30 @@
 ### 7.2 Event
 
 - 存於 `events.db`
-- 注入只取 active 事件（`planted/triggered`）
+- query-based 注入只取 active 事件（`planted/triggered`），以 `[相關事件追蹤]` 呈現
+- `sticky_priority > 0` 的事件會額外以 `[長期關鍵事件]` 常駐注入，依 `sticky_priority DESC, id DESC` 取最多 4 條
+- sticky events 可包含 `resolved` 狀態；用途是保留跨弧線 plot pressure，而不是即時場景相關性
 - async extraction 會做標題去重與狀態升級
+- async extraction 的 `event_ops` / legacy `events` 可附 `sticky: true`，寫入為 `sticky_priority=1`
 - fork 分支時會繼承 parent 在 `branch_point_index` 之前的事件，並保留 `message_index IS NULL` 的 legacy 條目
+- fork / merge 會保留 `sticky_priority`
 - 刪除分支（hard delete / `was_main` soft-delete）與啟動時 incomplete branch cleanup 會同步清除該分支事件，避免 orphan records
 
-### 7.3 NPC tier（戰力細分）
+### 7.3 Story anchors（身份層長期記憶）
+
+- 存於各分支 `character_state.json` 的 `story_anchors`
+- 上限 10 條，讀取時會 self-heal / normalize / 去重
+- 注入位置是 system prompt 的 `critical_facts -> ### 長期記憶`
+- 用途是 identity layer 的持久事實：
+  - 長期主線
+  - 核心隊伍關係
+  - 永久代價 / 不可逆變化
+  - 已成為角色身份一部分的長期宿敵 / 契約 / 追索壓力
+- `story_anchors` 和 sticky events 分工不同：
+  - anchors = 身份層事實
+  - sticky events = 劇情壓力
+
+### 7.4 NPC tier（戰力細分）
 
 - NPC 可帶 `tier` 欄位，允許 15 個值：`D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+`。
 - async extraction prompt 會提取 `tier`；若既有 NPC 本回合無法判定，應省略欄位而非覆蓋成 `null`。
@@ -152,7 +170,7 @@
   - `critical_facts` 的關係矩陣（`·X級`）
   - `[戰力等級提醒]`（僅已知 tier 且 ally/hostile）
 
-### 7.4 NPC lifecycle（active / archived）
+### 7.5 NPC lifecycle（active / archived）
 
 - NPC 新增欄位：
   - `lifecycle_status`：`active` / `archived`（缺省視為 `active`）
@@ -171,7 +189,7 @@
 - `_load_npcs()` 預設只回 active；需要全量時用 `include_archived=True`。
 - state.db 對 archived NPC 會打 `NPC|ARCHIVED` tag；`search_state` 預設過濾，只有 forced key（玩家明確提名）才保留。
 
-### 7.5 GM hidden plan（敘事前瞻）
+### 7.6 GM hidden plan（敘事前瞻）
 
 - 每分支可有 `branches/<bid>/gm_plan.json`（玩家不可見）。
 - 來源：`_extract_tags_async()` 的 `plan` 擷取結果（LLM 根據 GM 回覆重寫）。

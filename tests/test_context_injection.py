@@ -142,6 +142,28 @@ class TestBuildAugmentedMessage:
         assert "---\n原始訊息" in text
 
     @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.format_sticky_events", return_value="[長期關鍵事件]\n- 神王追索")
+    @mock.patch("app.search_relevant_events", return_value="[相關事件追蹤]\n- 水靈珠線索")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_sticky_events_injected_before_query_events(
+        self,
+        _mock_fate,
+        _mock_gm,
+        _mock_act,
+        _mock_evt,
+        _mock_sticky,
+        _mock_lore,
+        story_id,
+        setup_story,
+    ):
+        text, _ = app_module._build_augmented_message(story_id, "main", "我要找水靈珠", {"current_phase": "副本中"})
+        assert "[長期關鍵事件]" in text
+        assert "[相關事件追蹤]" in text
+        assert text.index("[長期關鍵事件]") < text.index("[相關事件追蹤]")
+
+    @mock.patch("app.search_relevant_lore", return_value="")
     @mock.patch("app.search_relevant_events", return_value="")
     @mock.patch("app.get_recent_activities", return_value="")
     @mock.patch("app.is_gm_command", return_value=True)
@@ -256,6 +278,43 @@ class TestBuildAugmentedMessage:
             [{"name": "阿豪", "role": "隊友", "lifecycle_status": "active"}],
         )
         assert "安德斯" in text
+
+
+class TestCriticalFactsAnchors:
+    def test_critical_facts_include_story_anchors(self, story_id, setup_story):
+        branch_dir = setup_story / "branches" / "main"
+        state_path = branch_dir / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["story_anchors"] = [
+            "長期主線：回歸現實",
+            "核心隊伍關係：與小琳有深層心靈同調",
+        ]
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        loaded_state = app_module._load_character_state(story_id, "main")
+        text = app_module._build_critical_facts(story_id, "main", loaded_state, [])
+        assert "### 長期記憶" in text
+        assert "長期主線：回歸現實" in text
+
+    def test_load_character_state_self_heals_story_anchors(self, story_id, setup_story):
+        branch_dir = setup_story / "branches" / "main"
+        state_path = branch_dir / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state.pop("story_anchors", None)
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        loaded_state = app_module._load_character_state(story_id, "main")
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        assert loaded_state["story_anchors"] == []
+        assert persisted["story_anchors"] == []
+
+    def test_story_anchors_capped_at_ten(self, story_id, setup_story):
+        state = {
+            "current_phase": "副本中",
+            "story_anchors": [f"錨點{i}" for i in range(12)],
+        }
+        text = app_module._build_critical_facts(story_id, "main", state, [])
+        assert text.count("- 錨點") == 10
 
     @mock.patch("app.search_relevant_lore", return_value="")
     @mock.patch("app.search_relevant_events", return_value="")

@@ -30,7 +30,7 @@
 - `world_lore`: 精簡 lore 摘要（非全文）
 - `npc_profiles`: 當前分支「active NPC」統計摘要（詳細檔案改由 state RAG 按需注入）
 - `team_rules`: branch config 的組隊模式規則（`free_agent` / `fixed_team`）
-- `critical_facts`: 關鍵事實區塊（phase、world day、關鍵道具、NPC 關係與 tier）
+- `critical_facts`: 關鍵事實區塊（phase、world day、關鍵道具、NPC 關係與 tier，以及 `story_anchors` 的「長期記憶」）
 - `dungeon_context`: 副本進度/節點/成長限制上下文
 
 ### 2.3 模式切換對 prompt 的影響
@@ -55,21 +55,27 @@
 
 1. `[相關世界設定]`（base lore 混合搜尋）
 2. `[相關分支設定]`（branch lore bigram 搜尋）
-3. `[相關事件追蹤]`（非 blank branch）
-4. `[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]`（`gm_plan.json`，非 blank branch）
+3. `[長期關鍵事件]`（sticky events，非 blank branch）
+   - 來自 `events.db.sticky_priority > 0`
+   - 依 `sticky_priority DESC, id DESC` 取最多 4 條
+   - 可包含 `resolved` 事件；用途是長期 plot pressure，不依賴當前 query 命中
+4. `[相關事件追蹤]`（query-matched active events，非 blank branch）
+   - 只取 `planted/triggered`
+   - 仍維持最多 3 條，避免和 sticky layer 混淆
+5. `[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]`（`gm_plan.json`，非 blank branch）
    - 顯示 `arc` + 最多 3 個 `next_beats` + 最多 2 個 `must_payoff`
    - `remaining_turns` 於注入時計算：`ttl_turns - (current_index - payoff.created_at_index)`
    - 只保留 `remaining_turns > 0` 的 payoff
    - 注入段落硬上限 `GM_PLAN_CHAR_LIMIT`（預設 500 chars）
-5. `[NPC 近期動態]`
-6. `[相關角色狀態]`（state.db 檢索結果）
+6. `[NPC 近期動態]`
+7. `[相關角色狀態]`（state.db 檢索結果）
    - 預設檢索限流：總筆數最多 30、NPC 類別最多 10
    - `must_include_keys` 命中的條目先保留，再填入一般結果
    - archived NPC 預設不注入；玩家明確提名時可透過 `must_include_keys` 召回
-7. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
-8. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
-9. `---`
-10. 原始玩家輸入
+8. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
+9. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
+10. `---`
+11. 原始玩家輸入
 
 補充：
 
@@ -149,14 +155,17 @@
 特點：
 
 - 使用 `call_oneshot()` 解析剛產生的 GM 內容
-- 輸出 JSON（lore/events/plan/npcs/state/time/branch_title/dungeon）
+- 輸出 JSON（lore/events/plan/npcs/state/story_anchors/time/branch_title/dungeon）
 - 只在 GM 文本長度 >= 200 時啟動
 
 ### 4.1 Prompt 內建 guardrails
 
 - lore 提取有「通用設定」門檻，避免把一次性劇情寫進知識庫
 - event 優先走 `event_ops`（id-driven），避免 title 漂移造成斷鏈
-- event create 仍保留 title dedup + status 升級規則（planted -> triggered -> resolved/abandoned）
+- event create / legacy events 仍保留 title dedup + status 升級規則（planted -> triggered -> resolved/abandoned）
+- event 可附 `sticky: true`，只用於 cross-arc plot pressure；實際寫入為 `sticky_priority=1`
+- `story_anchors` 是獨立的 identity memory layer，格式為 `{add, update, remove}`；大多數回合應輸出空物件
+- `story_anchors.update/remove` 必須 exact-match 既有 anchor，避免 extractor 漂移式改寫長期記憶
 - plan 會注入「上一輪 gm_plan 摘要」讓模型可延續或重寫；`must_payoff` 會依 `event_title` relink 到當前分支 active events
 - NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
 - `_extract_tags_async()` 會在啟動時先抓當前副本 run context（`dungeon_id` + `entered_at`），並在 `_save_npc()` 時帶入，避免背景執行緒晚跑時吃到錯誤的副本來源

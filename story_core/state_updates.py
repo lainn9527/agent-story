@@ -5,7 +5,12 @@ import logging
 
 from story_core.character_state import _load_character_schema, _load_character_state
 from story_core.dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit, validate_dungeon_progression
-from story_core.event_db import get_active_events, insert_event, update_event_status
+from story_core.event_db import (
+    get_active_events,
+    insert_event,
+    update_event_status,
+    update_event_sticky_priority,
+)
 from story_core.npc_helpers import _sync_state_db_from_state
 from story_core.story_io import _save_json, _story_character_state_path
 from story_core.tag_extraction import _NORMALIZE_DASHES_RE, _NORMALIZE_DOTS_RE, _extract_item_base_name
@@ -80,6 +85,42 @@ def _normalize_event_status(raw_status: object) -> str | None:
     return None
 
 
+def _parse_sticky_flag(raw_flag: object) -> bool | None:
+    if raw_flag is None:
+        return None
+    if isinstance(raw_flag, bool):
+        return raw_flag
+    if isinstance(raw_flag, (int, float)):
+        return raw_flag != 0
+    if isinstance(raw_flag, str):
+        value = raw_flag.strip().lower()
+        if value in {"", "none", "null"}:
+            return None
+        if value in {"1", "true", "yes", "y", "on"}:
+            return True
+        if value in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(raw_flag)
+
+
+def _normalize_event_sticky_priority(
+    raw_priority: object,
+    raw_sticky: object | None = None,
+    *,
+    default: int | None = None,
+) -> int | None:
+    if raw_priority is None:
+        sticky_flag = _parse_sticky_flag(raw_sticky)
+        if sticky_flag is None:
+            return default
+        raw_priority = 1 if sticky_flag else 0
+    try:
+        priority = int(raw_priority)
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(3, priority))
+
+
 def _build_active_events_hint(story_id: str, branch_id: str, limit: int = 40) -> str:
     rows = get_active_events(story_id, branch_id, limit=limit)
     if not rows:
@@ -114,7 +155,14 @@ def _apply_event_ops(
             continue
         event_id = meta.get("id")
         if isinstance(event_id, int):
-            id_map[event_id] = {"title": title, "status": meta.get("status", "")}
+            id_map[event_id] = {
+                "title": title,
+                "status": meta.get("status", ""),
+                "sticky_priority": _normalize_event_sticky_priority(
+                    meta.get("sticky_priority"),
+                    default=0,
+                ) or 0,
+            }
 
     for op in event_ops.get("update", []) if isinstance(event_ops.get("update"), list) else []:
         if not isinstance(op, dict):
@@ -125,17 +173,36 @@ def _apply_event_ops(
         if not isinstance(raw_id, int):
             continue
         new_status = _normalize_event_status(op.get("status"))
-        if not new_status:
+        new_sticky_priority = _normalize_event_sticky_priority(
+            op.get("sticky_priority"),
+            op.get("sticky"),
+            default=None,
+        )
+        if not new_status and new_sticky_priority is None:
             continue
         current = id_map.get(raw_id)
         if not current:
             continue
         old_status = _normalize_event_status(current.get("status")) or str(current.get("status", "")).strip()
-        if _EVENT_STATUS_ORDER.get(new_status, -1) > _EVENT_STATUS_ORDER.get(old_status, -1):
+        old_sticky_priority = _normalize_event_sticky_priority(
+            current.get("sticky_priority"),
+            default=0,
+        ) or 0
+        if new_status and _EVENT_STATUS_ORDER.get(new_status, -1) > _EVENT_STATUS_ORDER.get(old_status, -1):
             update_event_status(story_id, raw_id, new_status)
             title = current["title"]
             existing_title_map[title]["status"] = new_status
             id_map[raw_id]["status"] = new_status
+            writes += 1
+        if (
+            new_sticky_priority is not None
+            and new_sticky_priority != old_sticky_priority
+            and (new_sticky_priority == 0 or new_sticky_priority > old_sticky_priority)
+        ):
+            update_event_sticky_priority(story_id, raw_id, new_sticky_priority)
+            title = current["title"]
+            existing_title_map.setdefault(title, {})["sticky_priority"] = new_sticky_priority
+            id_map[raw_id]["sticky_priority"] = new_sticky_priority
             writes += 1
 
     for op in event_ops.get("create", []) if isinstance(event_ops.get("create"), list) else []:
@@ -145,17 +212,42 @@ def _apply_event_ops(
         if not title:
             continue
         new_status = _normalize_event_status(op.get("status")) or "planted"
+        new_sticky_priority = _normalize_event_sticky_priority(
+            op.get("sticky_priority"),
+            op.get("sticky"),
+            default=0,
+        ) or 0
         if title in existing_titles:
             existing = existing_title_map.get(title, {})
             event_id = existing.get("id")
             old_status = _normalize_event_status(existing.get("status")) or str(existing.get("status", "")).strip()
+            old_sticky_priority = _normalize_event_sticky_priority(
+                existing.get("sticky_priority"),
+                default=0,
+            ) or 0
             if (
                 isinstance(event_id, int)
                 and _EVENT_STATUS_ORDER.get(new_status, -1) > _EVENT_STATUS_ORDER.get(old_status, -1)
             ):
                 update_event_status(story_id, event_id, new_status)
                 existing_title_map[title]["status"] = new_status
-                id_map[event_id] = {"title": title, "status": new_status}
+                id_map[event_id] = {
+                    "title": title,
+                    "status": new_status,
+                    "sticky_priority": old_sticky_priority,
+                }
+                writes += 1
+            if isinstance(event_id, int) and new_sticky_priority > old_sticky_priority:
+                update_event_sticky_priority(story_id, event_id, new_sticky_priority)
+                existing_title_map[title]["sticky_priority"] = new_sticky_priority
+                id_map.setdefault(
+                    event_id,
+                    {
+                        "title": title,
+                        "status": existing.get("status", ""),
+                        "sticky_priority": old_sticky_priority,
+                    },
+                )["sticky_priority"] = new_sticky_priority
                 writes += 1
             continue
 
@@ -166,11 +258,20 @@ def _apply_event_ops(
             "message_index": msg_index,
             "status": new_status,
             "tags": op.get("tags", ""),
+            "sticky_priority": new_sticky_priority,
         }
         new_id = insert_event(story_id, payload, branch_id)
         existing_titles.add(title)
-        existing_title_map[title] = {"id": new_id, "status": new_status}
-        id_map[new_id] = {"title": title, "status": new_status}
+        existing_title_map[title] = {
+            "id": new_id,
+            "status": new_status,
+            "sticky_priority": new_sticky_priority,
+        }
+        id_map[new_id] = {
+            "title": title,
+            "status": new_status,
+            "sticky_priority": new_sticky_priority,
+        }
         writes += 1
 
     return writes

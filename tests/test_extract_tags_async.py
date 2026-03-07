@@ -465,6 +465,73 @@ class TestAsyncEventOps:
         assert len(matching) == 1
         assert matching[0]["status"] == "triggered"
 
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_event_ops_update_by_id_can_set_sticky_priority(self, mock_llm, story_id, setup_story):
+        event_id = event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "神王追索", "description": "d", "status": "planted"
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "event_ops": {
+                "update": [{"id": event_id, "sticky": True}],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=11)
+
+        updated = event_db.get_event_by_id(story_id, event_id)
+        assert updated["sticky_priority"] == 1
+
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_legacy_events_dedup_can_raise_sticky_priority(self, mock_llm, story_id, setup_story):
+        event_db.insert_event(story_id, {
+            "event_type": "伏筆", "title": "白鴉邀約", "description": "old", "status": "planted", "sticky_priority": 0
+        }, "main")
+        mock_llm.return_value = json.dumps({
+            "events": [
+                {
+                    "event_type": "伏筆",
+                    "title": "白鴉邀約",
+                    "description": "new",
+                    "status": "triggered",
+                    "sticky": True,
+                    "tags": "",
+                },
+            ],
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=12)
+
+        events = event_db.get_events(story_id, branch_id="main", limit=20)
+        matching = [e for e in events if e["title"] == "白鴉邀約"]
+        assert len(matching) == 1
+        assert matching[0]["status"] == "triggered"
+        assert matching[0]["sticky_priority"] == 1
+
+
+class TestAsyncStoryAnchors:
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_story_anchor_ops_add_update_remove(self, mock_llm, story_id, setup_story):
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["story_anchors"] = ["長期主線：舊目標", "待移除錨點"]
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.return_value = json.dumps({
+            "story_anchors": {
+                "add": ["核心關係：與小琳深層同調"],
+                "update": [{"old": "長期主線：舊目標", "new": "長期主線：回歸現實"}],
+                "remove": ["待移除錨點"],
+            },
+        })
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=13)
+
+        updated = json.loads(state_path.read_text(encoding="utf-8"))
+        assert updated["story_anchors"] == [
+            "長期主線：回歸現實",
+            "核心關係：與小琳深層同調",
+        ]
+
 
 # ===================================================================
 # Lore extraction

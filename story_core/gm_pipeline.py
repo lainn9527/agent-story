@@ -7,7 +7,13 @@ import re
 import threading
 import time
 
-from story_core.state_updates import _EVENT_STATUS_ORDER, _INSTRUCTION_KEYS, _SCENE_KEYS, _is_numeric_value
+from story_core.state_updates import (
+    _EVENT_STATUS_ORDER,
+    _INSTRUCTION_KEYS,
+    _SCENE_KEYS,
+    _is_numeric_value,
+    _normalize_event_sticky_priority,
+)
 
 log = logging.getLogger("rpg")
 
@@ -16,6 +22,71 @@ def _app():
     import app as app_module
 
     return app_module
+
+
+def _normalize_story_anchor_value(app_module, value: object) -> str:
+    normalized = app_module._normalize_story_anchors([value], limit=1)
+    return normalized[0] if normalized else ""
+
+
+def _apply_story_anchor_ops(story_id: str, branch_id: str, raw_ops: object) -> tuple[list[str], list[str]] | None:
+    app_module = _app()
+
+    if not isinstance(raw_ops, dict):
+        return None
+
+    raw_add = raw_ops.get("add")
+    raw_update = raw_ops.get("update")
+    raw_remove = raw_ops.get("remove")
+    if not isinstance(raw_add, list) and not isinstance(raw_update, list) and not isinstance(raw_remove, list):
+        return None
+
+    state = app_module._load_character_state(story_id, branch_id)
+    before = app_module._normalize_story_anchors(state.get("story_anchors", []))
+    anchors = list(before)
+
+    remove_set = set()
+    if isinstance(raw_remove, list):
+        for item in raw_remove:
+            text = _normalize_story_anchor_value(app_module, item)
+            if text:
+                remove_set.add(text)
+    if remove_set:
+        anchors = [anchor for anchor in anchors if anchor not in remove_set]
+
+    replacements: dict[str, str] = {}
+    if isinstance(raw_update, list):
+        existing_anchor_set = set(anchors)
+        for item in raw_update:
+            if not isinstance(item, dict):
+                continue
+            old_text = _normalize_story_anchor_value(app_module, item.get("old"))
+            new_text = _normalize_story_anchor_value(app_module, item.get("new"))
+            if not old_text or not new_text or old_text == new_text:
+                continue
+            if old_text in existing_anchor_set:
+                replacements[old_text] = new_text
+    if replacements:
+        anchors = [replacements.get(anchor, anchor) for anchor in anchors]
+
+    additions: list[str] = []
+    if isinstance(raw_add, list):
+        for item in raw_add:
+            text = _normalize_story_anchor_value(app_module, item)
+            if text:
+                additions.append(text)
+
+    after = app_module._normalize_story_anchors([*anchors, *additions])
+    if after == before:
+        return None
+
+    state["story_anchors"] = after
+    app_module._save_json(app_module._story_character_state_path(story_id, branch_id), state)
+    log.info(
+        "    story_anchors: %s",
+        json.dumps({"before": before, "after": after}, ensure_ascii=False),
+    )
+    return before, after
 
 
 def _validate_state_update(update: dict, schema: dict, current_state: dict) -> tuple[dict, list[dict]]:
@@ -427,6 +498,8 @@ def _extract_tags_async(
 
             state = app_module._load_character_state(story_id, branch_id)
             existing_state_keys = ", ".join(sorted(state.keys()))
+            current_story_anchors = app_module._normalize_story_anchors(state.get("story_anchors", []))
+            story_anchors_text = "\n".join(f"- {anchor}" for anchor in current_story_anchors) if current_story_anchors else "（無）"
 
             list_contents_lines = []
             for list_def in schema.get("lists", []):
@@ -475,11 +548,13 @@ def _extract_tags_async(
                 "* `resolved`（解決）：必須是該事件的目標已徹底完成或因故徹底終結。\n"
                 "優先輸出 `event_ops`（用 id 更新，避免 title 漂移）：\n"
                 f"{active_events_text}\n"
-                "- update：已有事件狀態變化（如伏筆被觸發、事件被解決）時，輸出 id + status\n"
-                "- create：只有真的新事件才建立（title 不要跟現有事件只差幾個字）\n"
-                'event_ops 格式：{"update": [{"id": 123, "status": "triggered"}], "create": [{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}]}\n'
+                "- `sticky` 只用於跨弧線 plot pressure：外部威脅/追索、未解契約/承諾、仍在影響劇情的長期伏筆。**身份事實不要放在 events，改放 story_anchors。**\n"
+                "- 大多數事件都不是 sticky；只有真正需要長期常駐提醒的事件才標 `sticky: true`\n"
+                "- update：已有事件狀態變化（如伏筆被觸發、事件被解決）時，輸出 id + status；若這個事件已成為長期劇情壓力，也可加 `sticky`\n"
+                "- create：只有真的新事件才建立（title 不要跟現有事件只差幾個字）；sticky 事件仍然必須是 plot pressure，不可和 story_anchors 重複\n"
+                'event_ops 格式：{"update": [{"id": 123, "status": "triggered", "sticky": true}], "create": [{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字", "sticky": true}]}\n'
                 "- 相容：若你無法使用 event id，才改用 legacy `events` 陣列格式。\n"
-                'legacy events 格式：[{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字"}]\n'
+                'legacy events 格式：[{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字", "sticky": true}]\n'
                 "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
                 "可用狀態：planted/triggered/resolved/abandoned（可用同義詞如 ongoing/completed，系統會正規化）\n\n"
                 "## 3. GM 敘事計劃（plan）\n"
@@ -543,13 +618,24 @@ def _extract_tags_async(
                 "- list_add/list_remove：list 型欄位增減\n"
                 "- 相容：若你無法輸出 state_ops，才輸出 legacy `state` 物件。\n"
                 "格式：state/state_ops 只填有變化的欄位。\n\n"
-                "## 6. 時間流逝（time）\n"
+                "## 6. 長期記憶（story_anchors）\n"
+                "提取角色/隊伍/故事的**身份層永久事實**。這些內容會常駐進 system prompt，必須非常保守。\n"
+                "只允許 4 類：長期主線、核心隊伍關係、永久代價/不可逆變化、長期宿敵/契約/追索壓力。\n"
+                "不要把單純 plot pressure 放進 story_anchors；那種放到 sticky events。\n"
+                f"目前 story_anchors：\n{story_anchors_text}\n"
+                "規則：\n"
+                "- `add`：只加入 genuinely new 的跨弧線永久事實\n"
+                "- `update`：只有既有 anchor 被故事**明確推翻或明確升級**時才用，而且 old 必須和現有 anchor 完全一致\n"
+                "- `remove`：只有該事實被故事**明確否定**時才用，而且文字必須和現有 anchor 完全一致\n"
+                "- 大多數回合應該輸出空的 `story_anchors: {}`\n"
+                '格式：{"add": ["新 anchor"], "update": [{"old": "舊 anchor", "new": "新 anchor"}], "remove": ["舊 anchor"]}\n\n'
+                "## 7. 時間流逝（time）\n"
                 "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
                 "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
                 "- 隱含流逝參考：一場小戰鬥 → hours:1、大型戰役/Boss戰 → hours:3、探索建築/區域 → hours:2、長途移動/趕路 → hours:4、休息/過夜 → hours:8、訓練/修煉 → days:1\n"
                 "- 純對話/短暫互動/思考/角色創建/主神空間閒聊不需要輸出。只有場景中有實際行動推進才估算。\n"
                 '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
-                "## 7. 分支標題（branch_title）\n"
+                "## 8. 分支標題（branch_title）\n"
                 "用 4-8 個中文字總結這段 GM 回覆中**玩家的核心行動或場景轉折**。\n"
                 "例如：「七首殺屍測試」「巷道右側突圍」「自省之眼覺醒」「進入蜀山副本」「商城兌換裝備」\n"
                 "要求：動作導向、簡潔、不帶標點符號。\n"
@@ -565,7 +651,7 @@ def _extract_tags_async(
                     nodes_mapping = ", ".join([f"{node['id']}=「{node['title']}」" for node in node_list])
                     areas_str = ", ".join([area["id"] for area in template.get("areas", [])])
                     prompt += (
-                        f"## 8. 副本進度（dungeon）\n"
+                        f"## 9. 副本進度（dungeon）\n"
                         f"當前在副本【{template['name']}】中。分析 GM 文本中是否存在：\n"
                         f"- 主線劇情節點的完成（如「成功封印伽椰子」）\n"
                         f"- 新區域的發現或探索（如「進入二樓」、「深入地下室」）\n\n"
@@ -589,7 +675,7 @@ def _extract_tags_async(
             prompt += (
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "plan": {...}, "npcs": [...], "state_ops": {...}, "state": {...}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
+                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "plan": {...}, "npcs": [...], "state_ops": {...}, "state": {...}, "story_anchors": {"add": [...], "update": [...], "remove": [...]}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
 
@@ -633,7 +719,14 @@ def _extract_tags_async(
             if not isinstance(data, dict):
                 return
 
-            saved_counts = {"lore": 0, "events": 0, "npcs": 0, "state": False, "plan": "no change"}
+            saved_counts = {
+                "lore": 0,
+                "events": 0,
+                "npcs": 0,
+                "state": False,
+                "anchors": "no change",
+                "plan": "no change",
+            }
 
             pistol = app_module.get_pistol_mode(app_module._story_dir(story_id), branch_id)
             if pistol:
@@ -688,17 +781,28 @@ def _extract_tags_async(
                         if not title:
                             continue
                         new_status = app_module._normalize_event_status(event.get("status")) or "planted"
+                        sticky_priority = _normalize_event_sticky_priority(
+                            event.get("sticky_priority"),
+                            event.get("sticky"),
+                            default=0,
+                        ) or 0
                         if title not in existing_titles:
                             event["message_index"] = msg_index
                             event["status"] = new_status
+                            event["sticky_priority"] = sticky_priority
                             new_id = app_module.insert_event(story_id, event, branch_id)
                             existing_titles.add(title)
-                            existing_title_map[title] = {"id": new_id, "status": new_status}
+                            existing_title_map[title] = {
+                                "id": new_id,
+                                "status": new_status,
+                                "sticky_priority": sticky_priority,
+                            }
                             saved_counts["events"] += 1
                         else:
                             existing = existing_title_map.get(title, {})
                             old_status = app_module._normalize_event_status(existing.get("status")) or str(existing.get("status", "")).strip()
                             event_id = existing.get("id")
+                            old_sticky_priority = int(existing.get("sticky_priority") or 0)
                             if (
                                 isinstance(event_id, int)
                                 and _EVENT_STATUS_ORDER.get(new_status, -1)
@@ -706,6 +810,10 @@ def _extract_tags_async(
                             ):
                                 app_module.update_event_status(story_id, event_id, new_status)
                                 existing_title_map[title]["status"] = new_status
+                                saved_counts["events"] += 1
+                            if isinstance(event_id, int) and sticky_priority > old_sticky_priority:
+                                app_module.update_event_sticky_priority(story_id, event_id, sticky_priority)
+                                existing_title_map[title]["sticky_priority"] = sticky_priority
                                 saved_counts["events"] += 1
 
             if pistol:
@@ -753,6 +861,11 @@ def _extract_tags_async(
                         state_applied = True
                 saved_counts["state"] = state_applied
 
+            anchor_change = _apply_story_anchor_ops(story_id, branch_id, data.get("story_anchors"))
+            if anchor_change is not None:
+                _before, after = anchor_change
+                saved_counts["anchors"] = f"updated ({len(after)})"
+
             time_data = data.get("time", {})
             if time_data and isinstance(time_data, dict) and not skip_time:
                 days = time_data.get("days") or 0
@@ -796,11 +909,12 @@ def _extract_tags_async(
                     saved_counts["dungeon_area"] = True
 
             log.info(
-                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, time %s, title %s, plan %s, dungeon %s",
+                "    extract_tags: saved %d lore, %d events, %d npcs, state %s, anchors %s, time %s, title %s, plan %s, dungeon %s",
                 saved_counts["lore"],
                 saved_counts["events"],
                 saved_counts["npcs"],
                 "updated" if saved_counts["state"] else "no change",
+                saved_counts.get("anchors", "no change"),
                 f"+{saved_counts['time']:.1f}d" if saved_counts.get("time") else "no change",
                 repr(saved_counts.get("title", "—")),
                 saved_counts.get("plan", "no change"),
@@ -1059,6 +1173,9 @@ def _build_augmented_message(
         parts.append(branch_lore)
 
     if not is_blank:
+        sticky_events = app_module.format_sticky_events(story_id, branch_id, limit=4)
+        if sticky_events:
+            parts.append(sticky_events)
         events = app_module.search_relevant_events(story_id, user_text, branch_id, limit=3)
         if events:
             parts.append(events)
