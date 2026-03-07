@@ -7,6 +7,7 @@ import re
 import threading
 import time
 
+from state_updates import _EVENT_STATUS_ORDER, _INSTRUCTION_KEYS, _SCENE_KEYS, _is_numeric_value
 
 log = logging.getLogger("rpg")
 
@@ -40,10 +41,10 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
     direct_overwrite_keys = set(schema.get("direct_overwrite_keys", []))
 
     for key, value in update.items():
-        if key in app_module._SCENE_KEYS:
+        if key in _SCENE_KEYS:
             violations.append({"key": key, "rule": "scene_key", "value": value, "action": "drop"})
             continue
-        if key in app_module._INSTRUCTION_KEYS:
+        if key in _INSTRUCTION_KEYS:
             violations.append({"key": key, "rule": "instruction_key", "value": value, "action": "drop"})
             continue
 
@@ -51,11 +52,11 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
             violations.append({"key": key, "rule": "invalid_phase", "value": value, "action": "drop"})
             continue
 
-        if key == "reward_points_delta" and not app_module._is_numeric_value(value):
+        if key == "reward_points_delta" and not _is_numeric_value(value):
             violations.append({"key": key, "rule": "non_numeric_delta", "value": value, "action": "drop"})
             continue
 
-        if key == "reward_points" and not app_module._is_numeric_value(value):
+        if key == "reward_points" and not _is_numeric_value(value):
             violations.append({"key": key, "rule": "non_numeric_points", "value": value, "action": "drop"})
             continue
 
@@ -76,7 +77,7 @@ def _validate_state_update(update: dict, schema: dict, current_state: dict) -> t
                 continue
 
         if key.endswith("_delta") and key != "reward_points_delta":
-            if not app_module._is_numeric_value(value):
+            if not _is_numeric_value(value):
                 violations.append({"key": key, "rule": "delta_non_numeric", "value": value, "action": "drop"})
                 continue
 
@@ -700,8 +701,8 @@ def _extract_tags_async(
                             event_id = existing.get("id")
                             if (
                                 isinstance(event_id, int)
-                                and app_module._EVENT_STATUS_ORDER.get(new_status, -1)
-                                > app_module._EVENT_STATUS_ORDER.get(old_status, -1)
+                                and _EVENT_STATUS_ORDER.get(new_status, -1)
+                                > _EVENT_STATUS_ORDER.get(old_status, -1)
                             ):
                                 app_module.update_event_status(story_id, event_id, new_status)
                                 existing_title_map[title]["status"] = new_status

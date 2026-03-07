@@ -52,7 +52,10 @@ def api_init():
     parsed_path = app_module._story_parsed_path(story_id)
     if not os.path.exists(parsed_path):
         if os.path.exists(app_module.CONVERSATION_PATH):
-            app_module.save_parsed()
+            app_module.save_parsed(
+                app_module.parse_conversation(os.fspath(app_module.CONVERSATION_PATH)),
+                output=os.fspath(app_module.LEGACY_PARSED_PATH),
+            )
             if os.path.exists(app_module.LEGACY_PARSED_PATH):
                 shutil.copy2(app_module.LEGACY_PARSED_PATH, parsed_path)
         else:
