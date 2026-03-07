@@ -34,3 +34,42 @@ Typical baseline:
 pytest tests/test_api_routes.py
 pytest tests/test_state_update.py tests/test_extract_tags_async.py
 ```
+
+For larger backend refactors or import/layout changes, run:
+
+```bash
+pytest
+```
+
+## Current Layout
+
+- `app.py`
+  - Flask bootstrap / import surface for routes and tests.
+  - Keep `python app.py` working.
+- `story_core/`
+  - Main internal backend package.
+  - Most former root-level Python modules now live here (`llm_bridge`, `state_db`, `prompts`, `story_io`, etc.).
+- `auto_play.py`
+  - Thin CLI compatibility wrapper.
+  - Real implementation lives in `story_core/auto_play.py`.
+- `routes/`
+  - Flask blueprints only; shared logic should usually live in `story_core/`.
+- `static/`
+  - Frontend JS/CSS.
+- `scripts/`
+  - Operational utilities grouped by domain:
+    - `scripts/backfill/`
+    - `scripts/deploy/`
+    - `scripts/dev/`
+    - `scripts/lore/`
+    - `scripts/migrations/`
+    - `scripts/state/`
+
+## Navigation Notes
+
+- If you are looking for backend implementation, start in `story_core/` before assuming logic is still in repo root.
+- Preserve stable entrypoints and operator workflows:
+  - `python app.py`
+  - `python auto_play.py`
+- New reusable backend modules should generally go under `story_core/`, not the repo root.
+- New utility scripts should generally go under the appropriate `scripts/<domain>/` directory.
