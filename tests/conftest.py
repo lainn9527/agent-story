@@ -132,6 +132,7 @@ SAMPLE_NPCS = [
 def _patch_paths_all_modules(monkeypatch, tmp_path, stories_dir, design_dir, app_module=None):
     """Patch shared path constants across app and extracted helper modules."""
     import app as imported_app_module
+    import app_helpers
     import event_db
     import lore_db
     import state_db
@@ -147,7 +148,7 @@ def _patch_paths_all_modules(monkeypatch, tmp_path, stories_dir, design_dir, app
         ("STORIES_REGISTRY_PATH", str(data_dir / "stories.json")),
         ("_LLM_CONFIG_PATH", str(tmp_path / "llm_config.json")),
     )
-    for mod in (app_target, story_io, event_db, lore_db, state_db):
+    for mod in (app_target, app_helpers, story_io, event_db, lore_db, state_db):
         for attr, value in patches:
             if hasattr(mod, attr):
                 monkeypatch.setattr(mod, attr, value)
