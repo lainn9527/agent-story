@@ -5,6 +5,16 @@ import re
 import unicodedata
 
 from story_core.npc_lifecycle import parse_npc_lifecycle_status
+from story_core.dungeon_return_memory import (
+    NPC_ARCHIVE_KIND_OFFSTAGE,
+    NPC_HOME_SCOPE_DUNGEON_LOCAL,
+    NPC_RETURN_RECALL_ELIGIBLE,
+    NPC_RETURN_RECALL_UNKNOWN,
+    apply_npc_provenance_defaults,
+    canonicalize_dungeon_name,
+    normalize_npc_home_scope,
+    normalize_npc_return_recall_state,
+)
 from story_core.state_db import (
     build_npc_content as build_state_npc_content,
     replace_categories_batch as replace_state_categories_batch,
@@ -319,6 +329,7 @@ def _save_npc(
     origin_dungeon_id: str | None = None,
     origin_run_id: str | None = None,
     archive_kind: str | None = None,
+    msg_index: int | None = None,
 ):
     """Save or update an NPC entry. Matches by 'name' field."""
     npcs = _load_npcs(story_id, branch_id, include_archived=True)
@@ -346,6 +357,13 @@ def _save_npc(
             existing_index = i
             existing_npc = existing
             break
+
+    npc_data = apply_npc_provenance_defaults(story_id, branch_id, npc_data, existing_npc)
+    if msg_index is not None:
+        try:
+            npc_data["last_seen_msg_index"] = int(msg_index)
+        except (TypeError, ValueError):
+            pass
 
     existing_origin_dungeon_id = str((existing_npc or {}).get("origin_dungeon_id") or "").strip()
     existing_origin_run_id = str((existing_npc or {}).get("origin_run_id") or "").strip()
@@ -407,7 +425,33 @@ def _save_npc(
             npc_data["archive_kind"] = None
 
     reactivated = False
+    state = _load_json(_story_character_state_path(story_id, branch_id), {})
+    current_dungeon = canonicalize_dungeon_name(story_id, state.get("current_dungeon"))
+    existing_home_scope = normalize_npc_home_scope(
+        (existing_npc or {}).get("home_scope") if existing_npc else None
+    )
+    existing_home_dungeon = canonicalize_dungeon_name(
+        story_id,
+        (existing_npc or {}).get("home_dungeon") if existing_npc else None,
+    )
+    existing_recall_state = normalize_npc_return_recall_state(
+        (existing_npc or {}).get("return_recall_state") if existing_npc else None
+    )
     if (
+        existing_npc
+        and existing_lifecycle == "archived"
+        and existing_archive_kind == _NPC_ARCHIVE_KIND_OFFSTAGE
+        and not incoming_archive_requested
+        and existing_home_scope == NPC_HOME_SCOPE_DUNGEON_LOCAL
+        and existing_home_dungeon
+        and existing_home_dungeon == current_dungeon
+        and existing_recall_state == NPC_RETURN_RECALL_ELIGIBLE
+    ):
+        npc_data["lifecycle_status"] = "active"
+        npc_data["archive_kind"] = None
+        npc_data["archived_reason"] = None
+        reactivated = True
+    elif (
         existing_npc
         and existing_lifecycle == "archived"
         and existing_archive_kind == _NPC_ARCHIVE_KIND_OFFSTAGE
@@ -423,6 +467,9 @@ def _save_npc(
         reactivated = True
     if reactivated and "current_status" not in npc_data:
         npc_data["current_status"] = ""
+
+    if reactivated:
+        npc_data["return_recall_state"] = NPC_RETURN_RECALL_UNKNOWN
 
     if "id" not in npc_data:
         if existing_npc and existing_npc.get("id"):

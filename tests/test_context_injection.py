@@ -586,3 +586,81 @@ class TestTierReminderInjection:
         state = {"current_phase": "副本中", "relationships": {"阿豪": "信任"}}
         text, _ = app_module._build_augmented_message(story_id, "main", "我要進攻", state)
         assert "[戰力等級提醒]" not in text
+
+
+@mock.patch("app.search_relevant_lore", return_value="")
+@mock.patch("app.format_sticky_events", return_value="[長期關鍵事件]\n- 神王追索")
+@mock.patch("app.search_relevant_events", return_value="")
+@mock.patch("app.get_recent_activities", return_value="")
+@mock.patch("app.is_gm_command", return_value=False)
+@mock.patch("app.get_fate_mode", return_value=False)
+def test_dungeon_return_recall_injected_once_before_sticky_events_top_level(
+    _mock_fate,
+    _mock_gm,
+    _mock_act,
+    _mock_evt,
+    _mock_sticky,
+    _mock_lore,
+    story_id,
+    setup_story,
+):
+    branch_dir = setup_story / "branches" / "main"
+    (branch_dir / "character_state.json").write_text(
+        json.dumps(
+            {
+                "name": "測試者",
+                "current_phase": "副本中",
+                "current_dungeon": "火影忍者",
+                "relationships": {"阿豪": "老戰友"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (branch_dir / "npcs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "name": "阿豪",
+                    "role": "隊友",
+                    "lifecycle_status": "archived",
+                    "archive_kind": "offstage",
+                    "archived_reason": "已離隊",
+                    "home_scope": "dungeon_local",
+                    "home_dungeon": "火影忍者",
+                    "return_recall_state": "eligible",
+                    "last_seen_msg_index": 12,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (branch_dir / "dungeon_return_memory.json").write_text(
+        json.dumps(
+            {
+                "visited_dungeons": ["火影忍者"],
+                "pending_reentry_dungeon": "火影忍者",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    first_text, _ = app_module._build_augmented_message(
+        story_id,
+        "main",
+        "我重新走進木葉村",
+        {"current_phase": "副本中", "current_dungeon": "火影忍者", "relationships": {"阿豪": "老戰友"}},
+    )
+    assert "[舊副本關聯角色提醒]" in first_text
+    assert "阿豪" in first_text
+    assert first_text.index("[舊副本關聯角色提醒]") < first_text.index("[長期關鍵事件]")
+
+    second_text, _ = app_module._build_augmented_message(
+        story_id,
+        "main",
+        "我繼續前進",
+        {"current_phase": "副本中", "current_dungeon": "火影忍者", "relationships": {"阿豪": "老戰友"}},
+    )
+    assert "[舊副本關聯角色提醒]" not in second_text

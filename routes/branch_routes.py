@@ -77,6 +77,13 @@ def api_branches_create():
     app_module.copy_events_for_fork(story_id, source_branch_id, branch_id, branch_point_index)
     app_module._copy_gm_plan(story_id, source_branch_id, branch_id, branch_point_index=branch_point_index)
     app_module.copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    app_module.save_dungeon_return_memory_for_fork(
+        story_id,
+        source_branch_id,
+        branch_id,
+        branch_point_index,
+        fallback_state=forked_state,
+    )
     app_module._save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
@@ -114,6 +121,7 @@ def api_branches_blank():
     app_module._save_json(app_module._story_npcs_path(story_id, branch_id), blank_npcs)
     app_module.rebuild_state_db_from_json(story_id, branch_id, state=blank_state, npcs=blank_npcs)
     app_module._save_branch_messages(story_id, branch_id, [])
+    app_module.init_dungeon_return_memory(story_id, branch_id)
 
     from story_core.dungeon_system import _save_dungeon_progress
 
@@ -387,6 +395,7 @@ def api_branches_merge():
     app_module.merge_events_into(story_id, branch_id, parent_id)
     app_module._copy_gm_plan(story_id, branch_id, parent_id, branch_point_index=None)
     app_module.copy_dungeon_progress(story_id, branch_id, parent_id)
+    app_module.copy_dungeon_return_memory(story_id, branch_id, parent_id)
 
     for bid, branch in branches.items():
         if branch.get("parent_branch_id") == branch_id:
@@ -544,6 +553,13 @@ def api_branches_edit():
         story_id, source_branch_id, branch_id, branch_point_index=branch_point_index
     )
     app_module.copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    app_module.save_dungeon_return_memory_for_fork(
+        story_id,
+        source_branch_id,
+        branch_id,
+        branch_point_index,
+        fallback_state=forked_state,
+    )
     app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -740,6 +756,13 @@ def api_branches_edit_stream():
         story_id, source_branch_id, branch_id, branch_point_index=branch_point_index
     )
     app_module.copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    app_module.save_dungeon_return_memory_for_fork(
+        story_id,
+        source_branch_id,
+        branch_id,
+        branch_point_index,
+        fallback_state=forked_state,
+    )
     app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
@@ -945,6 +968,13 @@ def api_branches_regenerate():
         story_id, source_branch_id, branch_id, branch_point_index=branch_point_index
     )
     app_module.copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    app_module.save_dungeon_return_memory_for_fork(
+        story_id,
+        source_branch_id,
+        branch_id,
+        branch_point_index,
+        fallback_state=forked_state,
+    )
     app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
 
     app_module._save_branch_messages(story_id, branch_id, [])
@@ -1122,6 +1152,13 @@ def api_branches_regenerate_stream():
         story_id, source_branch_id, branch_id, branch_point_index=branch_point_index
     )
     app_module.copy_dungeon_progress(story_id, parent_branch_id, branch_id)
+    app_module.save_dungeon_return_memory_for_fork(
+        story_id,
+        source_branch_id,
+        branch_id,
+        branch_point_index,
+        fallback_state=forked_state,
+    )
     app_module._save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {

@@ -189,7 +189,46 @@
 - `_load_npcs()` 預設只回 active；需要全量時用 `include_archived=True`。
 - state.db 對 archived NPC 會打 `NPC|ARCHIVED` tag；`search_state` 預設過濾，只有 forced key（玩家明確提名）才保留。
 
-### 7.6 GM hidden plan（敘事前瞻）
+### 7.6 舊副本角色召回（Dungeon Return Recall）
+
+- 每分支新增 `branches/<bid>/dungeon_return_memory.json`
+  - `visited_dungeons`: 依首次拜訪順序去重
+  - `pending_reentry_dungeon`: 一次性 recall hint
+- 權威訊號是 `character_state.current_dungeon` 的轉換；`dungeon_progress` 不是前提。
+- 轉場入口分兩類：
+  - 顯式 route：`/api/dungeon/enter`、`/api/dungeon/return`
+  - 敘事路徑：`_apply_state_update()` / cleanup / normalize 後的 `reconcile_dungeon_entry()`、`reconcile_dungeon_exit()`
+- 規則：
+  - 首次進入某副本：只把它加入 `visited_dungeons`
+  - 再次進入已拜訪副本：設 `pending_reentry_dungeon = current_dungeon`
+  - `A -> B` 直接切換時，先處理離開 `A` 的 NPC provenance / recall policy，再處理進入 `B`
+- prompt 注入：
+  - `_build_augmented_message()` 會在 branch lore 後、sticky events 前插入 `[舊副本關聯角色提醒]`
+  - 候選固定為 `home_scope=dungeon_local`、`home_dungeon=current_dungeon`、`archived+offstage+eligible`
+  - 最多 4 名，約 350 chars
+  - 第一次嘗試注入後就清掉 pending，避免每回合重複提醒
+- NPC provenance 欄位：
+  - `home_scope`: `dungeon_local | main_god_space | cross_dungeon`
+  - `home_dungeon`: 副本顯示名稱
+  - `return_recall_state`: `eligible | excluded_carried_out | excluded_converted | excluded_terminal | unknown`
+  - `last_seen_msg_index`: 最近一次被 GM 寫到的訊息索引
+- 離開副本時：
+  - `archived + offstage + dungeon_local` => `eligible`
+  - 明確被帶出副本的隊友 => `home_scope=cross_dungeon`、`excluded_carried_out`
+  - 召喚物/素材/封印/武裝化 => `excluded_converted`
+  - terminal 退場 => `excluded_terminal`
+- reactivation：
+  - 若既有 NPC 是 `archived + offstage + eligible`
+  - 且角色目前回到 `home_dungeon`
+  - 且新的 NPC update 沒再要求 archived
+  - 則 `_save_npc()` 會自動翻回 active
+- branch 行為：
+  - fork / edit / regenerate：不能盲 copy recall file，必須依 source timeline 到 branch point 重建
+  - blank branch：初始化空 recall file
+  - merge：child recall file 直接覆蓋 parent
+  - promote / switch：不做額外 copy，沿用原 branch recall file
+
+### 7.7 GM hidden plan（敘事前瞻）
 
 - 每分支可有 `branches/<bid>/gm_plan.json`（玩家不可見）。
 - 來源：`_extract_tags_async()` 的 `plan` 擷取結果（LLM 根據 GM 回覆重寫）。
@@ -208,6 +247,7 @@
 - 新分支會繼承：
   - 對應 index 的 state/NPC/world_day snapshot
   - recap、cheat、branch lore、events、dungeon progress、gm plan（若 `plan.updated_at_index <= branch_point_index`）
+  - `dungeon_return_memory.json` 會依 source timeline 截到 `branch_point_index` 重建，避免未來拜訪過的副本洩漏到子分支
 
 ### 8.2 Promote
 
@@ -220,6 +260,7 @@
 
 - 子分支訊息覆寫回父分支（從 branch point 之後）
 - 複製 state/NPC/recap/world_day/cheats/dungeon progress
+- 複製 child 的 `dungeon_return_memory.json`
 - 合併 child events 回 parent：新標題直接新增；同標題時以 child 的 status 覆蓋 parent
 - child 的 `gm_plan.json` 會覆寫 parent，並以 parent 的 active events 重新 relink `must_payoff.event_id`
 - 子分支標記為 `merged`

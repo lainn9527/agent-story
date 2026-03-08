@@ -17,6 +17,8 @@ import copy
 from datetime import datetime, timezone
 from typing import Optional
 
+from story_core.dungeon_return_memory import handle_dungeon_return_transition
+
 log = logging.getLogger(__name__)
 
 # Thread-safe locks per story
@@ -295,6 +297,15 @@ def reconcile_dungeon_entry(story_id: str, branch_id: str, old_state: dict, new_
     if not new_dungeon or new_dungeon == old_dungeon:
         return
 
+    if not old_dungeon:
+        handle_dungeon_return_transition(
+            story_id,
+            branch_id,
+            old_state,
+            new_state,
+            mode="enter",
+        )
+
     progress = _load_dungeon_progress(story_id, branch_id)
     if progress and progress.get("current_dungeon"):
         return
@@ -321,6 +332,15 @@ def reconcile_dungeon_exit(story_id: str, branch_id: str, old_state: dict, new_s
     new_dungeon = _current_dungeon_name(new_state)
     if old_dungeon == new_dungeon:
         return
+
+    if old_dungeon:
+        handle_dungeon_return_transition(
+            story_id,
+            branch_id,
+            old_state,
+            new_state,
+            mode="exit",
+        )
 
     if old_dungeon:
         progress = _load_dungeon_progress(story_id, branch_id)

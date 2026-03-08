@@ -11,8 +11,10 @@ import os
 import pytest
 
 import app as app_module
+from story_core import dungeon_system
 from story_core import event_db
 from story_core import lore_db
+from story_core import state_cleanup
 from story_core import state_db
 from story_core import story_io
 
@@ -253,6 +255,64 @@ class TestBranchesAPI:
         assert branch["branch_point_index"] == -1
         state_db_path = setup_story / "branches" / branch["id"] / "state.db"
         assert state_db_path.exists()
+        recall_path = setup_story / "branches" / branch["id"] / "dungeon_return_memory.json"
+        assert recall_path.exists()
+        assert json.loads(recall_path.read_text(encoding="utf-8")) == {
+            "visited_dungeons": [],
+            "pending_reentry_dungeon": None,
+        }
+
+    def test_create_branch_rebuilds_dungeon_return_memory_from_branch_point(self, client, setup_story):
+        design_dir = setup_story.parent.parent.parent / "story_design" / "test_story"
+        (design_dir / "parsed_conversation.json").write_text(
+            json.dumps(
+                [
+                    {"index": 0, "role": "user", "content": "起始"},
+                    {
+                        "index": 1,
+                        "role": "assistant",
+                        "content": "第一次進入木葉",
+                        "state_snapshot": {"current_dungeon": "火影忍者"},
+                    },
+                    {"index": 2, "role": "user", "content": "我前進"},
+                    {
+                        "index": 3,
+                        "role": "assistant",
+                        "content": "離開木葉",
+                        "state_snapshot": {"current_dungeon": ""},
+                    },
+                    {"index": 4, "role": "user", "content": "往後走"},
+                    {
+                        "index": 5,
+                        "role": "assistant",
+                        "content": "未來才會進異形",
+                        "state_snapshot": {"current_dungeon": "異形"},
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        main_recall_path = setup_story / "branches" / "main" / "dungeon_return_memory.json"
+        main_recall_path.write_text(
+            json.dumps(
+                {
+                    "visited_dungeons": ["火影忍者", "異形"],
+                    "pending_reentry_dungeon": "異形",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        resp = client.post("/api/branches", json={"name": "記憶分支", "branch_point_index": 3})
+        assert resp.status_code == 200
+        branch_id = resp.get_json()["branch"]["id"]
+        recall = json.loads(
+            (setup_story / "branches" / branch_id / "dungeon_return_memory.json").read_text(encoding="utf-8")
+        )
+        assert recall["visited_dungeons"] == ["火影忍者"]
+        assert recall["pending_reentry_dungeon"] is None
 
     def test_create_branch_copies_events_before_branch_point(self, client, setup_story, story_id):
         event_db.insert_event(story_id, {
@@ -757,6 +817,93 @@ class TestBranchesAPI:
         assert merge_resp.status_code == 200
         assert merge_resp.get_json()["ok"] is True
         assert not main_plan_path.exists()
+
+    def test_merge_branch_overwrites_parent_dungeon_return_memory(self, client, setup_story):
+        main_recall_path = setup_story / "branches" / "main" / "dungeon_return_memory.json"
+        main_recall_path.write_text(
+            json.dumps({"visited_dungeons": ["咒怨"], "pending_reentry_dungeon": None}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        resp = client.post("/api/branches", json={"name": "合併記憶分支", "branch_point_index": 1})
+        assert resp.status_code == 200
+        child_id = resp.get_json()["branch"]["id"]
+
+        child_recall_path = setup_story / "branches" / child_id / "dungeon_return_memory.json"
+        child_recall_path.write_text(
+            json.dumps(
+                {"visited_dungeons": ["火影忍者"], "pending_reentry_dungeon": "火影忍者"},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        merge_resp = client.post("/api/branches/merge", json={"branch_id": child_id})
+        assert merge_resp.status_code == 200
+        merged = json.loads(main_recall_path.read_text(encoding="utf-8"))
+        assert merged == {
+            "visited_dungeons": ["火影忍者"],
+            "pending_reentry_dungeon": "火影忍者",
+        }
+
+
+class TestDungeonAPI:
+    def test_dungeon_enter_and_return_track_reentry_memory(self, client, setup_story, monkeypatch):
+        story_dir = setup_story
+        monkeypatch.setattr(dungeon_system, "_story_dir", lambda story_id: str(story_dir))
+        monkeypatch.setattr(
+            dungeon_system,
+            "_branch_dir",
+            lambda story_id, branch_id: str(story_dir / "branches" / branch_id),
+        )
+        (story_dir / "dungeons_template.json").write_text(
+            json.dumps(
+                {
+                    "dungeons": [
+                        {
+                            "id": "naruto",
+                            "name": "火影忍者",
+                            "difficulty": "C",
+                            "mainline": {"nodes": [{"id": "node_1", "title": "進入木葉"}]},
+                            "areas": [{"id": "gate", "name": "木葉大門", "initial_status": "discovered"}],
+                            "progression_rules": {
+                                "rank_progress": 0.5,
+                                "gene_lock_gain": 10,
+                                "gene_lock_stage_cap": "第一階 50%",
+                                "base_reward": 1000,
+                                "mainline_multiplier": 1.5,
+                                "exploration_multiplier": 1.2,
+                                "difficulty_scaling": {"E": 1.0, "D": 1.0},
+                            },
+                            "prerequisites": {"min_rank": "E"},
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(state_cleanup, "run_state_cleanup_async", lambda *args, **kwargs: None)
+
+        enter_resp = client.post("/api/dungeon/enter", json={"branch_id": "main", "dungeon_id": "naruto"})
+        assert enter_resp.status_code == 200
+        recall_path = setup_story / "branches" / "main" / "dungeon_return_memory.json"
+        recall = json.loads(recall_path.read_text(encoding="utf-8"))
+        assert recall["visited_dungeons"] == ["火影忍者"]
+        assert recall["pending_reentry_dungeon"] is None
+
+        progress_path = setup_story / "branches" / "main" / "dungeon_progress.json"
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        progress["current_dungeon"]["mainline_progress"] = 100
+        progress_path.write_text(json.dumps(progress, ensure_ascii=False), encoding="utf-8")
+
+        leave_resp = client.post("/api/dungeon/return", json={"branch_id": "main"})
+        assert leave_resp.status_code == 200
+
+        enter_again_resp = client.post("/api/dungeon/enter", json={"branch_id": "main", "dungeon_id": "naruto"})
+        assert enter_again_resp.status_code == 200
+        recall = json.loads(recall_path.read_text(encoding="utf-8"))
+        assert recall["visited_dungeons"] == ["火影忍者"]
+        assert recall["pending_reentry_dungeon"] == "火影忍者"
 
     def test_edit_no_change_rejected(self, client, setup_story):
         """Editing a message with identical content should return 400."""
