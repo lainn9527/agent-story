@@ -626,6 +626,30 @@ INITIAL_STATE_WITH_SYSTEMS = {
     "systems": {"死生之道": "B級（具備空間掌控力）"},
 }
 
+SCHEMA_FOR_ASYNC_GUARD = {
+    "fields": [
+        {"key": "current_status", "label": "狀態", "type": "text"},
+        {"key": "base_power_level", "label": "基礎戰力", "type": "text"},
+        {"key": "gene_lock", "label": "基因鎖", "type": "text"},
+        {"key": "current_dungeon", "label": "所在副本", "type": "text"},
+        {"key": "systems", "label": "體系", "type": "map"},
+    ],
+    "lists": [
+        {
+            "key": "abilities",
+            "label": "技能",
+            "state_add_key": "abilities_add",
+            "state_remove_key": "abilities_remove",
+        },
+    ],
+    "direct_overwrite_keys": [
+        "current_status",
+        "base_power_level",
+        "gene_lock",
+        "current_dungeon",
+    ],
+}
+
 
 class TestFieldsMapType:
     """schema.fields entries with type=map should be deep-merged like schema.lists map entries."""
@@ -946,3 +970,77 @@ class TestStateOpsTranslation:
             INITIAL_STATE,
         )
         assert update["reward_points_delta"] == -300
+
+
+class TestAsyncStateCanonicalization:
+    def test_state_ops_filters_temporary_system_upgrade(self):
+        update, dropped, source = app_module._canonicalize_async_state_payload(
+            {
+                "state_ops": {
+                    "map_upsert": {
+                        "systems": {
+                            "萬象召喚": "A級（位格暫時不穩）",
+                            "咒靈操術": "B級（穩定可常態使用）",
+                        },
+                    },
+                },
+            },
+            SCHEMA_FOR_ASYNC_GUARD,
+            {},
+        )
+
+        assert source == "state_ops"
+        assert update == {"systems": {"咒靈操術": "B級（穩定可常態使用）"}}
+        assert dropped == ["systems.萬象召喚"]
+
+    def test_legacy_state_cannot_bypass_guard(self):
+        update, dropped, source = app_module._canonicalize_async_state_payload(
+            {
+                "state": {
+                    "base_power_level": "A級邊緣",
+                    "gene_lock": "第二階（暫時突破）",
+                    "systems": {"門之鑰": "A級（強行跨入）"},
+                },
+            },
+            SCHEMA_FOR_ASYNC_GUARD,
+            {},
+        )
+
+        assert source == "state"
+        assert update == {}
+        assert dropped == ["systems.門之鑰", "base_power_level", "gene_lock"]
+
+    def test_filters_temporary_abilities_and_current_dungeon(self):
+        update, dropped, source = app_module._canonicalize_async_state_payload(
+            {
+                "state": {
+                    "current_dungeon": "咒怨",
+                    "abilities_add": ["時空回聲·爆發版", "靈視·微觀解析"],
+                },
+            },
+            SCHEMA_FOR_ASYNC_GUARD,
+            {},
+        )
+
+        assert source == "state"
+        assert update == {"abilities_add": ["靈視·微觀解析"]}
+        assert dropped == ["current_dungeon", "abilities_add:時空回聲·爆發版"]
+
+    def test_keeps_stable_upgrade_and_ignores_other_fields_with_marker_words(self):
+        update, dropped, source = app_module._canonicalize_async_state_payload(
+            {
+                "state": {
+                    "current_status": "精神波動但已穩住",
+                    "systems": {"萬象召喚": "A級（已穩定，可常態使用）"},
+                },
+            },
+            SCHEMA_FOR_ASYNC_GUARD,
+            {},
+        )
+
+        assert source == "state"
+        assert update == {
+            "current_status": "精神波動但已穩住",
+            "systems": {"萬象召喚": "A級（已穩定，可常態使用）"},
+        }
+        assert dropped == []

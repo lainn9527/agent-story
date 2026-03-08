@@ -2,6 +2,7 @@
 
 import copy
 import logging
+import threading
 
 from story_core.character_state import _load_character_schema, _load_character_state
 from story_core.dungeon_system import reconcile_dungeon_entry, reconcile_dungeon_exit, validate_dungeon_progression
@@ -16,6 +17,39 @@ from story_core.story_io import _save_json, _story_character_state_path
 from story_core.tag_extraction import _NORMALIZE_DASHES_RE, _NORMALIZE_DOTS_RE, _extract_item_base_name
 
 log = logging.getLogger("rpg")
+
+_character_state_locks: dict[str, threading.RLock] = {}
+_character_state_locks_lock = threading.Lock()
+
+_ASYNC_STATE_TEMP_MARKERS = (
+    "暫時",
+    "邊緣",
+    "觸及",
+    "強行",
+    "超限",
+    "過載",
+    "催化",
+    "不穩",
+    "波動",
+)
+_ASYNC_ABILITY_TEMP_MARKERS = _ASYNC_STATE_TEMP_MARKERS + (
+    "爆發版",
+    "感悟版",
+)
+
+
+def _get_character_state_lock(story_id: str, branch_id: str) -> threading.RLock:
+    key = f"{story_id}/{branch_id}"
+    with _character_state_locks_lock:
+        if key not in _character_state_locks:
+            _character_state_locks[key] = threading.RLock()
+        return _character_state_locks[key]
+
+
+def _contains_async_state_marker(value: object, markers: tuple[str, ...]) -> bool:
+    if not isinstance(value, str):
+        return False
+    return any(marker in value for marker in markers)
 
 
 def _is_numeric_value(value: object) -> bool:
@@ -405,6 +439,93 @@ def _state_ops_to_update(state_ops: dict, schema: dict, current_state: dict | No
     return update
 
 
+def _get_ability_add_keys(schema: dict) -> set[str]:
+    keys: set[str] = set()
+    for list_def in schema.get("lists", []):
+        if list_def.get("key") != "abilities":
+            continue
+        keys.add(list_def.get("state_add_key") or "abilities_add")
+    if not keys:
+        keys.add("abilities_add")
+    return keys
+
+
+def _sanitize_async_state_update(update: dict, schema: dict) -> tuple[dict, list[str]]:
+    """Drop async-only transient promotions before writing canonical state."""
+    if not isinstance(update, dict):
+        return {}, []
+
+    sanitized = copy.deepcopy(update)
+    dropped: list[str] = []
+
+    systems = sanitized.get("systems")
+    if isinstance(systems, dict):
+        kept_systems = {}
+        for system_name, system_value in systems.items():
+            if system_value is None or not _contains_async_state_marker(system_value, _ASYNC_STATE_TEMP_MARKERS):
+                kept_systems[system_name] = system_value
+            else:
+                dropped.append(f"systems.{system_name}")
+        if kept_systems:
+            sanitized["systems"] = kept_systems
+        else:
+            sanitized.pop("systems", None)
+
+    for key in ("base_power_level", "gene_lock"):
+        if key in sanitized and _contains_async_state_marker(sanitized.get(key), _ASYNC_STATE_TEMP_MARKERS):
+            sanitized.pop(key, None)
+            dropped.append(key)
+
+    if "current_dungeon" in sanitized:
+        sanitized.pop("current_dungeon", None)
+        dropped.append("current_dungeon")
+
+    for add_key in _get_ability_add_keys(schema):
+        if add_key not in sanitized:
+            continue
+        raw_items = sanitized.get(add_key)
+        if isinstance(raw_items, str):
+            raw_items = [raw_items]
+        if not isinstance(raw_items, list):
+            continue
+        kept_items: list[str] = []
+        for item in raw_items:
+            if _contains_async_state_marker(item, _ASYNC_ABILITY_TEMP_MARKERS):
+                dropped.append(f"{add_key}:{item}")
+                continue
+            _append_unique_str(kept_items, item)
+        if kept_items:
+            sanitized[add_key] = kept_items
+        else:
+            sanitized.pop(add_key, None)
+
+    return sanitized, dropped
+
+
+def _canonicalize_async_state_payload(payload: dict, schema: dict, current_state: dict | None = None) -> tuple[dict, list[str], str | None]:
+    """Convert async extractor output to canonical update, then apply transient guard."""
+    if not isinstance(payload, dict):
+        return {}, [], None
+
+    source: str | None = None
+    candidate: dict = {}
+    raw_state_ops = payload.get("state_ops")
+    if isinstance(raw_state_ops, dict):
+        candidate = _state_ops_to_update(raw_state_ops, schema, current_state or {})
+        source = "state_ops"
+    else:
+        raw_state = payload.get("state")
+        if isinstance(raw_state, dict):
+            candidate = dict(raw_state)
+            source = "state"
+
+    if not candidate:
+        return {}, [], source
+
+    sanitized, dropped = _sanitize_async_state_update(candidate, schema)
+    return sanitized, dropped, source
+
+
 def _normalize_map_key(key: str) -> str:
     """Normalize a map key for fuzzy matching. Preserves semantics, normalizes characters."""
     value = key.replace(" ", "").replace("\u3000", "")
@@ -667,34 +788,36 @@ def _apply_state_update_inner(story_id: str, branch_id: str, update: dict, schem
 
 def _apply_state_update(story_id: str, branch_id: str, update: dict):
     """Apply a STATE update dict to the branch's character state file."""
-    schema = _load_character_schema(story_id)
-    current_state = _load_character_state(story_id, branch_id)
-    old_state = copy.deepcopy(current_state)
+    with _get_character_state_lock(story_id, branch_id):
+        schema = _load_character_schema(story_id)
+        current_state = _load_character_state(story_id, branch_id)
+        old_state = copy.deepcopy(current_state)
 
-    from story_core.gm_pipeline import _normalize_state_async, _run_state_gate
+        from story_core.gm_pipeline import _normalize_state_async, _run_state_gate
 
-    update = _run_state_gate(
-        update, schema, current_state,
-        label="state_gate", story_id=story_id, branch_id=branch_id,
-    )
+        update = _run_state_gate(
+            update, schema, current_state,
+            label="state_gate", story_id=story_id, branch_id=branch_id,
+        )
 
-    _apply_state_update_inner(story_id, branch_id, update, schema)
+        _apply_state_update_inner(story_id, branch_id, update, schema)
 
-    new_state = _load_character_state(story_id, branch_id)
-    reconcile_dungeon_entry(story_id, branch_id, old_state, new_state)
-    validate_dungeon_progression(story_id, branch_id, new_state, old_state)
-    reconcile_dungeon_exit(story_id, branch_id, old_state, new_state)
+        new_state = _load_character_state(story_id, branch_id)
+        reconcile_dungeon_entry(story_id, branch_id, old_state, new_state)
+        validate_dungeon_progression(story_id, branch_id, new_state, old_state)
+        reconcile_dungeon_exit(story_id, branch_id, old_state, new_state)
 
-    _save_json(_story_character_state_path(story_id, branch_id), new_state)
-    _sync_state_db_from_state(story_id, branch_id, new_state)
+        _save_json(_story_character_state_path(story_id, branch_id), new_state)
+        _sync_state_db_from_state(story_id, branch_id, new_state)
 
-    _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
+        _normalize_state_async(story_id, branch_id, update, _get_schema_known_keys(schema))
 
 
 __all__ = [
     "_is_numeric_value",
     "_SCENE_KEYS",
     "_INSTRUCTION_KEYS",
+    "_get_character_state_lock",
     "_get_schema_known_keys",
     "_EVENT_STATUS_ORDER",
     "_EVENT_STATUS_ALIASES",
@@ -703,6 +826,8 @@ __all__ = [
     "_apply_event_ops",
     "_append_unique_str",
     "_state_ops_to_update",
+    "_sanitize_async_state_update",
+    "_canonicalize_async_state_payload",
     "_normalize_map_key",
     "_resolve_map_keys",
     "_dedup_inventory_plain_vs_variant",

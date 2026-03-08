@@ -160,9 +160,24 @@
 
 特點：
 
-- 使用 `call_oneshot()` 解析剛產生的 GM 內容
-- 輸出 JSON（lore/events/plan/npcs/state/story_anchors/time/branch_title/dungeon）
+- 使用兩個並行的 `call_oneshot()` 解析剛產生的 GM 內容，但套用順序固定為序列化
 - 只在 GM 文本長度 >= 200 時啟動
+
+目前拆成兩條 async extractor：
+
+1. `non-state`
+   - 輸出：`lore / event_ops / events / plan / npcs / story_anchors / time / branch_title / dungeon`
+2. `state-only`
+   - 只輸出 `state_ops`（legacy `state` 僅作 defensive fallback）
+   - 只允許提取「本回合結束後仍然成立」的穩定角色狀態
+
+兩條 extractor 的推論可並行，但套用順序固定為：
+
+1. 先套 `non-state` 中不碰 `character_state.json` 的部分（lore / events / plan / npcs / time / branch_title / dungeon）
+2. 取得 per-branch character-state lock
+3. 套 `story_anchors`
+4. 套 `state-only`
+5. 釋放 lock
 
 ### 4.1 Prompt 內建 guardrails
 
@@ -175,8 +190,18 @@
 - plan 會注入「上一輪 gm_plan 摘要」讓模型可延續或重寫；`must_payoff` 會依 `event_title` relink 到當前分支 active events
 - NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
 - `_extract_tags_async()` 會在啟動時先抓當前副本 run context（`dungeon_id` + `entered_at`），並在 `_save_npc()` 時帶入，避免背景執行緒晚跑時吃到錯誤的副本來源
-- state 優先走 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove），fallback 才用 legacy `state`
-- async state / normalize / cleanup 若把 `current_dungeon` 寫進 canonical state，也會透過 reconciliation 自動補齊或歸檔 `dungeon_progress.json`
+- `state-only` 專門處理 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove），fallback 才接受 legacy `state`
+- `state-only` prompt 仍保留完整的 state 寫入 contract，而不是只講禁止事項：
+  - 明確定義 `state_ops` 的 `set / delta / map_upsert / map_remove / list_add / list_remove` 結構與範例
+  - 保留 `current_phase` 合法值、`completed_missions` 嚴格約束、`relationships` 心理狀態追蹤、inventory 清理原則、abilities 維護原則
+- `state-only` 明確禁止把一次性爆發、超限、邊緣觸及、位格不穩、外物催化等描述寫進永久 `systems / base_power_level / gene_lock`
+- `state-only` 的 canonical update 在套用前會再經過一次保守 guard：
+  - 只檢查 candidate value 本身，不掃整段 GM 文本
+  - 會丟棄帶有 `暫時 / 邊緣 / 觸及 / 強行 / 超限 / 過載 / 催化 / 不穩 / 波動` 等語義的 `systems.* / base_power_level / gene_lock`
+  - `abilities_add` 也會額外過濾 `爆發版 / 感悟版` 等一次性升階描述
+- `state-only` v1 不允許 async 更新 `current_dungeon`
+  - `current_dungeon` 仍由同步 `STATE` tag、`/api/dungeon/*`、既有 reconciliation 流程負責
+  - `dungeon` 抽取仍保留在 `non-state`，用來更新 `dungeon_progress.json`
 - time 有上限（單次最多 30 天）
 - dungeon 進度提取時會給 node id 對照
 

@@ -41,52 +41,53 @@ def _apply_story_anchor_ops(story_id: str, branch_id: str, raw_ops: object) -> t
     if not isinstance(raw_add, list) and not isinstance(raw_update, list) and not isinstance(raw_remove, list):
         return None
 
-    state = app_module._load_character_state(story_id, branch_id)
-    before = app_module._normalize_story_anchors(state.get("story_anchors", []))
-    anchors = list(before)
+    with app_module._get_character_state_lock(story_id, branch_id):
+        state = app_module._load_character_state(story_id, branch_id)
+        before = app_module._normalize_story_anchors(state.get("story_anchors", []))
+        anchors = list(before)
 
-    remove_set = set()
-    if isinstance(raw_remove, list):
-        for item in raw_remove:
-            text = _normalize_story_anchor_value(app_module, item)
-            if text:
-                remove_set.add(text)
-    if remove_set:
-        anchors = [anchor for anchor in anchors if anchor not in remove_set]
+        remove_set = set()
+        if isinstance(raw_remove, list):
+            for item in raw_remove:
+                text = _normalize_story_anchor_value(app_module, item)
+                if text:
+                    remove_set.add(text)
+        if remove_set:
+            anchors = [anchor for anchor in anchors if anchor not in remove_set]
 
-    replacements: dict[str, str] = {}
-    if isinstance(raw_update, list):
-        existing_anchor_set = set(anchors)
-        for item in raw_update:
-            if not isinstance(item, dict):
-                continue
-            old_text = _normalize_story_anchor_value(app_module, item.get("old"))
-            new_text = _normalize_story_anchor_value(app_module, item.get("new"))
-            if not old_text or not new_text or old_text == new_text:
-                continue
-            if old_text in existing_anchor_set:
-                replacements[old_text] = new_text
-    if replacements:
-        anchors = [replacements.get(anchor, anchor) for anchor in anchors]
+        replacements: dict[str, str] = {}
+        if isinstance(raw_update, list):
+            existing_anchor_set = set(anchors)
+            for item in raw_update:
+                if not isinstance(item, dict):
+                    continue
+                old_text = _normalize_story_anchor_value(app_module, item.get("old"))
+                new_text = _normalize_story_anchor_value(app_module, item.get("new"))
+                if not old_text or not new_text or old_text == new_text:
+                    continue
+                if old_text in existing_anchor_set:
+                    replacements[old_text] = new_text
+        if replacements:
+            anchors = [replacements.get(anchor, anchor) for anchor in anchors]
 
-    additions: list[str] = []
-    if isinstance(raw_add, list):
-        for item in raw_add:
-            text = _normalize_story_anchor_value(app_module, item)
-            if text:
-                additions.append(text)
+        additions: list[str] = []
+        if isinstance(raw_add, list):
+            for item in raw_add:
+                text = _normalize_story_anchor_value(app_module, item)
+                if text:
+                    additions.append(text)
 
-    after = app_module._normalize_story_anchors([*anchors, *additions])
-    if after == before:
-        return None
+        after = app_module._normalize_story_anchors([*anchors, *additions])
+        if after == before:
+            return None
 
-    state["story_anchors"] = after
-    app_module._save_json(app_module._story_character_state_path(story_id, branch_id), state)
-    log.info(
-        "    story_anchors: %s",
-        json.dumps({"before": before, "after": after}, ensure_ascii=False),
-    )
-    return before, after
+        state["story_anchors"] = after
+        app_module._save_json(app_module._story_character_state_path(story_id, branch_id), state)
+        log.info(
+            "    story_anchors: %s",
+            json.dumps({"before": before, "after": after}, ensure_ascii=False),
+        )
+        return before, after
 
 
 def _validate_state_update(update: dict, schema: dict, current_state: dict) -> tuple[dict, list[dict]]:
@@ -456,51 +457,30 @@ def _extract_tags_async(
         from story_core.event_db import get_event_title_map, get_event_titles
         from story_core.llm_bridge import call_oneshot
 
-        try:
-            toc = app_module.get_lore_toc(story_id)
-            branch_toc = app_module._get_branch_lore_toc(story_id, branch_id)
-            if branch_toc:
-                toc += "\n（分支設定）\n" + branch_toc
-            lore = app_module._load_lore(story_id)
-            branch_lore = app_module._load_branch_lore(story_id, branch_id)
-            topic_categories = {entry.get("topic", ""): entry.get("category", "") for entry in lore}
-            branch_topic_categories = {entry.get("topic", ""): entry.get("category", "") for entry in branch_lore}
-            all_topic_categories = {**topic_categories, **branch_topic_categories}
-            user_protected = {entry.get("topic", "") for entry in lore if entry.get("edited_by") == "user"}
-            existing_titles = get_event_titles(story_id, branch_id)
-            existing_title_map = get_event_title_map(story_id, branch_id)
-            active_events_text = app_module._build_active_events_hint(story_id, branch_id, limit=40)
-            previous_plan = app_module._load_gm_plan(story_id, branch_id)
-            previous_plan_text = app_module._summarize_gm_plan_for_prompt(previous_plan, current_index=msg_index)
-
-            schema = app_module._load_character_schema(story_id)
-            schema_lines = []
+        def _build_schema_summary(schema: dict) -> str:
+            lines = []
             for field in schema.get("fields", []):
                 if field.get("type") == "map":
-                    schema_lines.append(
+                    lines.append(
                         f"- {field['key']}（{field.get('label', '')}）: map，直接輸出 {{\"key\": \"value\"}} 覆蓋，null 表示移除"
                     )
                 else:
-                    schema_lines.append(f"- {field['key']}（{field.get('label', '')}）: {field.get('type', 'text')}")
+                    lines.append(f"- {field['key']}（{field.get('label', '')}）: {field.get('type', 'text')}")
             for list_def in schema.get("lists", []):
                 list_type = list_def.get("type", "list")
                 if list_type == "map":
-                    schema_lines.append(
+                    lines.append(
                         f"- {list_def['key']}（{list_def.get('label', '')}）: map，直接輸出 {{\"key\": \"value\"}} 覆蓋，null 表示移除"
                     )
                 else:
                     add_key = list_def.get("state_add_key", "")
                     remove_key = list_def.get("state_remove_key", "")
-                    schema_lines.append(
+                    lines.append(
                         f"- {list_def['key']}（{list_def.get('label', '')}）: list，新增用 {add_key}，移除用 {remove_key}"
                     )
-            schema_summary = "\n".join(schema_lines)
+            return "\n".join(lines)
 
-            state = app_module._load_character_state(story_id, branch_id)
-            existing_state_keys = ", ".join(sorted(state.keys()))
-            current_story_anchors = app_module._normalize_story_anchors(state.get("story_anchors", []))
-            story_anchors_text = "\n".join(f"- {anchor}" for anchor in current_story_anchors) if current_story_anchors else "（無）"
-
+        def _build_list_contents(schema: dict, state: dict) -> str:
             list_contents_lines = []
             for list_def in schema.get("lists", []):
                 list_type = list_def.get("type", "list")
@@ -517,46 +497,83 @@ def _extract_tags_async(
                         list_contents_lines.append(
                             f"{list_def.get('label', list_key)}：{json.dumps(items, ensure_ascii=False)}"
                         )
-            list_contents_str = "\n".join(list_contents_lines) if list_contents_lines else ""
+            return "\n".join(list_contents_lines) if list_contents_lines else "（無）"
 
+        def _build_dungeon_prompt(story_id: str, branch_id: str) -> str:
+            dungeon_progress = app_module._load_dungeon_progress(story_id, branch_id)
+            if not dungeon_progress or not dungeon_progress.get("current_dungeon"):
+                return ""
+            current = dungeon_progress["current_dungeon"]
+            template = app_module._load_dungeon_template(story_id, current["dungeon_id"])
+            if not template:
+                return ""
+            node_list = template["mainline"]["nodes"]
+            nodes_mapping = ", ".join([f"{node['id']}=「{node['title']}」" for node in node_list])
+            areas_str = ", ".join([area["id"] for area in template.get("areas", [])])
+            return (
+                f"## 8. 副本進度（dungeon）\n"
+                f"當前在副本【{template['name']}】中。分析 GM 文本中是否存在：\n"
+                f"- 主線劇情節點的完成（如「成功封印伽椰子」）\n"
+                f"- 新區域的發現或探索（如「進入二樓」、「深入地下室」）\n\n"
+                f"節點 ID 對照（依序）：{nodes_mapping}\n"
+                f"參考區域 ID：{areas_str}\n\n"
+                '格式：\n'
+                '{\n'
+                '  "mainline_progress_delta": 20,\n'
+                '  "completed_nodes": ["node_2"],\n'
+                '  "discovered_areas": ["umbrella_lab"],\n'
+                '  "explored_area_updates": {\n'
+                '    "umbrella_lab": 30\n'
+                '  }\n'
+                '}\n\n'
+                "**重要**：\n"
+                "- 如果沒有明顯的劇情節點完成，不要輸出 completed_nodes\n"
+                "- 如果沒有新區域發現，不要輸出 discovered_areas\n"
+                "- 保守估計進度，避免過度推進（GM 可能只是鋪墊，尚未真正完成目標）\n\n"
+            )
+
+        def _build_non_state_prompt(
+            gm_text: str,
+            toc: str,
+            active_events_text: str,
+            previous_plan_text: str,
+            story_anchors_text: str,
+            dungeon_prompt: str,
+        ) -> str:
             prompt = (
-                "你是一個 RPG 結構化資料擷取工具。分析以下 GM 回覆，提取結構化資訊。\n\n"
+                "你是一個 RPG 結構化資料擷取工具。分析以下 GM 回覆，提取非角色永久狀態的結構化資訊。\n\n"
                 f"## GM 回覆\n{gm_text}\n\n"
                 "## 1. 世界設定（lore）\n"
                 "提取**通用世界規則與設定**，這些設定要適用於任何角色、任何分支時間線。\n"
                 "**核心判斷標準：GM 在未來的其他場景中是否需要參考這條設定？** 只有「是」才提取。\n"
                 "✓ 適合提取：體系或副本的核心規則與運作機制、重要且可重複出現的地點（如總部、主要設施）、商城兌換項目\n"
-                "✗ 禁止提取：玩家或特定 NPC 專屬的獨有道具、一次性消耗品、個人技能與強化素材（如『空白的因果律之格』、『紅衣核心』等）。**這些屬於 `inventory` 或 `abilities` 的管轄範圍。Lore 僅保留所有輪迴者皆適用的「客觀世界規律、體系通用設定與常規商城販售物」。**"
-                "劇情事件的具體過程（交給 events 追蹤）、"
-                "角色的個人數值或進度（如「基因鎖進度15%」「獎勵點5740」）、"
-                "角色獲得/失去的具體道具、角色習得的功法與技能進度、角色的戰鬥過程與經歷、角色之間的互動劇情\n"
+                "✗ 禁止提取：玩家或特定 NPC 專屬的獨有道具、一次性消耗品、個人技能與強化素材。這些不屬於 lore。\n"
                 "**撰寫原則：**\n"
-                "- 用通用語氣（「輪迴者可以…」「該能力的效果是…」），**不要提及具體角色名**\n"
-                "- 如果已有設定中有密切相關的主題，**更新該條目**（使用完全相同的 topic 名稱）\n"
+                "- 用通用語氣（「輪迴者可以…」「該能力的效果是…」），不要提及具體角色名\n"
+                "- 如果已有設定中有密切相關的主題，更新該條目（使用完全相同的 topic 名稱）\n"
                 "- 每個條目只涵蓋一個具體概念，content 控制在 200-800 字\n"
                 f"已有設定（優先更新而非新建）：\n{toc}\n"
-                '格式：[{{"category": "分類", "subcategory": "子分類(選填)", "topic": "主題", "content": "完整描述"}}]\n'
+                '格式：[{"category": "分類", "subcategory": "子分類(選填)", "topic": "主題", "content": "完整描述"}]\n'
                 "可用分類：主神設定與規則/體系/商城/副本世界觀/道具/場景/NPC/故事追蹤\n"
-                "- 體系：必須填 subcategory。框架級概念用 subcategory 為體系名 + topic「介紹」（如 subcategory「基因鎖」topic「介紹」）；單一技能用 subcategory「技能」；基礎數值用 subcategory「基本屬性」\n"
-                "- 副本世界觀：必須填 subcategory 為副本名（如「生化危機」「咒怨」）\n"
+                "- 體系：必須填 subcategory。框架級概念用 subcategory 為體系名 + topic「介紹」；單一技能用 subcategory「技能」；基礎數值用 subcategory「基本屬性」\n"
+                "- 副本世界觀：必須填 subcategory 為副本名\n"
                 "- 道具：角色可使用的物品與裝備\n\n"
                 "## 2. 事件追蹤（events）\n"
                 "提取重要事件：伏筆、轉折、戰鬥、發現等。不要記錄瑣碎事件。\n"
                 "**【防幻覺絕對規則】：**\n"
-                "* **嚴禁僅因對話中「提及」、「討論」或「回憶」某事件就更改其狀態（例如提及「回歸現實」不代表該事件被 triggered）。**\n"
-                "* `triggered`（觸發）：必須是該事件在物理層面、劇情層面產生了**實質性的初步進展或變故**。\n"
-                "* `resolved`（解決）：必須是該事件的目標已徹底完成或因故徹底終結。\n"
+                "* 嚴禁僅因對話中「提及」、「討論」或「回憶」某事件就更改其狀態。\n"
+                "* `triggered` 必須是該事件在物理層面、劇情層面產生了實質性的初步進展或變故。\n"
+                "* `resolved` 必須是該事件的目標已徹底完成或因故徹底終結。\n"
                 "優先輸出 `event_ops`（用 id 更新，避免 title 漂移）：\n"
                 f"{active_events_text}\n"
-                "- `sticky` 只用於跨弧線 plot pressure：外部威脅/追索、未解契約/承諾、仍在影響劇情的長期伏筆。**身份事實不要放在 events，改放 story_anchors。**\n"
-                "- 大多數事件都不是 sticky；只有真正需要長期常駐提醒的事件才標 `sticky: true`\n"
-                "- update：已有事件狀態變化（如伏筆被觸發、事件被解決）時，輸出 id + status；若這個事件已成為長期劇情壓力，也可加 `sticky`\n"
-                "- create：只有真的新事件才建立（title 不要跟現有事件只差幾個字）；sticky 事件仍然必須是 plot pressure，不可和 story_anchors 重複\n"
+                "- `sticky` 只用於跨弧線 plot pressure；身份事實不要放在 events，改放 story_anchors。\n"
+                "- update：已有事件狀態變化時，輸出 id + status；若成為長期劇情壓力，也可加 `sticky`\n"
+                "- create：只有真的新事件才建立；sticky 事件不可和 story_anchors 重複\n"
                 'event_ops 格式：{"update": [{"id": 123, "status": "triggered", "sticky": true}], "create": [{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字", "sticky": true}]}\n'
                 "- 相容：若你無法使用 event id，才改用 legacy `events` 陣列格式。\n"
                 'legacy events 格式：[{"event_type": "類型", "title": "標題", "description": "描述", "status": "planted", "tags": "關鍵字", "sticky": true}]\n'
                 "可用類型：伏筆/轉折/遭遇/發現/戰鬥/獲得/觸發\n"
-                "可用狀態：planted/triggered/resolved/abandoned（可用同義詞如 ongoing/completed，系統會正規化）\n\n"
+                "可用狀態：planted/triggered/resolved/abandoned\n\n"
                 "## 3. GM 敘事計劃（plan）\n"
                 "提取 GM 回覆裡隱含的敘事走向，僅供後續 GM 生成時參考，不可透露給玩家。\n"
                 "上一輪 GM 計劃（供參考，可全部改寫）：\n"
@@ -573,151 +590,269 @@ def _extract_tags_async(
                 '- tier：戰力等級（D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+）。'
                 "只有在文本明確提及或可直接判定時才填，否則用 null，不要猜測。\n"
                 "- 若是已存在的 NPC 且本回合無法判定 tier，請省略 tier 欄位（不要輸出 null 覆蓋）。\n"
-                '格式：[{{"name": "名字", "role": "定位", "tier": "D-~S+ 或 null", "appearance": "外觀", '
-                '"personality": {{"openness": N, "conscientiousness": N, "extraversion": N, '
-                '"agreeableness": N, "neuroticism": N, "summary": "一句話"}}, "backstory": "背景"}}]\n\n'
-                "## 5. 角色狀態變化（state）\n"
-                f"Schema 告訴你角色有哪些欄位：\n{schema_summary}\n"
-                f"角色目前有這些欄位：{existing_state_keys}\n"
-                + (f"角色目前的列表內容（含人際關係）：\n{list_contents_str}\n" if list_contents_str else "")
-                + "\n規則：\n"
-                "- **map 型欄位**（道具欄、人際關係等）：直接輸出 map，同名 key 自動覆蓋\n"
-                "  - 道具欄：`inventory: {\"道具名\": \"狀態描述\"}`，進化/變化自動覆蓋同名道具\n"
-                "  - 移除道具：`inventory: {\"道具名\": null}`\n"
-                "  - 無狀態道具：`inventory: {\"道具名\": \"\"}`\n"
-                "- 列表型欄位用 `_add` / `_remove` 後綴（如 `abilities_add`, `abilities_remove`）\n"
-                "- 數值型欄位用 `_delta` 後綴（如 `reward_points_delta: -500`）\n"
-                "- 文字型欄位直接覆蓋（如 `gene_lock: \"第二階\"`），值要簡短（5-20字）\n"
-                "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
-                "- `current_dungeon`: 當前所在副本名稱（如「咒術迴戰」「民俗台灣」「鬼滅之刃」）。進入副本時設定，回到主神空間時設為空字串 \"\"。必須與世界設定中的副本分類名一致。\n"
-                "- **人際關係**：`relationships: {\"NPC名\": \"新關係描述\"}`。**對照上方的目前關係，如果 GM 文本顯示關係有變化（更親密、敵對、信任等），務必輸出更新**\n"
-                "- **體系等級**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），**必須輸出 systems 更新**，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）\n"
-                "- 可以新增**永久性角色屬性**（如學會新體系時加 `修真境界`, `法力` 等）\n"
-                '- 角色死亡時 `current_phase` 設為 `"死亡"`，`current_status` 設為 `"end"`\n'
-                "**【欄位嚴格寫入規則】：**\n"
-                "- **`completed_missions`（已完成任務）**：**絕對約束！** 僅限於主神明確發布並結算的「主線/支線任務」與「隱藏成就」。**嚴禁**將「獲得裝備」、「得知情報」、「抵達某地」或「日常行為」視為任務寫入此陣列。\n"
-                "- **`relationships`（人際關係與 NPC 狀態）**：不僅記錄好感度與敵友關係。當 GM 文本明確描寫 NPC 的**心理狀態或情緒發生重大轉折**（例如：對未來副本感到恐懼、對玩家產生依賴/警惕），**必須更新該 NPC 的關係描述**，以確保 NPC 具備記憶與情緒連貫性。\n"
-                "- **`systems`（體系等級）**：`systems: {\"體系名\": \"新等級\"}`。當 GM 文本顯示某體系升級（如 B→A、覺醒、突破等），必須輸出 systems 更新，格式為等級 + 新特徵（如 `\"死生之道\": \"A級（漩渦瞳·空間感知）\"`）。\n"
-                "- **禁止**新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options 等一次性描述）\n"
-                "\n**道具欄清理原則**（每次提取時都必須遵守）：\n"
-                "- **禁止寫入場景/戰鬥狀態**：「戰鬥中」「對峙中」「集結中」「盤旋中」「佔領中」「啟動中」「錄製中」「噴湧中」等臨時狀態不是道具，不要寫入 inventory。這些只是當前回合的敘事描述，下一回合就過時了。\n"
-                "- **已消耗/已使用的道具**：設為 null 移除（如 `\"榴彈\": null`）\n"
-                "- **已融合到角色/裝備的物品**：不再是獨立道具，設為 null 移除\n"
-                "- **召喚物/僕從**：只記錄召喚物的存在、等級和數量（如 `\"僕從軍團\": \"A級模板，約30單位\"`），不要為每個單位的部署狀態各開一條\n"
-                "- **隊友的基因鎖/能力狀態**：寫入 relationships，不要寫入 inventory\n"
-                "- **道具欄應保持精簡**：如果目前已超過 50 項，優先用 null 清理已消耗、已融合、過時的條目\n"
-                "\n**技能列表維護原則**：\n"
-                "- **技能升級時必須同時移除舊版本**：用 `abilities_remove` 移除被取代的技能，再用 `abilities_add` 加入新版本。例如「咒靈操術 (C級)」升級為「咒靈操術 (A級)」時，要同時 remove C級版本。\n"
-                "- **同一技能的不同描述只保留最新**：如「靈視」「靈視 (解析迷霧)」「靈視·微觀解析」只需保留最高階的一個。\n"
-                "- **已被體系（systems）涵蓋的技能不需重複列在 abilities**：如 systems 已有「咒靈操術: A級」，abilities 不需要再列「咒靈操術 (A級)」。\n"
-                "優先輸出 `state_ops`（結構化操作，避免覆蓋錯誤）：\n"
-                '{"set": {"current_phase": "副本中"}, "delta": {"reward_points": -500}, "map_upsert": {"inventory": {"封印之鏡": "裂痕"}}, "map_remove": {"inventory": ["一次性符"]}, "list_add": {"abilities": ["靈視·微觀解析"]}, "list_remove": {"abilities": ["靈視"]}}\n'
-                "- set：直接覆蓋欄位（null 表示不變，不是刪除）\n"
-                "- delta：數值增減（reward_points 建議用這個）\n"
-                "- map_upsert/map_remove：map 型欄位增修與刪除\n"
-                "- list_add/list_remove：list 型欄位增減\n"
-                "- 相容：若你無法輸出 state_ops，才輸出 legacy `state` 物件。\n"
-                "格式：state/state_ops 只填有變化的欄位。\n\n"
-                "## 6. 長期記憶（story_anchors）\n"
-                "提取角色/隊伍/故事的**身份層永久事實**。這些內容會常駐進 system prompt，必須非常保守。\n"
+                '格式：[{"name": "名字", "role": "定位", "tier": "D-~S+ 或 null", "appearance": "外觀", '
+                '"personality": {"openness": N, "conscientiousness": N, "extraversion": N, '
+                '"agreeableness": N, "neuroticism": N, "summary": "一句話"}, "backstory": "背景"}]\n\n'
+                "## 5. 長期記憶（story_anchors）\n"
+                "提取角色/隊伍/故事的身份層永久事實。這些內容會常駐進 system prompt，必須非常保守。\n"
                 "只允許 4 類：長期主線、核心隊伍關係、永久代價/不可逆變化、長期宿敵/契約/追索壓力。\n"
                 "不要把單純 plot pressure 放進 story_anchors；那種放到 sticky events。\n"
                 f"目前 story_anchors：\n{story_anchors_text}\n"
                 "規則：\n"
                 "- `add`：只加入 genuinely new 的跨弧線永久事實\n"
-                "- `update`：只有既有 anchor 被故事**明確推翻或明確升級**時才用，而且 old 必須和現有 anchor 完全一致\n"
-                "- `remove`：只有該事實被故事**明確否定**時才用，而且文字必須和現有 anchor 完全一致\n"
+                "- `update`：只有既有 anchor 被故事明確推翻或明確升級時才用，而且 old 必須和現有 anchor 完全一致\n"
+                "- `remove`：只有該事實被故事明確否定時才用，而且文字必須和現有 anchor 完全一致\n"
                 "- 大多數回合應該輸出空的 `story_anchors: {}`\n"
                 '格式：{"add": ["新 anchor"], "update": [{"old": "舊 anchor", "new": "新 anchor"}], "remove": ["舊 anchor"]}\n\n'
-                "## 7. 時間流逝（time）\n"
-                "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
-                "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
-                "- 隱含流逝參考：一場小戰鬥 → hours:1、大型戰役/Boss戰 → hours:3、探索建築/區域 → hours:2、長途移動/趕路 → hours:4、休息/過夜 → hours:8、訓練/修煉 → days:1\n"
-                "- 純對話/短暫互動/思考/角色創建/主神空間閒聊不需要輸出。只有場景中有實際行動推進才估算。\n"
-                '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
-                "## 8. 分支標題（branch_title）\n"
-                "用 4-8 個中文字總結這段 GM 回覆中**玩家的核心行動或場景轉折**。\n"
+            )
+            if not skip_time:
+                prompt += (
+                    "## 6. 時間流逝（time）\n"
+                    "估算這段敘事中經過了多少時間。包含明確跳躍和隱含的時間流逝。\n"
+                    "- 明確跳躍：「三天後」→ days:3、「那天深夜」→ hours:8、「半個月的苦練」→ days:15\n"
+                    "- 隱含流逝參考：一場小戰鬥 → hours:1、大型戰役/Boss戰 → hours:3、探索建築/區域 → hours:2、長途移動/趕路 → hours:4、休息/過夜 → hours:8、訓練/修煉 → days:1\n"
+                    "- 純對話/短暫互動/思考/角色創建/主神空間閒聊不需要輸出。只有場景中有實際行動推進才估算。\n"
+                    '格式：{"days": N} 或 {"hours": N}（只選一種，優先用 days）\n\n'
+                )
+            prompt += (
+                "## 7. 分支標題（branch_title）\n"
+                "用 4-8 個中文字總結這段 GM 回覆中玩家的核心行動或場景轉折。\n"
                 "例如：「七首殺屍測試」「巷道右側突圍」「自省之眼覺醒」「進入蜀山副本」「商城兌換裝備」\n"
                 "要求：動作導向、簡潔、不帶標點符號。\n"
                 '格式：字串\n\n'
             )
-
-            dungeon_progress = app_module._load_dungeon_progress(story_id, branch_id)
-            if dungeon_progress and dungeon_progress.get("current_dungeon"):
-                current = dungeon_progress["current_dungeon"]
-                template = app_module._load_dungeon_template(story_id, current["dungeon_id"])
-                if template:
-                    node_list = template["mainline"]["nodes"]
-                    nodes_mapping = ", ".join([f"{node['id']}=「{node['title']}」" for node in node_list])
-                    areas_str = ", ".join([area["id"] for area in template.get("areas", [])])
-                    prompt += (
-                        f"## 9. 副本進度（dungeon）\n"
-                        f"當前在副本【{template['name']}】中。分析 GM 文本中是否存在：\n"
-                        f"- 主線劇情節點的完成（如「成功封印伽椰子」）\n"
-                        f"- 新區域的發現或探索（如「進入二樓」、「深入地下室」）\n\n"
-                        f"節點 ID 對照（依序）：{nodes_mapping}\n"
-                        f"參考區域 ID：{areas_str}\n\n"
-                        '格式：\n'
-                        '{\n'
-                        '  "mainline_progress_delta": 20,\n'
-                        '  "completed_nodes": ["node_2"],\n'
-                        '  "discovered_areas": ["umbrella_lab"],\n'
-                        '  "explored_area_updates": {\n'
-                        '    "umbrella_lab": 30\n'
-                        '  }\n'
-                        '}\n\n'
-                        "**重要**：\n"
-                        "- 如果沒有明顯的劇情節點完成，不要輸出 completed_nodes\n"
-                        "- 如果沒有新區域發現，不要輸出 discovered_areas\n"
-                        "- 保守估計進度，避免過度推進（GM 可能只是鋪墊，尚未真正完成目標）\n\n"
-                    )
-
+            if dungeon_prompt:
+                prompt += dungeon_prompt
             prompt += (
                 "## 輸出\n"
                 "JSON 物件，只包含有內容的類型：\n"
-                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "plan": {...}, "npcs": [...], "state_ops": {...}, "state": {...}, "story_anchors": {"add": [...], "update": [...], "remove": [...]}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
+                '{"lore": [...], "event_ops": {"update": [...], "create": [...]}, "events": [...], "plan": {...}, "npcs": [...], "story_anchors": {"add": [...], "update": [...], "remove": [...]}, "time": {"days": N}, "branch_title": "...", "dungeon": {...}}\n'
                 "沒有新資訊的類型省略或用空陣列/空物件。只輸出 JSON。"
             )
+            return prompt
 
-            app_module._trace_llm(
-                stage="extract_tags_request",
-                story_id=story_id,
-                branch_id=branch_id,
-                message_index=msg_index,
-                source="_extract_tags_async",
-                payload={"gm_text": gm_text, "prompt": prompt, "skip_state": skip_state, "skip_time": skip_time},
-                tags={"mode": "oneshot"},
+        def _build_state_only_prompt(
+            gm_text: str,
+            schema_summary: str,
+            existing_state_keys: str,
+            current_state_core: str,
+            list_contents_str: str,
+        ) -> str:
+            return (
+                "你是一個 RPG 角色狀態抽取工具。你只負責提取「本回合結束後仍然成立」的穩定角色狀態。\n\n"
+                f"## GM 回覆\n{gm_text}\n\n"
+                "## 目前角色狀態\n"
+                f"Schema：\n{schema_summary}\n\n"
+                f"目前已有欄位：\n{existing_state_keys}\n\n"
+                f"目前核心狀態：\n{current_state_core}\n\n"
+                f"目前 map/list 內容：\n{list_contents_str}\n\n"
+                "## 核心原則\n"
+                "- 只提取本回合結束後仍然成立、下一回合仍應保留的穩定狀態。\n"
+                "- 不要把敘事中的高光演出、一次性爆發、暫時過載、戰鬥中的極限表現，寫進永久狀態。\n"
+                "- `systems`、`base_power_level`、`gene_lock` 是常態能力，不是單次戰鬥摘要。\n\n"
+                "## `state_ops` 寫法\n"
+                "- 優先輸出 `state_ops`（結構化操作，避免覆蓋錯誤）\n"
+                '{"set": {"current_phase": "副本中"}, "delta": {"reward_points": -500}, "map_upsert": {"inventory": {"封印之鏡": "裂痕"}}, "map_remove": {"inventory": ["一次性符"]}, "list_add": {"abilities": ["靈視·微觀解析"]}, "list_remove": {"abilities": ["靈視"]}}\n'
+                "- set：直接覆蓋欄位（null 表示不變，不是刪除）\n"
+                "- delta：數值增減（`reward_points` 建議用這個）\n"
+                "- map_upsert/map_remove：map 型欄位增修與刪除\n"
+                "- list_add/list_remove：list 型欄位增減\n"
+                "- 若你無法輸出 `state_ops`，才輸出 legacy `state` 物件\n"
+                "- `state/state_ops` 只填有變化的欄位\n\n"
+                "## 寫入規則\n"
+                "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
+                "- 角色死亡時 `current_phase` 設為 `死亡`，`current_status` 設為 `end`\n"
+                "- `relationships` 不只記錄敵友與好感；若 GM 文本明確描寫 NPC 心理狀態或情緒發生重大轉折，也必須更新對應關係描述\n"
+                "- `completed_missions` 僅限於主神明確發布並結算的主線/支線任務與隱藏成就；禁止把裝備獲得、情報得知、抵達某地或日常行為寫進去\n"
+                "- 禁止新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options）\n\n"
+                "## 道具欄清理原則\n"
+                "- 禁止把場景/戰鬥狀態寫入 inventory；「戰鬥中」「對峙中」「集結中」等只是敘事狀態，不是道具\n"
+                "- 已消耗/已使用的道具：設為 null 移除\n"
+                "- 已融合到角色或裝備的物品：不再作為獨立道具保留\n"
+                "- 召喚物/僕從：只記錄其存在、等級與數量，不要把每個單位的部署狀態各寫一條\n"
+                "- 隊友的基因鎖/能力狀態寫入 relationships，不要寫入 inventory\n\n"
+                "## 絕對禁止持久化的內容\n"
+                "以下情況一律不得更新 `systems` / `base_power_level` / `gene_lock`：\n"
+                "- 一次性爆發、燃燒、透支、自爆、獻祭、外物催化\n"
+                "- 「強行跨入」「短暫觸及」「A級邊緣」「位格不穩」「暫時提升」「超限」「過載」「波動」\n"
+                "- 使用高階素材、外部灌注、特殊環境、主場加成後才成立的表現\n"
+                "- 文本明示「基礎等級沒變」「只是觸碰到 A 級邊緣」「位格暫時不穩」\n\n"
+                "## `systems` / `base_power_level` / `gene_lock` 的寫入條件\n"
+                "只有同時滿足以下條件，才可以更新：\n"
+                "1. GM 文本明確表示這是正式、穩定、永久、已完成的升級/突破/兌換結果\n"
+                "2. 這個升級在回合結尾仍成立，不依賴當前戰鬥、素材燃燒或暫時過載\n"
+                "3. 文本沒有任何暫時性語義（如：邊緣、觸及、強行、過載、不穩）\n\n"
+                "若不確定，寧可不更新。\n\n"
+                "## `abilities` 的規則\n"
+                "- 只有在 GM 文本明確表示角色真正學會、掌握、保留了某招式時，才可新增。\n"
+                "- 一次性爆發、外物催化、極限感悟下出現的招式，不得直接寫入永久 `abilities`。\n"
+                "- 不要因為單次爆發，就把技能名稱升階（例如把 B 級招式直接改成 A 級版）。\n\n"
+                "## 技能列表維護原則\n"
+                "- 技能升級時必須同時移除舊版本，再加入新版本\n"
+                "- 同一技能的不同描述只保留最新版本\n"
+                "- 已被 `systems` 涵蓋的技能，不要再重複列在 `abilities`\n\n"
+                "## 其他欄位\n"
+                "- `current_phase` / `current_status`：可更新，但必須反映回合結尾的實際狀態\n"
+                "- `inventory`：只寫穩定的獲得/失去/損毀\n"
+                "- `relationships`：只寫本回合後仍成立的關係變化\n"
+                "- `reward_points` 只用 delta\n"
+                "- 不要輸出 `current_dungeon`\n"
+                "- 不要新增場景性欄位\n\n"
+                "## 輸出格式\n"
+                "只輸出 JSON：\n"
+                '{"state_ops": {...}}\n\n'
+                "若沒有穩定狀態變化，輸出：\n"
+                '{"state_ops": {}}\n\n'
+                "## 例子\n"
+                "例 1（不可持久化）：\n"
+                "「透過 S 級素材位格加持，【時空回聲】強行跨入 A 級·萬象歸一」\n"
+                "正確輸出：\n"
+                '{"state_ops": {}}\n\n'
+                "例 2（不可持久化）：\n"
+                "「雖然基礎等級沒變，但戰鬥邏輯已觸碰 A 級邊緣」\n"
+                "正確輸出：\n"
+                '{"state_ops": {}}\n\n'
+                "例 3（可持久化）：\n"
+                "「主神完成穩定化，萬象召喚正式晉升 A 級，之後可常態使用」\n"
+                "正確輸出：\n"
+                '{"state_ops":{"map_upsert":{"systems":{"萬象召喚":"A級（已穩定，可常態使用）"}}}}'
             )
-            started = time.time()
-            result = call_oneshot(prompt)
-            app_module._log_llm_usage(story_id, "oneshot", time.time() - started, branch_id=branch_id)
-            app_module._trace_llm(
-                stage="extract_tags_response_raw",
-                story_id=story_id,
-                branch_id=branch_id,
-                message_index=msg_index,
-                source="_extract_tags_async",
-                payload={"response": result, "usage": app_module.get_last_usage()},
-                tags={"mode": "oneshot"},
-            )
+
+        def _parse_json_response(result: object) -> dict:
             if not result:
-                return
-
-            result = result.strip()
-            if result.startswith("```"):
-                lines = result.split("\n")
-                result = "\n".join(line for line in lines if not line.startswith("```"))
-
+                return {}
+            text = str(result).strip()
+            if not text:
+                return {}
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(line for line in lines if not line.startswith("```"))
             try:
-                data = json.loads(result)
+                data = json.loads(text)
             except json.JSONDecodeError:
-                match = re.search(r"\{.*\}", result, re.DOTALL)
+                match = re.search(r"\{.*\}", text, re.DOTALL)
                 if not match:
-                    log.info("    extract_tags: no JSON found in response, skipping")
-                    return
+                    return {}
                 data = json.loads(match.group())
+            return data if isinstance(data, dict) else {}
+
+        def _filter_extract_payload(data: dict, allowed_keys: set[str]) -> dict:
             if not isinstance(data, dict):
-                return
+                return {}
+            return {key: data[key] for key in allowed_keys if key in data}
+
+        def _start_extract_worker(kind: str, prompt: str):
+            result_box: dict[str, object] = {"data": {}, "error": None}
+
+            def _call():
+                try:
+                    app_module._trace_llm(
+                        stage=f"extract_tags_{kind}_request",
+                        story_id=story_id,
+                        branch_id=branch_id,
+                        message_index=msg_index,
+                        source="_extract_tags_async",
+                        payload={"gm_text": gm_text, "prompt": prompt, "skip_state": skip_state, "skip_time": skip_time},
+                        tags={"mode": "oneshot", "extractor": kind},
+                    )
+                    started = time.time()
+                    response = call_oneshot(prompt)
+                    usage = app_module.get_last_usage()
+                    app_module._log_llm_usage(
+                        story_id,
+                        "oneshot",
+                        time.time() - started,
+                        branch_id=branch_id,
+                        usage=usage,
+                    )
+                    app_module._trace_llm(
+                        stage=f"extract_tags_{kind}_response_raw",
+                        story_id=story_id,
+                        branch_id=branch_id,
+                        message_index=msg_index,
+                        source="_extract_tags_async",
+                        payload={"response": response, "usage": usage},
+                        tags={"mode": "oneshot", "extractor": kind},
+                    )
+                    result_box["data"] = _parse_json_response(response)
+                except Exception as exc:
+                    result_box["error"] = exc
+
+            worker = threading.Thread(target=_call, daemon=True)
+            worker.start()
+            return worker, result_box
+
+        try:
+            toc = app_module.get_lore_toc(story_id)
+            branch_toc = app_module._get_branch_lore_toc(story_id, branch_id)
+            lore = app_module._load_lore(story_id)
+            branch_lore = app_module._load_branch_lore(story_id, branch_id)
+            topic_categories = {entry.get("topic", ""): entry.get("category", "") for entry in lore}
+            branch_topic_categories = {entry.get("topic", ""): entry.get("category", "") for entry in branch_lore}
+            all_topic_categories = {**topic_categories, **branch_topic_categories}
+            user_protected = {entry.get("topic", "") for entry in lore if entry.get("edited_by") == "user"}
+            existing_titles = get_event_titles(story_id, branch_id)
+            existing_title_map = get_event_title_map(story_id, branch_id)
+            active_events_text = app_module._build_active_events_hint(story_id, branch_id, limit=40)
+            previous_plan = app_module._load_gm_plan(story_id, branch_id)
+            previous_plan_text = app_module._summarize_gm_plan_for_prompt(previous_plan, current_index=msg_index)
+
+            schema = app_module._load_character_schema(story_id)
+            state = app_module._load_character_state(story_id, branch_id)
+            schema_summary = _build_schema_summary(schema)
+            existing_state_keys = ", ".join(sorted(state.keys())) or "（無）"
+            current_story_anchors = app_module._normalize_story_anchors(state.get("story_anchors", []))
+            story_anchors_text = "\n".join(f"- {anchor}" for anchor in current_story_anchors) if current_story_anchors else "（無）"
+            list_contents_str = _build_list_contents(schema, state)
+            current_state_core = app_module._build_core_state_text(story_id, state)
+            dungeon_prompt = _build_dungeon_prompt(story_id, branch_id)
+
+            toc_text = toc
+            if branch_toc:
+                toc_text += "\n（分支設定）\n" + branch_toc
+
+            non_state_prompt = _build_non_state_prompt(
+                gm_text,
+                toc_text,
+                active_events_text,
+                previous_plan_text,
+                story_anchors_text,
+                dungeon_prompt,
+            )
+            state_prompt = None if skip_state else _build_state_only_prompt(
+                gm_text,
+                schema_summary,
+                existing_state_keys,
+                current_state_core,
+                list_contents_str,
+            )
+
+            jobs: list[tuple[str, threading.Thread, dict[str, object]]] = []
+            jobs.append(("non_state", *_start_extract_worker("non_state", non_state_prompt)))
+            if state_prompt is not None:
+                jobs.append(("state_only", *_start_extract_worker("state_only", state_prompt)))
+
+            raw_results: dict[str, dict] = {}
+            for kind, worker, result_box in jobs:
+                try:
+                    worker.join()
+                except RuntimeError:
+                    # Test harness may replace Thread.start() with synchronous execution.
+                    pass
+                if result_box["error"] is not None:
+                    log.warning("    extract_tags[%s]: failed (%s), skipping", kind, result_box["error"])
+                    raw_results[kind] = {}
+                    continue
+                raw_results[kind] = result_box.get("data", {}) if isinstance(result_box.get("data"), dict) else {}
+
+            non_state_data = _filter_extract_payload(
+                raw_results.get("non_state", {}),
+                {"lore", "event_ops", "events_ops", "events", "plan", "npcs", "story_anchors", "time", "branch_title", "dungeon"},
+            )
+            state_data = _filter_extract_payload(
+                raw_results.get("state_only", {}),
+                {"state_ops", "state"},
+            )
 
             saved_counts = {
                 "lore": 0,
@@ -734,7 +869,7 @@ def _extract_tags_async(
 
             prefix_registry = app_module.build_prefix_registry(story_id)
 
-            for entry in ([] if pistol else data.get("lore", [])):
+            for entry in ([] if pistol else non_state_data.get("lore", [])):
                 topic = entry.get("topic", "").strip()
                 category = entry.get("category", "").strip()
                 if not topic:
@@ -763,9 +898,9 @@ def _extract_tags_async(
                 app_module.invalidate_prefix_cache(story_id)
 
             if not pistol:
-                event_ops = data.get("event_ops")
+                event_ops = non_state_data.get("event_ops")
                 if event_ops is None:
-                    event_ops = data.get("events_ops")
+                    event_ops = non_state_data.get("events_ops")
                 if isinstance(event_ops, dict):
                     saved_counts["events"] += app_module._apply_event_ops(
                         story_id,
@@ -776,7 +911,7 @@ def _extract_tags_async(
                         existing_title_map,
                     )
                 else:
-                    for event in data.get("events", []):
+                    for event in non_state_data.get("events", []):
                         title = event.get("title", "").strip()
                         if not title:
                             continue
@@ -818,8 +953,8 @@ def _extract_tags_async(
 
             if pistol:
                 saved_counts["plan"] = "skipped"
-            elif "plan" in data:
-                plan_data = data.get("plan")
+            elif "plan" in non_state_data:
+                plan_data = non_state_data.get("plan")
                 if isinstance(plan_data, dict):
                     active_event_rows = app_module.get_active_events(story_id, branch_id, limit=80)
                     normalized_plan = app_module._normalize_gm_plan_payload(
@@ -834,7 +969,7 @@ def _extract_tags_async(
                 else:
                     saved_counts["plan"] = "ignored"
 
-            for npc in data.get("npcs", []):
+            for npc in non_state_data.get("npcs", []):
                 if npc.get("name", "").strip():
                     app_module._save_npc(
                         story_id,
@@ -845,28 +980,7 @@ def _extract_tags_async(
                     )
                     saved_counts["npcs"] += 1
 
-            if not skip_state:
-                state_applied = False
-                state_ops = data.get("state_ops")
-                if isinstance(state_ops, dict):
-                    current_state = app_module._load_character_state(story_id, branch_id)
-                    ops_update = app_module._state_ops_to_update(state_ops, schema, current_state)
-                    if ops_update:
-                        app_module._apply_state_update(story_id, branch_id, ops_update)
-                        state_applied = True
-                if not state_applied:
-                    state_update = data.get("state", {})
-                    if state_update and isinstance(state_update, dict):
-                        app_module._apply_state_update(story_id, branch_id, state_update)
-                        state_applied = True
-                saved_counts["state"] = state_applied
-
-            anchor_change = _apply_story_anchor_ops(story_id, branch_id, data.get("story_anchors"))
-            if anchor_change is not None:
-                _before, after = anchor_change
-                saved_counts["anchors"] = f"updated ({len(after)})"
-
-            time_data = data.get("time", {})
+            time_data = non_state_data.get("time", {})
             if time_data and isinstance(time_data, dict) and not skip_time:
                 days = time_data.get("days") or 0
                 hours = time_data.get("hours") or 0
@@ -875,7 +989,7 @@ def _extract_tags_async(
                     app_module.advance_world_day(story_id, branch_id, total_days)
                     saved_counts["time"] = total_days
 
-            branch_title = data.get("branch_title", "")
+            branch_title = non_state_data.get("branch_title", "")
             if branch_title and isinstance(branch_title, str):
                 branch_title = branch_title.strip()[:20]
                 tree = app_module._load_tree(story_id)
@@ -885,7 +999,7 @@ def _extract_tags_async(
                     app_module._save_tree(story_id, tree)
                     saved_counts["title"] = branch_title
 
-            dungeon_data = data.get("dungeon", {})
+            dungeon_data = non_state_data.get("dungeon", {})
             if dungeon_data and isinstance(dungeon_data, dict):
                 if dungeon_data.get("mainline_progress_delta") or dungeon_data.get("completed_nodes"):
                     app_module.update_dungeon_progress(
@@ -907,6 +1021,30 @@ def _extract_tags_async(
                         },
                     )
                     saved_counts["dungeon_area"] = True
+
+            # Keep anchors + async state as a single atomic character-state write section.
+            with app_module._get_character_state_lock(story_id, branch_id):
+                anchor_change = _apply_story_anchor_ops(story_id, branch_id, non_state_data.get("story_anchors"))
+                if anchor_change is not None:
+                    _before, after = anchor_change
+                    saved_counts["anchors"] = f"updated ({len(after)})"
+
+                if not skip_state:
+                    current_state = app_module._load_character_state(story_id, branch_id)
+                    canonical_update, dropped_keys, state_source = app_module._canonicalize_async_state_payload(
+                        state_data,
+                        schema,
+                        current_state,
+                    )
+                    if dropped_keys:
+                        log.info(
+                            "    async_state_guard[%s]: dropped %s",
+                            state_source or "none",
+                            dropped_keys,
+                        )
+                    if canonical_update:
+                        app_module._apply_state_update(story_id, branch_id, canonical_update)
+                        saved_counts["state"] = True
 
             log.info(
                 "    extract_tags: saved %d lore, %d events, %d npcs, state %s, anchors %s, time %s, title %s, plan %s, dungeon %s",
@@ -1256,6 +1394,7 @@ def _build_augmented_message(
 
 
 __all__ = [
+    "_apply_story_anchor_ops",
     "_validate_state_update",
     "_review_state_update_llm",
     "_run_state_gate",
