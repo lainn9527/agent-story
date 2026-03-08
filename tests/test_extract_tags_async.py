@@ -337,6 +337,172 @@ class TestAsyncExtractionParsing:
         assert gm["state_snapshot"]["current_status"] == "新狀態"
 
 
+class TestAsyncExtractionSplit:
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_non_state_hallucinated_state_is_ignored(self, mock_llm, story_id, setup_story):
+        mock_llm.side_effect = [
+            json.dumps({"state_ops": {"set": {"current_status": "不應套用"}}}),
+            json.dumps({}),
+        ]
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=3)
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state.get("current_status") is None
+
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_state_only_hallucinated_non_state_keys_are_ignored(self, mock_llm, story_id, setup_story):
+        mock_llm.side_effect = [
+            json.dumps({}),
+            json.dumps({"branch_title": "錯誤標題", "state": {"current_status": "正確狀態"}}),
+        ]
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=4)
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        tree = json.loads((setup_story / "timeline_tree.json").read_text(encoding="utf-8"))
+        assert state["current_status"] == "正確狀態"
+        assert "title" not in tree["branches"]["main"]
+
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_state_only_filters_temporary_system_upgrade(self, mock_llm, story_id, setup_story, tmp_path):
+        schema_path = tmp_path / "story_design" / story_id / "character_schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema["fields"].append({"key": "systems", "label": "體系", "type": "map"})
+        schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["systems"] = {}
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.side_effect = [
+            json.dumps({}),
+            json.dumps({"state_ops": {"map_upsert": {"systems": {"萬象召喚": "A級（位格暫時不穩）"}}}}),
+        ]
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=6)
+
+        updated = json.loads(state_path.read_text(encoding="utf-8"))
+        assert updated["systems"] == {}
+
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_state_only_keeps_stable_system_upgrade(self, mock_llm, story_id, setup_story, tmp_path):
+        schema_path = tmp_path / "story_design" / story_id / "character_schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema["fields"].append({"key": "systems", "label": "體系", "type": "map"})
+        schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
+
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["systems"] = {}
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        mock_llm.side_effect = [
+            json.dumps({}),
+            json.dumps({"state_ops": {"map_upsert": {"systems": {"萬象召喚": "A級（已穩定，可常態使用）"}}}}),
+        ]
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=7)
+
+        updated = json.loads(state_path.read_text(encoding="utf-8"))
+        assert updated["systems"]["萬象召喚"] == "A級（已穩定，可常態使用）"
+
+    def test_story_anchors_and_state_updates_share_character_state_lock(self, story_id, setup_story):
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        lock = app_module._get_character_state_lock(story_id, "main")
+        anchor_done = threading.Event()
+        state_done = threading.Event()
+
+        def _run_anchor():
+            app_module._apply_story_anchor_ops(
+                story_id,
+                "main",
+                {"add": ["長期主線：回歸現實"]},
+            )
+            anchor_done.set()
+
+        def _run_state():
+            app_module._apply_state_update(
+                story_id,
+                "main",
+                {"current_status": "已整理完畢"},
+            )
+            state_done.set()
+
+        with lock:
+            anchor_thread = REAL_THREAD(target=_run_anchor, daemon=True)
+            state_thread = REAL_THREAD(target=_run_state, daemon=True)
+            anchor_thread.start()
+            state_thread.start()
+            time.sleep(0.05)
+            assert not anchor_done.is_set()
+            assert not state_done.is_set()
+
+        anchor_thread.join(timeout=1.0)
+        state_thread.join(timeout=1.0)
+        assert anchor_done.is_set()
+        assert state_done.is_set()
+
+        updated = json.loads(state_path.read_text(encoding="utf-8"))
+        assert updated["story_anchors"] == ["長期主線：回歸現實"]
+        assert updated["current_status"] == "已整理完畢"
+
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_dungeon_updates_still_route_through_non_state_extractor(
+        self,
+        mock_llm,
+        story_id,
+        setup_story,
+        monkeypatch,
+    ):
+        progress_calls = []
+        area_calls = []
+
+        monkeypatch.setattr(
+            app_module,
+            "_load_dungeon_progress",
+            lambda *_args, **_kwargs: {"current_dungeon": {"dungeon_id": "demo_dungeon"}},
+        )
+        monkeypatch.setattr(
+            app_module,
+            "_load_dungeon_template",
+            lambda *_args, **_kwargs: {
+                "name": "示範副本",
+                "mainline": {"nodes": [{"id": "node_1", "title": "進入洋館"}]},
+                "areas": [{"id": "hall"}],
+            },
+        )
+        monkeypatch.setattr(
+            app_module,
+            "update_dungeon_progress",
+            lambda *_args, **kwargs: progress_calls.append(kwargs or _args),
+        )
+        monkeypatch.setattr(
+            app_module,
+            "update_dungeon_area",
+            lambda *_args, **kwargs: area_calls.append(kwargs or _args),
+        )
+        mock_llm.side_effect = [
+            json.dumps({
+                "dungeon": {
+                    "mainline_progress_delta": 15,
+                    "completed_nodes": ["node_1"],
+                    "discovered_areas": ["hall"],
+                    "explored_area_updates": {"hall": 30},
+                },
+            }),
+            json.dumps({}),
+        ]
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=14)
+
+        assert progress_calls
+        assert area_calls
+
+
 # ===================================================================
 # Event dedup
 # ===================================================================
@@ -675,7 +841,8 @@ class TestAsyncGmPlanExtraction:
 
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=10)
 
-        prompt = mock_llm.call_args[0][0]
+        prompts = [call.args[0] for call in mock_llm.call_args_list]
+        prompt = next(text for text in prompts if "上一輪 GM 計劃（供參考，可全部改寫）" in text)
         assert "上一輪 GM 計劃（供參考，可全部改寫）" in prompt
         assert "舊弧線" in prompt
         assert "舊節點" in prompt
@@ -792,7 +959,8 @@ class TestNpcTier:
 
         app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=1)
 
-        prompt = mock_llm.call_args[0][0]
+        prompts = [call.args[0] for call in mock_llm.call_args_list]
+        prompt = next(text for text in prompts if '"tier": "D-~S+ 或 null"' in text)
         assert '"tier": "D-~S+ 或 null"' in prompt
         assert "D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+" in prompt
         assert "請省略 tier 欄位（不要輸出 null 覆蓋）" in prompt
