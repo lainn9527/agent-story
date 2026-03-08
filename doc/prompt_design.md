@@ -59,27 +59,32 @@
 
 1. `[相關世界設定]`（base lore 混合搜尋）
 2. `[相關分支設定]`（branch lore bigram 搜尋）
-3. `[長期關鍵事件]`（sticky events，非 blank branch）
+3. `[舊副本關聯角色提醒]`（一次性 dungeon return recall，非 blank branch）
+   - 只在 `dungeon_return_memory.json.pending_reentry_dungeon == current_dungeon` 時嘗試注入
+   - 只選 `home_scope=dungeon_local`、`home_dungeon=current_dungeon`、`archived+offstage+eligible` 的 NPC
+   - 依 relationship / `last_seen_msg_index` / tier 排序，最多 4 名、約 350 chars
+   - 第一次嘗試注入後就清掉 pending（有候選或無候選都一樣）
+4. `[長期關鍵事件]`（sticky events，非 blank branch）
    - 來自 `events.db.sticky_priority > 0`
    - 依 `sticky_priority DESC, id DESC` 取最多 4 條
    - 可包含 `resolved` 事件；用途是長期 plot pressure，不依賴當前 query 命中
-4. `[相關事件追蹤]`（query-matched active events，非 blank branch）
+5. `[相關事件追蹤]`（query-matched active events，非 blank branch）
    - 只取 `planted/triggered`
    - 仍維持最多 3 條，避免和 sticky layer 混淆
-5. `[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]`（`gm_plan.json`，非 blank branch）
+6. `[GM 敘事計劃（僅供 GM 內部參考，勿透露給玩家）]`（`gm_plan.json`，非 blank branch）
    - 顯示 `arc` + 最多 3 個 `next_beats` + 最多 2 個 `must_payoff`
    - `remaining_turns` 於注入時計算：`ttl_turns - (current_index - payoff.created_at_index)`
    - 只保留 `remaining_turns > 0` 的 payoff
    - 注入段落硬上限 `GM_PLAN_CHAR_LIMIT`（預設 500 chars）
-6. `[NPC 近期動態]`
-7. `[相關角色狀態]`（state.db 檢索結果）
+7. `[NPC 近期動態]`
+8. `[相關角色狀態]`（state.db 檢索結果）
    - 預設檢索限流：總筆數最多 30、NPC 類別最多 10
    - `must_include_keys` 命中的條目先保留，再填入一般結果
    - archived NPC 預設不注入；玩家明確提名時可透過 `must_include_keys` 召回
-8. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
-9. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
-10. `---`
-11. 原始玩家輸入
+9. `[戰力等級提醒]`（僅當存在 tier 已知且分類為 ally/hostile 的 NPC）
+10. `[命運走向]`（若 fate mode 開啟且非 `/gm` 指令）
+11. `---`
+12. 原始玩家輸入
 
 補充：
 
@@ -99,7 +104,10 @@
 - NPC tier 採 15 個 sub-tier：`D-/D/D+/C-/C/C+/B-/B/B+/A-/A/A+/S-/S/S+`。
 - `_save_npc()` 會做 tier allowlist 正規化；不合法值直接忽略、不覆蓋既有合法值。
 - NPC metadata 新增 `lifecycle_status` / `archived_reason` / `archive_kind` / `origin_dungeon_id` / `origin_run_id`；缺省視為 active，archived NPC 預設不進常駐 prompt。
+- NPC provenance metadata 另新增 `home_scope` / `home_dungeon` / `return_recall_state` / `last_seen_msg_index`，用於「回舊副本喚回 cast」的提示層，不直接影響 state RAG。
 - `_save_npc()` 會依 `current_status` 關鍵詞區分 `archive_kind=terminal|offstage`；若同一個 `origin_run_id` 的 offstage NPC 在後續 GM 回覆又被抽到，會自動轉回 active，並移除 relationship 上的 ` (已歸檔)` 註記。
+- `_save_npc()` 在副本內首次記錄 NPC 時，會預設 `home_scope=dungeon_local`、`home_dungeon=current_dungeon`；在主神空間首次記錄則預設 `home_scope=main_god_space`。
+- 若既有 NPC 是 `archived + offstage + eligible`，且角色目前重新回到 `home_dungeon`，後續新的 NPC update 會自動 re-activate；舊的 `same origin_run_id` reactivation 仍保留為 fallback。
 
 ### 2.6 State RAG（角色狀態按需注入）
 

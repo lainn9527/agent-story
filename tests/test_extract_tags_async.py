@@ -1079,6 +1079,64 @@ class TestNpcTier:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["relationships"]["阿喪"] == "暫時離隊"
 
+    def test_save_npc_sets_provenance_defaults_and_last_seen_msg_index(self, story_id, setup_story):
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["current_phase"] = "副本中"
+        state["current_dungeon"] = "火影忍者"
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        app_module._save_npc(
+            story_id,
+            {"name": "小林", "role": "忍者學員"},
+            "main",
+            msg_index=7,
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["home_scope"] == "dungeon_local"
+        assert npcs[0]["home_dungeon"] == "火影忍者"
+        assert npcs[0]["last_seen_msg_index"] == 7
+
+    def test_save_npc_reactivates_when_reentering_home_dungeon(self, story_id, setup_story):
+        state_path = setup_story / "branches" / "main" / "character_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["relationships"] = {"老林": "舊識 (已歸檔)"}
+        state["current_phase"] = "主神空間"
+        state["current_dungeon"] = ""
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        app_module._save_npc(
+            story_id,
+            {
+                "name": "老林",
+                "role": "在地嚮導",
+                "lifecycle_status": "archived",
+                "archive_kind": "offstage",
+                "archived_reason": "留守舊地",
+                "home_scope": "dungeon_local",
+                "home_dungeon": "火影忍者",
+                "return_recall_state": "eligible",
+            },
+            "main",
+        )
+
+        state["current_phase"] = "副本中"
+        state["current_dungeon"] = "火影忍者"
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        app_module._save_npc(
+            story_id,
+            {"name": "老林", "role": "再次現身"},
+            "main",
+        )
+
+        npcs_path = setup_story / "branches" / "main" / "npcs.json"
+        npcs = json.loads(npcs_path.read_text(encoding="utf-8"))
+        assert npcs[0]["lifecycle_status"] == "active"
+        assert npcs[0]["archive_kind"] is None
+
     @pytest.mark.parametrize(
         ("existing_status", "existing_archive_kind", "incoming_run_id"),
         [

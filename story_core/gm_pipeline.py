@@ -977,6 +977,7 @@ def _extract_tags_async(
                         branch_id,
                         origin_dungeon_id=run_ctx["dungeon_id"] if run_ctx else None,
                         origin_run_id=run_ctx["run_id"] if run_ctx else None,
+                        msg_index=msg_index,
                     )
                     saved_counts["npcs"] += 1
 
@@ -1132,6 +1133,7 @@ def _process_gm_response(
             branch_id,
             origin_dungeon_id=run_ctx["dungeon_id"] if run_ctx else None,
             origin_run_id=run_ctx["run_id"] if run_ctx else None,
+            msg_index=msg_index,
         )
 
     gm_response, event_list = app_module._extract_event_tag(gm_response)
@@ -1312,6 +1314,9 @@ def _build_augmented_message(
         parts.append(branch_lore)
 
     if not is_blank:
+        dungeon_recall = app_module.consume_dungeon_return_recall_block(story_id, branch_id)
+        if dungeon_recall:
+            parts.append(dungeon_recall)
         sticky_events = app_module.format_sticky_events(story_id, branch_id, limit=4)
         if sticky_events:
             parts.append(sticky_events)

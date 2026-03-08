@@ -99,6 +99,11 @@ def _load_progress(tmp_path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _load_recall_memory(tmp_path):
+    path = _branch_dir(tmp_path) / "dungeon_return_memory.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _base_state(**overrides):
     state = {
         "current_phase": "主神空間",
@@ -250,6 +255,66 @@ def test_reconcile_exit_archives_with_new_state_and_initializes_switch(tmp_path)
     assert progress["history"][0]["dungeon_id"] == "alien"
     assert progress["history"][0]["rank_after"] == "C"
     assert progress["history"][0]["reward_points_earned"] == 150
+
+
+def test_reconcile_entry_sets_pending_only_on_reentry(tmp_path):
+    _write_json(_branch_dir(tmp_path) / "character_state.json", _base_state())
+
+    dungeon_system.reconcile_dungeon_entry(
+        STORY_ID,
+        BRANCH_ID,
+        _base_state(current_dungeon=""),
+        _base_state(current_dungeon="火影忍者", current_phase="副本中"),
+    )
+    memory = _load_recall_memory(tmp_path)
+    assert memory["visited_dungeons"] == ["火影忍者"]
+    assert memory["pending_reentry_dungeon"] is None
+
+    dungeon_system.reconcile_dungeon_exit(
+        STORY_ID,
+        BRANCH_ID,
+        _base_state(current_dungeon="火影忍者", current_phase="副本中"),
+        _base_state(current_dungeon="", current_phase="主神空間"),
+    )
+    dungeon_system.reconcile_dungeon_entry(
+        STORY_ID,
+        BRANCH_ID,
+        _base_state(current_dungeon="", current_phase="主神空間"),
+        _base_state(current_dungeon="火影忍者", current_phase="副本中"),
+    )
+    memory = _load_recall_memory(tmp_path)
+    assert memory["visited_dungeons"] == ["火影忍者"]
+    assert memory["pending_reentry_dungeon"] == "火影忍者"
+
+
+def test_reconcile_exit_marks_local_archived_npc_eligible_and_tracks_next_dungeon(tmp_path):
+    _write_json(_branch_dir(tmp_path) / "character_state.json", _base_state(current_dungeon="異形"))
+    _write_json(_branch_dir(tmp_path) / "dungeon_progress.json", _active_progress())
+    _write_json(
+        _branch_dir(tmp_path) / "npcs.json",
+        [
+            {
+                "name": "老林",
+                "role": "在地嚮導",
+                "lifecycle_status": "archived",
+                "archive_kind": "offstage",
+                "archived_reason": "留在原地守望",
+                "home_scope": "dungeon_local",
+                "home_dungeon": "異形",
+            }
+        ],
+    )
+
+    old_state = _base_state(current_dungeon="異形", current_phase="副本中")
+    new_state = _base_state(current_dungeon="火影忍者", current_phase="副本中")
+    dungeon_system.reconcile_dungeon_exit(STORY_ID, BRANCH_ID, old_state, new_state)
+
+    npcs = json.loads((_branch_dir(tmp_path) / "npcs.json").read_text(encoding="utf-8"))
+    assert npcs[0]["return_recall_state"] == "eligible"
+
+    memory = _load_recall_memory(tmp_path)
+    assert memory["visited_dungeons"] == ["火影忍者"]
+    assert memory["pending_reentry_dungeon"] is None
 
 
 def test_apply_state_update_initializes_progress_before_validation(tmp_path, monkeypatch):

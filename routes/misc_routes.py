@@ -619,10 +619,18 @@ def api_dungeon_enter():
         log.exception("Failed to initialize dungeon progress")
         return jsonify({"error": str(exc)}), 500
 
+    old_state = dict(state)
     state["current_phase"] = "傳送中"
     state["current_status"] = f"準備進入【{template['name']}】副本"
     state["current_dungeon"] = template["name"]
     app_module._save_character_state(story_id, branch_id, state)
+    app_module.handle_dungeon_return_transition(
+        story_id,
+        branch_id,
+        old_state,
+        state,
+        mode="enter",
+    )
 
     try:
         from story_core.world_timer import advance_dungeon_enter
@@ -751,6 +759,7 @@ def api_dungeon_return():
         total_reward = int(total_reward * early_penalty)
 
     state = app_module._load_character_state(story_id, branch_id)
+    old_state = dict(state)
     player_rank = state.get("等級", "E")
     scaling = rules.get("difficulty_scaling", {}).get(player_rank, 1.0)
     total_reward = int(total_reward * scaling)
@@ -763,6 +772,13 @@ def api_dungeon_return():
     state["current_dungeon"] = ""
     state["reward_points"] = state.get("reward_points", 0) + total_reward
     app_module._save_character_state(story_id, branch_id, state)
+    app_module.handle_dungeon_return_transition(
+        story_id,
+        branch_id,
+        old_state,
+        state,
+        mode="exit",
+    )
 
     from story_core.state_cleanup import run_state_cleanup_async
 

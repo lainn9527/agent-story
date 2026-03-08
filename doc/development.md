@@ -75,6 +75,7 @@ pytest tests/test_debug_api.py
 | `scripts/backfill/backfill_branch_titles.py` | 回填分支標題 |
 | `scripts/backfill/backfill_npc_lifecycle.py` | 回填 NPC lifecycle + R1 去重 + 重建 `state.db` |
 | `scripts/backfill/backfill_story_memory.py` | 回填 `story_anchors` 與 sticky events（建議先 `--dry-run`） |
+| `scripts/backfill/backfill_dungeon_return_memory.py` | 回填 `dungeon_return_memory.json` 與 NPC provenance（建議先 `--dry-run`） |
 | `scripts/migrations/migrate_current_dungeon.py` | 回填 `current_dungeon` |
 | `scripts/state/cleanup_character_state.py` | 清理/修復 state 汙染 |
 | `scripts/state/clean_state.py` | 移除 legacy 垃圾欄位 |
@@ -88,6 +89,15 @@ pytest tests/test_debug_api.py
 
 ```bash
 python3 scripts/backfill/backfill_story_memory.py \
+  --story-id story_original \
+  --branch-id branch_69569153 \
+  --dry-run
+```
+
+`backfill_dungeon_return_memory.py` 範例：
+
+```bash
+python3 scripts/backfill/backfill_dungeon_return_memory.py \
   --story-id story_original \
   --branch-id branch_69569153 \
   --dry-run

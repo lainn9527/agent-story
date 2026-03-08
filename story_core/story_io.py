@@ -97,6 +97,10 @@ def _dungeon_progress_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
 
 
+def _dungeon_return_memory_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "dungeon_return_memory.json")
+
+
 def _story_messages_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "messages.json")
 
@@ -329,6 +333,7 @@ __all__ = [
     "_last_apply_backup_path",
     "_debug_directive_path",
     "_dungeon_progress_path",
+    "_dungeon_return_memory_path",
     "_story_messages_path",
     "_story_character_state_path",
     "_story_npcs_path",
