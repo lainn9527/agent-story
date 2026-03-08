@@ -650,6 +650,27 @@ def _extract_tags_async(
                 "- 只提取本回合結束後仍然成立、下一回合仍應保留的穩定狀態。\n"
                 "- 不要把敘事中的高光演出、一次性爆發、暫時過載、戰鬥中的極限表現，寫進永久狀態。\n"
                 "- `systems`、`base_power_level`、`gene_lock` 是常態能力，不是單次戰鬥摘要。\n\n"
+                "## `state_ops` 寫法\n"
+                "- 優先輸出 `state_ops`（結構化操作，避免覆蓋錯誤）\n"
+                '{"set": {"current_phase": "副本中"}, "delta": {"reward_points": -500}, "map_upsert": {"inventory": {"封印之鏡": "裂痕"}}, "map_remove": {"inventory": ["一次性符"]}, "list_add": {"abilities": ["靈視·微觀解析"]}, "list_remove": {"abilities": ["靈視"]}}\n'
+                "- set：直接覆蓋欄位（null 表示不變，不是刪除）\n"
+                "- delta：數值增減（`reward_points` 建議用這個）\n"
+                "- map_upsert/map_remove：map 型欄位增修與刪除\n"
+                "- list_add/list_remove：list 型欄位增減\n"
+                "- 若你無法輸出 `state_ops`，才輸出 legacy `state` 物件\n"
+                "- `state/state_ops` 只填有變化的欄位\n\n"
+                "## 寫入規則\n"
+                "- `current_phase` 只能是：主神空間/副本中/副本結算/傳送中/死亡\n"
+                "- 角色死亡時 `current_phase` 設為 `死亡`，`current_status` 設為 `end`\n"
+                "- `relationships` 不只記錄敵友與好感；若 GM 文本明確描寫 NPC 心理狀態或情緒發生重大轉折，也必須更新對應關係描述\n"
+                "- `completed_missions` 僅限於主神明確發布並結算的主線/支線任務與隱藏成就；禁止把裝備獲得、情報得知、抵達某地或日常行為寫進去\n"
+                "- 禁止新增臨時性/場景性欄位（如 location, threat_level, combat_status, escape_options）\n\n"
+                "## 道具欄清理原則\n"
+                "- 禁止把場景/戰鬥狀態寫入 inventory；「戰鬥中」「對峙中」「集結中」等只是敘事狀態，不是道具\n"
+                "- 已消耗/已使用的道具：設為 null 移除\n"
+                "- 已融合到角色或裝備的物品：不再作為獨立道具保留\n"
+                "- 召喚物/僕從：只記錄其存在、等級與數量，不要把每個單位的部署狀態各寫一條\n"
+                "- 隊友的基因鎖/能力狀態寫入 relationships，不要寫入 inventory\n\n"
                 "## 絕對禁止持久化的內容\n"
                 "以下情況一律不得更新 `systems` / `base_power_level` / `gene_lock`：\n"
                 "- 一次性爆發、燃燒、透支、自爆、獻祭、外物催化\n"
@@ -666,6 +687,10 @@ def _extract_tags_async(
                 "- 只有在 GM 文本明確表示角色真正學會、掌握、保留了某招式時，才可新增。\n"
                 "- 一次性爆發、外物催化、極限感悟下出現的招式，不得直接寫入永久 `abilities`。\n"
                 "- 不要因為單次爆發，就把技能名稱升階（例如把 B 級招式直接改成 A 級版）。\n\n"
+                "## 技能列表維護原則\n"
+                "- 技能升級時必須同時移除舊版本，再加入新版本\n"
+                "- 同一技能的不同描述只保留最新版本\n"
+                "- 已被 `systems` 涵蓋的技能，不要再重複列在 `abilities`\n\n"
                 "## 其他欄位\n"
                 "- `current_phase` / `current_status`：可更新，但必須反映回合結尾的實際狀態\n"
                 "- `inventory`：只寫穩定的獲得/失去/損毀\n"
@@ -997,6 +1022,7 @@ def _extract_tags_async(
                     )
                     saved_counts["dungeon_area"] = True
 
+            # Keep anchors + async state as a single atomic character-state write section.
             with app_module._get_character_state_lock(story_id, branch_id):
                 anchor_change = _apply_story_anchor_ops(story_id, branch_id, non_state_data.get("story_anchors"))
                 if anchor_change is not None:

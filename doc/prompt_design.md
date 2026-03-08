@@ -191,6 +191,9 @@
 - NPC 提取支援 `tier` 欄位；若既有 NPC 本回合無法判定 tier，應省略該欄位（不要用 null 覆蓋）
 - `_extract_tags_async()` 會在啟動時先抓當前副本 run context（`dungeon_id` + `entered_at`），並在 `_save_npc()` 時帶入，避免背景執行緒晚跑時吃到錯誤的副本來源
 - `state-only` 專門處理 `state_ops`（set/delta/map_upsert/map_remove/list_add/list_remove），fallback 才接受 legacy `state`
+- `state-only` prompt 仍保留完整的 state 寫入 contract，而不是只講禁止事項：
+  - 明確定義 `state_ops` 的 `set / delta / map_upsert / map_remove / list_add / list_remove` 結構與範例
+  - 保留 `current_phase` 合法值、`completed_missions` 嚴格約束、`relationships` 心理狀態追蹤、inventory 清理原則、abilities 維護原則
 - `state-only` 明確禁止把一次性爆發、超限、邊緣觸及、位格不穩、外物催化等描述寫進永久 `systems / base_power_level / gene_lock`
 - `state-only` 的 canonical update 在套用前會再經過一次保守 guard：
   - 只檢查 candidate value 本身，不掃整段 GM 文本

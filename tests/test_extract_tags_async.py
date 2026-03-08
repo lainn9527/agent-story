@@ -410,6 +410,25 @@ class TestAsyncExtractionSplit:
         updated = json.loads(state_path.read_text(encoding="utf-8"))
         assert updated["systems"]["萬象召喚"] == "A級（已穩定，可常態使用）"
 
+    @mock.patch("story_core.llm_bridge.call_oneshot")
+    def test_state_only_prompt_retains_state_ops_contract_and_write_rules(self, mock_llm, story_id, setup_story):
+        mock_llm.side_effect = [
+            json.dumps({}),
+            json.dumps({"state_ops": {}}),
+        ]
+
+        app_module._extract_tags_async(story_id, "main", "GM回覆文字測試" * 50, msg_index=8)
+
+        prompts = [call.args[0] for call in mock_llm.call_args_list]
+        prompt = next(text for text in prompts if "## `state_ops` 寫法" in text)
+        assert "map_upsert" in prompt
+        assert "map_remove" in prompt
+        assert "list_add" in prompt
+        assert "主神空間/副本中/副本結算/傳送中/死亡" in prompt
+        assert "completed_missions" in prompt
+        assert "NPC 心理狀態或情緒發生重大轉折" in prompt
+        assert "技能升級時必須同時移除舊版本，再加入新版本" in prompt
+
     def test_story_anchors_and_state_updates_share_character_state_lock(self, story_id, setup_story):
         state_path = setup_story / "branches" / "main" / "character_state.json"
         lock = app_module._get_character_state_lock(story_id, "main")
