@@ -443,7 +443,9 @@ def _build_story_system_prompt(
     if image_gen_enabled:
         result += (
             "\n\n## 場景插圖設定（系統）\n"
-            "- 本分支已啟用場景插圖。若需插圖，可依既有規則輸出單一 IMG tag。\n"
+            "- 本分支已啟用場景插圖。每次 GM 回覆都必須輸出且只輸出一個 IMG tag。\n"
+            "- 即使是過場、情報或對話回合，也要為當前最具代表性的場景補上一張插圖。\n"
+            "- IMG prompt 必須使用英文，聚焦當前回合最終畫面或最具代表性的視覺瞬間。\n"
             f"- 當前圖片模型：`{image_model}`。\n"
         )
     else:
