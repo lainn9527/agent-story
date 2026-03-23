@@ -8,7 +8,7 @@
 - 角色狀態追蹤（含 inventory/systems/relationships）
 - 世界觀知識庫（lore）與事件追蹤（events）
 - 命運骰、GM cheats、存檔、副本進度系統
-- 多 LLM provider（Gemini / Claude CLI）與串流回應
+- 多 LLM provider（Gemini / Claude CLI / Codex Agent）與串流回應
 
 目前主要的 Python 內部模組已整理到 `story_core/`；entrypoints 仍維持在 repo root（例如 `app.py`、`auto_play.py`）。
 
@@ -33,9 +33,16 @@ pip install -r requirements.txt
   },
   "claude_cli": {
     "model": "claude-opus-4-6"
+  },
+  "codex_agent": {
+    "model": "gpt-5.4"
   }
 }
 ```
+
+說明：
+- `codex_agent` 是 read-only GM provider。後端會為每回合建立臨時工作區，只暴露當前 branch 與 lore 相關檔案給 Codex 讀取，不會讓它直接改 runtime data。
+- UI 仍維持同一套 `/api/send*` / parser / state pipeline；Codex 只是新的可選 provider，不會替換既有 Gemini / Claude 路徑。
 
 3. 啟動服務
 

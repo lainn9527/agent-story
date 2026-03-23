@@ -412,7 +412,12 @@ def execute_turn(
     # 5. Call GM (stateless)
     t0_gm = time.time()
     gm_response, _ = call_claude_gm(
-        augmented_text, system_prompt, recent, session_id=None
+        augmented_text,
+        system_prompt,
+        recent,
+        session_id=None,
+        story_id=story_id,
+        branch_id=branch_id,
     )
     _gm_elapsed = time.time() - t0_gm
     usage_db.log_from_bridge(story_id, "gm", _gm_elapsed, branch_id=branch_id)

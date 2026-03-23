@@ -293,7 +293,12 @@ def api_send():
     )
     t0 = time.time()
     gm_response, _ = app_module.call_claude_gm(
-        augmented_text, system_prompt, recent, session_id=None
+        augmented_text,
+        system_prompt,
+        recent,
+        session_id=None,
+        story_id=story_id,
+        branch_id=branch_id,
     )
     gm_elapsed = time.time() - t0
     log.info("  claude_call: %.1fs", gm_elapsed)
@@ -440,7 +445,12 @@ def api_send_stream():
             yield _sse_event({"type": "dice", "dice": dice_result})
         try:
             for event_type, payload in app_module.call_claude_gm_stream(
-                augmented_text, system_prompt, recent, session_id=None
+                augmented_text,
+                system_prompt,
+                recent,
+                session_id=None,
+                story_id=story_id,
+                branch_id=branch_id,
             ):
                 if event_type == "text":
                     yield _sse_event({"type": "text", "chunk": payload})

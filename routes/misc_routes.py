@@ -403,6 +403,9 @@ def api_config_get():
             "claude_cli": {
                 "model": cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929"),
             },
+            "codex_agent": {
+                "model": cfg.get("codex_agent", {}).get("model", "gpt-5.4"),
+            },
         }
     )
 
@@ -432,6 +435,12 @@ def api_config_set():
             cfg["claude_cli"] = {}
         if "model" in data["claude_cli"]:
             cfg["claude_cli"]["model"] = data["claude_cli"]["model"]
+
+    if "codex_agent" in data and isinstance(data["codex_agent"], dict):
+        if "codex_agent" not in cfg:
+            cfg["codex_agent"] = {}
+        if "model" in data["codex_agent"]:
+            cfg["codex_agent"]["model"] = data["codex_agent"]["model"]
 
     with open(app_module._LLM_CONFIG_PATH, "w", encoding="utf-8") as handle:
         json.dump(cfg, handle, indent=2, ensure_ascii=False)
