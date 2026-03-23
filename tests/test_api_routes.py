@@ -21,7 +21,7 @@ from story_core import story_io
 
 
 class _ElementParentParser(HTMLParser):
-    """Track parent ids for elements in server-rendered HTML."""
+    """Track parent and ancestor ids for elements in server-rendered HTML."""
 
     _VOID_TAGS = {
         "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -32,6 +32,7 @@ class _ElementParentParser(HTMLParser):
         super().__init__()
         self.stack = []
         self.parents_by_id = {}
+        self.ancestors_by_id = {}
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
@@ -43,6 +44,7 @@ class _ElementParentParser(HTMLParser):
                 break
         if element_id:
             self.parents_by_id[element_id] = parent_id
+            self.ancestors_by_id[element_id] = [node["id"] for node in self.stack if node["id"]]
         if tag not in self._VOID_TAGS:
             self.stack.append({"tag": tag, "id": element_id})
 
@@ -200,8 +202,8 @@ class TestStoriesAPI:
         parser = _ElementParentParser()
         parser.feed(resp.get_data(as_text=True))
 
-        assert parser.parents_by_id["debug-panel-modal"] is None
-        assert parser.parents_by_id["pistol-prefs-modal"] is None
+        assert "pistol-prefs-modal" in parser.ancestors_by_id
+        assert "debug-panel-modal" not in parser.ancestors_by_id["pistol-prefs-modal"]
 
     def test_get_stories(self, client, setup_story, story_id):
         resp = client.get("/api/stories")
