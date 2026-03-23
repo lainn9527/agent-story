@@ -636,7 +636,12 @@ def api_branches_edit():
     t0 = time.time()
     try:
         gm_response, _ = app_module.call_claude_gm(
-            augmented_edit, system_prompt, recent, session_id=None
+            augmented_edit,
+            system_prompt,
+            recent,
+            session_id=None,
+            story_id=story_id,
+            branch_id=branch_id,
         )
     except Exception as exc:
         log.info("/api/branches/edit EXCEPTION %s", exc)
@@ -839,7 +844,12 @@ def api_branches_edit_stream():
             yield app_module._sse_event({"type": "dice", "dice": dice_result})
         try:
             for event_type, payload in app_module.call_claude_gm_stream(
-                augmented_edit, system_prompt, recent, session_id=None
+                augmented_edit,
+                system_prompt,
+                recent,
+                session_id=None,
+                story_id=story_id,
+                branch_id=branch_id,
             ):
                 if event_type == "text":
                     yield app_module._sse_event({"type": "text", "chunk": payload})
@@ -1046,7 +1056,12 @@ def api_branches_regenerate():
     t0 = time.time()
     try:
         gm_response, _ = app_module.call_claude_gm(
-            augmented_regen, system_prompt, recent, session_id=None
+            augmented_regen,
+            system_prompt,
+            recent,
+            session_id=None,
+            story_id=story_id,
+            branch_id=branch_id,
         )
     except Exception as exc:
         log.info("/api/branches/regenerate EXCEPTION %s", exc)
@@ -1227,7 +1242,12 @@ def api_branches_regenerate_stream():
             yield app_module._sse_event({"type": "dice", "dice": dice_result})
         try:
             for event_type, payload in app_module.call_claude_gm_stream(
-                augmented_regen, system_prompt, recent, session_id=None
+                augmented_regen,
+                system_prompt,
+                recent,
+                session_id=None,
+                story_id=story_id,
+                branch_id=branch_id,
             ):
                 if event_type == "text":
                     yield app_module._sse_event({"type": "text", "chunk": payload})

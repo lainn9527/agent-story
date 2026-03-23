@@ -452,6 +452,7 @@ def api_lore_chat_stream():
                 prior,
                 session_id=None,
                 tools=tools,
+                story_id=story_id,
             ):
                 if event_type == "text":
                     yield app_module._sse_event({"type": "text", "chunk": payload})
@@ -527,4 +528,3 @@ def api_lore_apply():
                 app_module.delete_lore_entry(story_id, topic, subcategory)
                 applied.append({"action": "delete", "topic": topic})
     return jsonify({"ok": True, "applied": applied})
-

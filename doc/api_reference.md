@@ -155,7 +155,7 @@
 | Method | Path | 說明 | 主要參數 |
 |---|---|---|---|
 | GET | `/api/config` | 讀 LLM 設定（已脫敏，不回傳 key） | - |
-| POST | `/api/config` | 更新 provider/model | body: `provider`, `gemini.model`, `claude_cli.model` |
+| POST | `/api/config` | 更新 provider/model | body: `provider`, `gemini.model`, `claude_cli.model`, `codex_agent.model` |
 | GET | `/api/cheats/dice` | 讀骰子 cheat 狀態 | `branch_id` |
 | POST | `/api/cheats/dice` | 設定 always_success | body: `branch_id`, `always_success` |
 | GET | `/api/cheats/fate` | 讀 fate mode | `branch_id` |
@@ -184,3 +184,11 @@
 注意：
 
 - 目前建議在 dungeon API 明確傳 `branch_id`，避免走 fallback path。
+
+`/api/config` 回傳補充：
+- `provider` 目前可能值：`gemini` / `claude_cli` / `codex_agent`
+- 回傳結構固定包含：
+  - `gemini.model`
+  - `claude_cli.model`
+  - `codex_agent.model`
+- `codex_agent` 是 read-only provider。前端看起來只是另一個模型供應商選項；後端仍走同一套 `/api/send*`、GM parser、snapshot 與 async extractor 流程。

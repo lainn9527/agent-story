@@ -8,7 +8,7 @@
 Browser (static/app.js, templates/index.html)
   -> Flask app (app.py)
       -> LLM bridge (story_core/llm_bridge.py)
-          -> story_core/gemini_bridge.py 或 story_core/claude_bridge.py
+          -> story_core/gemini_bridge.py / story_core/claude_bridge.py / story_core/codex_bridge.py
       -> Lore / Event / Usage / State SQLite
       -> JSON runtime files (messages/state/npcs/branch tree/saves...)
       -> Background threads (tag extraction, compaction, NPC evolution, state cleanup, image gen)
@@ -31,6 +31,10 @@ Browser (static/app.js, templates/index.html)
   - 內建 retention prune（按日期資料夾清理）
 - `story_core/gemini_bridge.py` / `story_core/claude_bridge.py`
   - Gemini API 或 Claude CLI 的實際呼叫
+- `story_core/codex_bridge.py`
+  - Codex CLI 的 read-only provider
+  - 以臨時工作區暴露當前 branch timeline / state / lore / recap / plan
+  - 仍走既有 GM parser / snapshot / async extractor pipeline
 - `story_core/lore_db.py` / `story_core/event_db.py` / `story_core/usage_db.py`
   - 各自獨立 SQLite
 - `story_core/state_db.py`

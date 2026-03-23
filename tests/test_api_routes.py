@@ -1275,9 +1275,11 @@ class TestSavesAPI:
 
         captured = {}
 
-        def fake_call_claude_gm(_user_text, system_prompt, _recent, session_id=None):
+        def fake_call_claude_gm(_user_text, system_prompt, _recent, session_id=None, **kwargs):
             captured["system_prompt"] = system_prompt
             assert session_id is None
+            assert kwargs["story_id"] == story_id
+            assert kwargs["branch_id"] == "main"
             return ("GM回覆", None)
 
         monkeypatch.setattr(app_module, "call_claude_gm", fake_call_claude_gm)
@@ -1319,9 +1321,11 @@ class TestSavesAPI:
 
         captured = {}
 
-        def fake_call_claude_gm(_user_text, system_prompt, _recent, session_id=None):
+        def fake_call_claude_gm(_user_text, system_prompt, _recent, session_id=None, **kwargs):
             captured["system_prompt"] = system_prompt
             assert session_id is None
+            assert kwargs["story_id"] == story_id
+            assert kwargs["branch_id"] == "branch_gap"
             return ("GM回覆", None)
 
         monkeypatch.setattr(app_module, "call_claude_gm", fake_call_claude_gm)
@@ -1363,8 +1367,10 @@ class TestSavesAPI:
             encoding="utf-8",
         )
 
-        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None):
+        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None, **kwargs):
             assert session_id is None
+            assert kwargs["story_id"] == story_id
+            assert kwargs["branch_id"] == "branch_gap_stream"
             yield ("done", {"response": "GM串流回覆", "usage": None})
 
         monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
@@ -1392,8 +1398,9 @@ class TestSavesAPI:
         preview_status = client.get("/api/status?branch_id=main").get_json()
         assert preview_status["loaded_save_id"] == save["id"]
 
-        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None):
+        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None, **kwargs):
             assert session_id is None
+            assert kwargs["branch_id"] == "main"
             yield ("done", {"response": "GM串流回覆", "usage": None})
 
         monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
@@ -1811,9 +1818,23 @@ class TestConfigAPI:
         assert data["ok"] is True
         assert data["provider"] == "gemini"
         assert "version" in data
+        assert data["codex_agent"]["model"] == "gpt-5.4"
         # API keys should NOT be exposed
         raw = json.dumps(data)
         assert "test_key_123" not in raw
+
+    def test_set_config_codex_agent(self, client, setup_story):
+        resp = client.post(
+            "/api/config",
+            json={"provider": "codex_agent", "codex_agent": {"model": "gpt-5.4"}},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        with open(app_module._LLM_CONFIG_PATH, "r", encoding="utf-8") as handle:
+            cfg = json.load(handle)
+        assert cfg["provider"] == "codex_agent"
+        assert cfg["codex_agent"]["model"] == "gpt-5.4"
 
 
 # ===================================================================

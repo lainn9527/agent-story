@@ -7,6 +7,7 @@
 - Python 3.11+（WSL2 文件示例使用 3.12）
 - `pip`
 - 若使用 Claude provider：`@anthropic-ai/claude-code` CLI
+- 若使用 Codex provider：`codex` CLI
 
 ### 安裝
 
@@ -20,9 +21,14 @@ pip install -r requirements.txt
 
 建立或修改 `llm_config.json`（含金鑰，不應提交）：
 
-- `provider`: `gemini` 或 `claude_cli`
+- `provider`: `gemini`、`claude_cli` 或 `codex_agent`
 - `gemini.api_keys`: 可放多把 key（系統會做 fallback/cooldown）
-- `gemini.model` / `claude_cli.model`
+- `gemini.model` / `claude_cli.model` / `codex_agent.model`
+
+`codex_agent` 備註：
+- 目前是 read-only provider，只會在臨時工作區內讀取 branch/lore/context 檔案。
+- 它不會直接寫 runtime JSON；最終仍由既有 Flask route + `gm_pipeline` 落盤。
+- 串流模式目前是 bridge 端相容層：Codex 先完成整段 GM 回覆，再切成 SSE chunk 回前端。
 
 ## 2) 本機啟動流程
 

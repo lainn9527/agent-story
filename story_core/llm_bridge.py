@@ -1,7 +1,7 @@
 """LLM Bridge — dispatches GM calls to the configured provider.
 
 Swap provider by editing llm_config.json (auto-reloads on file change).
-Supported providers: "gemini", "claude_cli"
+Supported providers: "gemini", "claude_cli", "codex_agent"
 """
 
 import json
@@ -70,6 +70,8 @@ def _capture_usage(provider: str, model: str):
     if provider == "gemini":
         from story_core.gemini_bridge import get_last_usage as _gemini_usage
         usage = _gemini_usage()
+    elif provider == "codex_agent":
+        usage = None
     else:
         from story_core.claude_bridge import get_last_usage as _claude_usage
         usage = _claude_usage()
@@ -86,6 +88,9 @@ def call_claude_gm(
     system_prompt: str,
     recent_messages: list[dict],
     session_id: str | None = None,
+    *,
+    story_id: str | None = None,
+    branch_id: str | None = None,
 ) -> tuple[str, str | None]:
     """Unified GM call. Returns (response_text, session_id_or_none)."""
     cfg = _get_config()
@@ -99,6 +104,22 @@ def call_claude_gm(
             user_message, system_prompt, recent_messages,
             gemini_cfg=g, model=model,
             session_id=session_id,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "codex_agent":
+        from story_core.codex_bridge import call_codex_gm
+
+        model = cfg.get("codex_agent", {}).get("model", "gpt-5.4")
+        result = call_codex_gm(
+            user_message,
+            system_prompt,
+            recent_messages,
+            session_id=session_id,
+            story_id=story_id,
+            branch_id=branch_id,
+            model=model,
         )
         _capture_usage(provider, model)
         return result
@@ -121,6 +142,9 @@ def call_claude_gm_stream(
     recent_messages: list[dict],
     session_id: str | None = None,
     tools: list[dict] | None = None,
+    *,
+    story_id: str | None = None,
+    branch_id: str | None = None,
 ):
     """Unified streaming GM call. Yields ("text"|"done"|"error", payload).
 
@@ -144,6 +168,24 @@ def call_claude_gm_stream(
                 if usage:
                     payload["usage"] = {**usage, "provider": provider, "model": model}
             yield (event_type, payload)
+        return
+
+    if provider == "codex_agent":
+        if tools:
+            log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
+        from story_core.codex_bridge import call_codex_gm_stream
+
+        model = cfg.get("codex_agent", {}).get("model", "gpt-5.4")
+        yield from call_codex_gm_stream(
+            user_message,
+            system_prompt,
+            recent_messages,
+            session_id=session_id,
+            story_id=story_id,
+            branch_id=branch_id,
+            model=model,
+            tools=tools,
+        )
         return
 
     # Default: Claude CLI (tools not supported)
@@ -177,6 +219,14 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
             gemini_cfg=g, model=model,
             system_prompt=system_prompt,
         )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "codex_agent":
+        from story_core.codex_bridge import call_codex_oneshot
+
+        model = cfg.get("codex_agent", {}).get("model", "gpt-5.4")
+        result = call_codex_oneshot(prompt, system_prompt=system_prompt, model=model)
         _capture_usage(provider, model)
         return result
 

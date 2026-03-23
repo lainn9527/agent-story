@@ -107,7 +107,12 @@ def api_debug_chat_stream():
         t_start = time.time()
         try:
             for event_type, payload in app_module.call_claude_gm_stream(
-                user_message, debug_system_prompt, prior, session_id=None
+                user_message,
+                debug_system_prompt,
+                prior,
+                session_id=None,
+                story_id=story_id,
+                branch_id=branch_id,
             ):
                 if event_type == "text":
                     yield app_module._sse_event({"type": "text", "chunk": payload})
