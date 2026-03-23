@@ -1968,7 +1968,9 @@ async function regenerateGmMessage(msg, msgEl) {
 
   $sendBtn.disabled = true;
 
-  showPlaceholderSwitcher(targetMsgEl, branchPointIndex + 1);
+  showPlaceholderSwitcher(targetMsgEl, branchPointIndex + 1, {
+    baseVariantCount: retryingMissingGm ? 1 : 2,
+  });
 
   if (activeStreamController) {
     activeStreamController.abort();
@@ -2033,10 +2035,11 @@ async function regenerateGmMessage(msg, msgEl) {
 }
 
 
-function showPlaceholderSwitcher(msgEl, index) {
+function showPlaceholderSwitcher(msgEl, index, options = {}) {
   const sibKey = String(index);
-  let current = 2;
-  let total = 2;
+  const baseVariantCount = Math.max(1, Number(options.baseVariantCount) || 2);
+  let current = baseVariantCount;
+  let total = baseVariantCount;
 
   if (siblingGroups[sibKey]) {
     total = siblingGroups[sibKey].total + 1;
