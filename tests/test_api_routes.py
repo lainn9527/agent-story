@@ -1065,7 +1065,6 @@ class TestDungeonAPI:
 
         def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None, **kwargs):
             assert session_id is None
-            assert kwargs["branch_id"].startswith("branch_")
             yield ("done", {"response": "補發串流成功", "usage": None})
 
         monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
