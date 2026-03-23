@@ -1927,6 +1927,7 @@ async function regenerateGmMessage(msg, msgEl) {
 
   const parentBranchId = msg.owner_branch_id || currentBranchId;
   const branchPointIndex = (msg.role === 'user') ? msg.index : msg.index - 1;
+  const retryingMissingGm = msg.role === 'user';
 
   // Truncate subsequent messages in DOM
   let sibling = msgEl.nextSibling;
@@ -1967,7 +1968,9 @@ async function regenerateGmMessage(msg, msgEl) {
 
   $sendBtn.disabled = true;
 
-  showPlaceholderSwitcher(targetMsgEl, branchPointIndex + 1);
+  showPlaceholderSwitcher(targetMsgEl, branchPointIndex + 1, {
+    baseVariantCount: retryingMissingGm ? 1 : 2,
+  });
 
   if (activeStreamController) {
     activeStreamController.abort();
@@ -2002,8 +2005,13 @@ async function regenerateGmMessage(msg, msgEl) {
       // onError
       (errMsg) => {
         if (errMsg !== "AbortError") {
-          if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
-          if (actionsEl) actionsEl.style.display = "";
+          if (retryingMissingGm) {
+            if (targetMsgEl) targetMsgEl.remove();
+            appendSystemError(errMsg || "重新生成失敗");
+          } else {
+            if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
+            if (actionsEl) actionsEl.style.display = "";
+          }
           loadBranches().then(() => renderBranchList());
           showAlert(errMsg || "重新生成失敗");
         }
@@ -2013,8 +2021,13 @@ async function regenerateGmMessage(msg, msgEl) {
     );
   } catch (err) {
     if (err.name === 'AbortError') return;
-    if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
-    if (actionsEl) actionsEl.style.display = "";
+    if (retryingMissingGm) {
+      if (targetMsgEl) targetMsgEl.remove();
+      appendSystemError("網路錯誤：" + err.message);
+    } else {
+      if (contentEl) contentEl.innerHTML = markdownToHtml(msg.content);
+      if (actionsEl) actionsEl.style.display = "";
+    }
     showAlert("網路錯誤：" + err.message);
   }
 
@@ -2022,10 +2035,11 @@ async function regenerateGmMessage(msg, msgEl) {
 }
 
 
-function showPlaceholderSwitcher(msgEl, index) {
+function showPlaceholderSwitcher(msgEl, index, options = {}) {
   const sibKey = String(index);
-  let current = 2;
-  let total = 2;
+  const baseVariantCount = Math.max(1, Number(options.baseVariantCount) || 2);
+  let current = baseVariantCount;
+  let total = baseVariantCount;
 
   if (siblingGroups[sibKey]) {
     total = siblingGroups[sibKey].total + 1;

@@ -19,6 +19,28 @@ def _app():
     return app_module
 
 
+def _resolve_regenerate_user_message(app_module, timeline: list[dict], branch_point_index: int) -> dict | None:
+    """Allow regenerating a user turn with an existing GM reply or retrying the last persisted user turn."""
+    user_msg = app_module._find_timeline_message(timeline, branch_point_index, role="user")
+    if not user_msg:
+        return None
+
+    next_msg = app_module._find_timeline_message(timeline, branch_point_index + 1)
+    if next_msg is not None:
+        if next_msg.get("role") in ("gm", "assistant"):
+            return user_msg
+        return None
+
+    has_later_messages = any(
+        isinstance(message, dict) and isinstance(message.get("index"), int)
+        and message["index"] > branch_point_index
+        for message in timeline
+    )
+    if has_later_messages:
+        return None
+    return user_msg
+
+
 @branch_bp.route("/api/branches")
 def api_branches():
     app_module = _app()
@@ -937,11 +959,8 @@ def api_branches_regenerate():
     branches = tree.get("branches", {})
     source_branch_id = parent_branch_id
     source_timeline = app_module.get_full_timeline(story_id, source_branch_id)
-    user_msg = app_module._find_timeline_message(source_timeline, branch_point_index, role="user")
-    gm_msg = app_module._find_timeline_message(
-        source_timeline, branch_point_index + 1, role=("gm", "assistant")
-    )
-    if not user_msg or not gm_msg:
+    user_msg = _resolve_regenerate_user_message(app_module, source_timeline, branch_point_index)
+    if not user_msg:
         return jsonify({"ok": False, "error": "invalid_regenerate_target"}), 400
     parent_branch_id = app_module._resolve_sibling_parent(branches, parent_branch_id, branch_point_index)
     if parent_branch_id not in branches:
@@ -1120,11 +1139,8 @@ def api_branches_regenerate_stream():
     branches = tree.get("branches", {})
     source_branch_id = parent_branch_id
     source_timeline = app_module.get_full_timeline(story_id, source_branch_id)
-    user_msg = app_module._find_timeline_message(source_timeline, branch_point_index, role="user")
-    gm_msg = app_module._find_timeline_message(
-        source_timeline, branch_point_index + 1, role=("gm", "assistant")
-    )
-    if not user_msg or not gm_msg:
+    user_msg = _resolve_regenerate_user_message(app_module, source_timeline, branch_point_index)
+    if not user_msg:
         return Response(
             app_module._sse_event({"type": "error", "message": "invalid_regenerate_target"}),
             mimetype="text/event-stream",
