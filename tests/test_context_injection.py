@@ -12,6 +12,7 @@ import pytest
 
 import app as app_module
 from story_core import state_db
+from story_core.prompts import SYSTEM_PROMPT_TEMPLATE
 
 
 @pytest.fixture(autouse=True)
@@ -142,6 +143,12 @@ class TestBuildAugmentedMessage:
         assert "---\n原始訊息" in text
         assert "[續場提醒]" not in text
 
+
+def test_fallback_prompt_requires_single_actions_block():
+    assert "可選行動區塊在整段回覆中只允許出現一次" in SYSTEM_PROMPT_TEMPLATE
+    assert "`<!--ACTIONS-->`" in SYSTEM_PROMPT_TEMPLATE
+    assert "嚴禁在正文其他位置輸出任何行動選項" in SYSTEM_PROMPT_TEMPLATE
+
     @mock.patch("app.search_relevant_lore", return_value="")
     @mock.patch("app.format_sticky_events", return_value="[長期關鍵事件]\n- 神王追索")
     @mock.patch("app.search_relevant_events", return_value="[相關事件追蹤]\n- 水靈珠線索")
@@ -163,6 +170,84 @@ class TestBuildAugmentedMessage:
         assert "[長期關鍵事件]" in text
         assert "[相關事件追蹤]" in text
         assert text.index("[長期關鍵事件]") < text.index("[相關事件追蹤]")
+
+    @mock.patch("app.search_relevant_lore", return_value="")
+    @mock.patch("app.format_sticky_events", return_value="[長期關鍵事件]\n- 神王追索")
+    @mock.patch("app.search_relevant_events", return_value="")
+    @mock.patch("app.get_recent_activities", return_value="")
+    @mock.patch("app.is_gm_command", return_value=False)
+    @mock.patch("app.get_fate_mode", return_value=False)
+    def test_dungeon_return_recall_injected_once_before_sticky_events(
+        self,
+        _mock_fate,
+        _mock_gm,
+        _mock_act,
+        _mock_evt,
+        _mock_sticky,
+        _mock_lore,
+        story_id,
+        setup_story,
+    ):
+        branch_dir = setup_story / "branches" / "main"
+        (branch_dir / "character_state.json").write_text(
+            json.dumps(
+                {
+                    "name": "測試者",
+                    "current_phase": "副本中",
+                    "current_dungeon": "火影忍者",
+                    "relationships": {"阿豪": "老戰友"},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (branch_dir / "npcs.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "name": "阿豪",
+                        "role": "隊友",
+                        "lifecycle_status": "archived",
+                        "archive_kind": "offstage",
+                        "archived_reason": "已離隊",
+                        "home_scope": "dungeon_local",
+                        "home_dungeon": "火影忍者",
+                        "return_recall_state": "eligible",
+                        "last_seen_msg_index": 12,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (branch_dir / "dungeon_return_memory.json").write_text(
+            json.dumps(
+                {
+                    "visited_dungeons": ["火影忍者"],
+                    "pending_reentry_dungeon": "火影忍者",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        first_text, _ = app_module._build_augmented_message(
+            story_id,
+            "main",
+            "我重新走進木葉村",
+            {"current_phase": "副本中", "current_dungeon": "火影忍者", "relationships": {"阿豪": "老戰友"}},
+        )
+        assert "[舊副本關聯角色提醒]" in first_text
+        assert "阿豪" in first_text
+        assert first_text.index("[舊副本關聯角色提醒]") < first_text.index("[長期關鍵事件]")
+
+        second_text, _ = app_module._build_augmented_message(
+            story_id,
+            "main",
+            "我繼續前進",
+            {"current_phase": "副本中", "current_dungeon": "火影忍者", "relationships": {"阿豪": "老戰友"}},
+        )
+        assert "[舊副本關聯角色提醒]" not in second_text
 
     @mock.patch("app.search_relevant_lore", return_value="")
     @mock.patch("app.search_relevant_events", return_value="")
@@ -509,6 +594,7 @@ class TestBuildStorySystemPrompt:
             {"image_gen_enabled": True, "image_model": "gemini-3.1-flash-image-preview"},
         )
         prompt = app_module._build_story_system_prompt(story_id, "{}", branch_id="main")
+        assert "每次 GM 回覆都必須輸出且只輸出一個 IMG tag" in prompt
         assert "當前圖片模型：`gemini-3.1-flash-image-preview`" in prompt
 
 

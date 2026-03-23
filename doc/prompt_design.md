@@ -48,6 +48,9 @@
   - 追加 NSFW 偏好（chips/custom）
 - `branch_config.image_gen_enabled = false`：
   - 追加「禁止輸出 IMG tag」系統段落，避免模型繼續發出插圖指令
+- `branch_config.image_gen_enabled = true`：
+  - 追加「每次 GM 回覆都必須輸出且只輸出一個 IMG tag」系統段落
+  - 即使是過場、情報或純對話回合，也要求模型為當前最具代表性的場景出圖
 - `branch_config.image_model`：
   - 追加目前圖片模型提示（預設 `gemini-2.5-flash-image`），方便同一故事不同分支使用不同產圖模型
 
@@ -93,7 +96,7 @@
   - 再附加 `current_dungeon`。
   - 再附加「最近幾則 GM 回覆或玩家輸入中明確提到」的 active NPC 名稱。
   - 再附加 recent GM 回覆中的高訊號 CJK terms（優先保留副本名、NPC 名、事件名、術式/道具名）。
-- GM 的可選行動區塊契約：在尾端選項前先輸出 `<!--ACTIONS-->`，再接 `**可選行動：**` 或 `**你打算：**` 與編號選項。`<!--ACTIONS-->` 會保留在 runtime 訊息中供 recent/compaction 清理使用，但前端顯示時會隱藏。
+- GM 的可選行動區塊契約：整段回覆只允許一個尾端選項區塊。模型必須先輸出 `<!--ACTIONS-->`，再接唯一的一個 `**可選行動：**` 或 `**你打算：**` 標頭與編號選項；正文其他位置不得再出現任何額外的行動選項或同類標頭。`<!--ACTIONS-->` 會保留在 runtime 訊息中供 recent/compaction 清理使用，但前端顯示時會隱藏。
 - `[相關世界設定]` 會用這個 expanded query 做 keyword + embedding 混合排序，並套用最低 keyword/RRF 分數門檻，避免弱命中條目塞滿 token budget。
 - `[相關分支設定]` 會用同一份 expanded query 做 normalized bigram overlap 搜尋，並額外考慮 query terms 對 `topic/subcategory/content` 的命中；budget 估算以 CJK 約 1 char ≈ 1 token 計，避免低相關的舊分支設定過量注入。
 
@@ -132,7 +135,7 @@
 - `IMG`：非同步生成圖片
   - 會先檢查 branch config：
     - `image_gen_enabled = false`：只移除 IMG tag，不會觸發下載
-    - `image_gen_enabled = true`：觸發下載；若有 `image_model` 則優先使用該模型
+    - `image_gen_enabled = true`：prompt 會要求每回合輸出單一 IMG tag；若模型真的輸出 IMG tag，則觸發下載，且 `image_model` 優先使用 branch config 指定值
 - `TIME`：推進 `world_day`
 
 ### 3.2 回覆清理
