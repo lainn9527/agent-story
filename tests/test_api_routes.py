@@ -1029,6 +1029,62 @@ class TestDungeonAPI:
         assert resp.status_code == 200
         assert calls == [("test_story", "main", 2)]
 
+    def test_regenerate_allows_retry_for_last_user_without_gm(self, client, setup_story, monkeypatch):
+        """Regenerate should accept the last persisted user turn when GM generation previously failed."""
+        import app as app_module
+
+        messages_path = setup_story / "branches" / "main" / "messages.json"
+        messages_path.write_text(
+            json.dumps([{"index": 4, "role": "user", "content": "補發這一回合"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("補發成功", None))
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+
+        resp = client.post("/api/branches/regenerate", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 4,
+        })
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["gm_msg"]["index"] == 5
+        assert data["gm_msg"]["content"] == "補發成功"
+
+    def test_regenerate_stream_allows_retry_for_last_user_without_gm(self, client, setup_story, monkeypatch):
+        """Streaming regenerate should accept the last persisted user turn when no GM reply exists yet."""
+        import app as app_module
+
+        messages_path = setup_story / "branches" / "main" / "messages.json"
+        messages_path.write_text(
+            json.dumps([{"index": 4, "role": "user", "content": "補發這一回合"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None, **kwargs):
+            assert session_id is None
+            assert kwargs["branch_id"].startswith("branch_")
+            yield ("done", {"response": "補發串流成功", "usage": None})
+
+        monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
+        monkeypatch.setattr(
+            app_module,
+            "_process_gm_response",
+            lambda gm_response, _story_id, _branch_id, _idx, **_kwargs: (gm_response, None, {}),
+        )
+
+        resp = client.post("/api/branches/regenerate/stream", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 4,
+        })
+
+        assert resp.status_code == 200
+        data = resp.get_data(as_text=True)
+        assert "\"type\": \"done\"" in data
+        assert "\"補發串流成功\"" in data
+
     def test_edit_stream_no_change_rejected(self, client, setup_story):
         """Streaming edit with identical content should return error SSE event."""
         resp = client.post("/api/branches/edit/stream", json={

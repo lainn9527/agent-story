@@ -244,6 +244,7 @@
 ### 8.1 Edit / Regenerate
 
 - 都會建立新分支，不覆蓋原分支
+- `regenerate` 除了重生既有 `user -> GM` 配對，也接受「最後一則已落盤但尚未有 GM」的 `user` 回合作為補發目標
 - 新分支會繼承：
   - 對應 index 的 state/NPC/world_day snapshot
   - recap、cheat、branch lore、events、dungeon progress、gm plan（若 `plan.updated_at_index <= branch_point_index`）
