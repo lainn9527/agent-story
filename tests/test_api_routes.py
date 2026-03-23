@@ -7,6 +7,7 @@ LLM calls are mocked; tests focus on request/response contracts.
 
 import json
 import os
+from html.parser import HTMLParser
 
 import pytest
 
@@ -17,6 +18,41 @@ from story_core import lore_db
 from story_core import state_cleanup
 from story_core import state_db
 from story_core import story_io
+
+
+class _ElementParentParser(HTMLParser):
+    """Track parent and ancestor ids for elements in server-rendered HTML."""
+
+    _VOID_TAGS = {
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.parents_by_id = {}
+        self.ancestors_by_id = {}
+
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+        element_id = attrs_dict.get("id")
+        parent_id = None
+        for node in reversed(self.stack):
+            if node["id"]:
+                parent_id = node["id"]
+                break
+        if element_id:
+            self.parents_by_id[element_id] = parent_id
+            self.ancestors_by_id[element_id] = [node["id"] for node in self.stack if node["id"]]
+        if tag not in self._VOID_TAGS:
+            self.stack.append({"tag": tag, "id": element_id})
+
+    def handle_endtag(self, tag):
+        while self.stack:
+            node = self.stack.pop()
+            if node["tag"] == tag:
+                break
 
 
 @pytest.fixture(autouse=True)
@@ -159,6 +195,16 @@ def setup_story(tmp_path, story_id):
 
 
 class TestStoriesAPI:
+    def test_index_renders_pistol_prefs_modal_outside_debug_modal(self, client, setup_story):
+        resp = client.get("/")
+        assert resp.status_code == 200
+
+        parser = _ElementParentParser()
+        parser.feed(resp.get_data(as_text=True))
+
+        assert "pistol-prefs-modal" in parser.ancestors_by_id
+        assert "debug-panel-modal" not in parser.ancestors_by_id["pistol-prefs-modal"]
+
     def test_get_stories(self, client, setup_story, story_id):
         resp = client.get("/api/stories")
         assert resp.status_code == 200
