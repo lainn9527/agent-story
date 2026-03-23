@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import select
 import shutil
 import subprocess
 import tempfile
@@ -14,11 +15,14 @@ from pathlib import Path
 from story_core.branch_tree import get_full_timeline
 from story_core.compaction import load_recap
 from story_core.gm_plan import _load_gm_plan
+from story_core.gm_cheats import get_fate_mode
 from story_core.lore_helpers import _load_branch_lore
+from story_core.tag_extraction import _sanitize_recent_messages
 from story_core.story_io import (
     _dungeon_progress_path,
     _load_json,
     _load_tree,
+    _story_dir,
     _story_character_state_path,
     _story_character_schema_path,
     _story_design_dir,
@@ -30,6 +34,7 @@ log = logging.getLogger("rpg")
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_TIMEOUT = 300
 DEFAULT_CODEX_MODEL = "gpt-5.4"
+STREAM_KEEPALIVE_S = 8.0
 _ENV = dict(os.environ)
 
 
@@ -118,7 +123,11 @@ def _build_gm_workspace(
         design_root = Path(_story_design_dir(story_id))
         tree = _load_tree(story_id)
         branch_meta = tree.get("branches", {}).get(branch_id, {})
-        timeline = get_full_timeline(story_id, branch_id)
+        strip_fate = not get_fate_mode(_story_dir(story_id), branch_id)
+        timeline = _sanitize_recent_messages(
+            get_full_timeline(story_id, branch_id),
+            strip_fate=strip_fate,
+        )
         recap = load_recap(story_id, branch_id)
         gm_plan = _load_gm_plan(story_id, branch_id)
         branch_lore = _load_branch_lore(story_id, branch_id)
@@ -179,21 +188,7 @@ def _build_gm_workspace(
 
 def _run_codex_task(*, workspace: str, model: str) -> str:
     output_path = os.path.join(workspace, "codex_last_message.txt")
-    cmd = [
-        CODEX_BIN,
-        "-a",
-        "never",
-        "exec",
-        "--skip-git-repo-check",
-        "-s",
-        "read-only",
-        "--ephemeral",
-        "-m",
-        model or DEFAULT_CODEX_MODEL,
-        "-o",
-        output_path,
-        "Read TASK.md and follow it exactly.",
-    ]
+    cmd = _build_codex_cmd(model=model, output_path=output_path)
 
     log.info("    codex_bridge: calling CLI cwd=%s model=%s", workspace, model or DEFAULT_CODEX_MODEL)
     t0 = time.time()
@@ -235,6 +230,27 @@ def _run_codex_task(*, workspace: str, model: str) -> str:
     return f"【系統錯誤】Codex 回應失敗：{detail}"
 
 
+def _build_codex_cmd(*, model: str, output_path: str | None = None, json_stream: bool = False) -> list[str]:
+    cmd = [
+        CODEX_BIN,
+        "-a",
+        "never",
+        "exec",
+        "--skip-git-repo-check",
+        "-s",
+        "read-only",
+        "--ephemeral",
+        "-m",
+        model or DEFAULT_CODEX_MODEL,
+    ]
+    if json_stream:
+        cmd.append("--json")
+    elif output_path:
+        cmd.extend(["-o", output_path])
+    cmd.append("Read TASK.md and follow it exactly.")
+    return cmd
+
+
 def call_codex_gm(
     user_message: str,
     system_prompt: str,
@@ -271,26 +287,136 @@ def call_codex_gm_stream(
     model: str = DEFAULT_CODEX_MODEL,
     tools: list[dict] | None = None,
 ):
-    """Streaming-compatible wrapper for Codex GM.
+    """Streaming wrapper for Codex GM using `codex exec --json`.
 
-    Codex CLI is executed once and then chunked into SSE-friendly text deltas.
+    Codex CLI does not currently provide token-by-token deltas for plain text
+    output, so we forward any completed agent text as soon as it appears and
+    emit empty keepalive chunks while the subprocess is still running.
     """
-    del tools
-    response, _ = call_codex_gm(
-        user_message,
-        system_prompt,
-        recent_messages,
-        session_id=session_id,
+    del tools, session_id
+    workspace = _build_gm_workspace(
         story_id=story_id,
         branch_id=branch_id,
-        model=model,
+        user_message=user_message,
+        system_prompt=system_prompt,
+        recent_messages=recent_messages,
     )
-    if response.startswith("【系統錯誤】"):
-        yield ("error", response.replace("【系統錯誤】", "", 1).strip())
+    try:
+        cmd = _build_codex_cmd(model=model, json_stream=True)
+        log.info("    codex_bridge_stream: calling CLI cwd=%s model=%s", workspace, model or DEFAULT_CODEX_MODEL)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            cwd=workspace,
+            env=_ENV,
+        )
+    except FileNotFoundError:
+        shutil.rmtree(workspace, ignore_errors=True)
+        log.info("    codex_bridge_stream: codex CLI not found")
+        yield ("error", "找不到 codex CLI。請確認已安裝 Codex。")
         return
-    for chunk in _chunk_text(response):
-        yield ("text", chunk)
-    yield ("done", {"response": response, "session_id": None, "usage": None})
+    except Exception as exc:
+        shutil.rmtree(workspace, ignore_errors=True)
+        log.info("    codex_bridge_stream: Popen EXCEPTION %s", exc)
+        yield ("error", str(exc))
+        return
+
+    response_text = ""
+    usage = None
+    last_emit_at = time.time()
+
+    try:
+        stdout = proc.stdout
+        assert stdout is not None
+        while True:
+            ready, _, _ = select.select([stdout], [], [], STREAM_KEEPALIVE_S)
+            if not ready:
+                if proc.poll() is not None:
+                    break
+                last_emit_at = time.time()
+                yield ("text", "")
+                continue
+
+            raw_line = stdout.readline()
+            if not raw_line:
+                if proc.poll() is not None:
+                    break
+                continue
+
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            event_type = data.get("type")
+            if event_type in {"thread.started", "turn.started"}:
+                if time.time() - last_emit_at >= 0.1:
+                    last_emit_at = time.time()
+                    yield ("text", "")
+                continue
+
+            if event_type == "item.completed":
+                item = data.get("item", {}) or {}
+                if item.get("type") == "agent_message":
+                    text = str(item.get("text", "")).strip()
+                    if text and text != response_text:
+                        delta = text[len(response_text):] if text.startswith(response_text) else text
+                        response_text = text
+                        if delta:
+                            last_emit_at = time.time()
+                            yield ("text", delta)
+                continue
+
+            if event_type == "turn.completed":
+                usage = data.get("usage")
+                continue
+
+            if event_type == "error":
+                message = ""
+                err = data.get("error")
+                if isinstance(err, dict):
+                    message = str(err.get("message", "")).strip()
+                if not message:
+                    message = str(data.get("message", "")).strip() or "Codex 執行失敗"
+                yield ("error", message)
+                return
+
+        proc.wait(timeout=10)
+        if proc.returncode != 0 and not response_text:
+            stderr_text = proc.stderr.read().strip() if proc.stderr else ""
+            error_msg = stderr_text or f"Codex process exited with code {proc.returncode}"
+            yield ("error", error_msg)
+            return
+
+        if not response_text:
+            yield ("error", "Codex 回傳空白回應")
+            return
+
+        yield ("done", {"response": response_text, "session_id": None, "usage": usage})
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        yield ("error", "Codex 回應逾時，請稍後再試。")
+    except Exception as exc:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        if response_text:
+            yield ("done", {"response": response_text, "session_id": None, "usage": usage})
+        else:
+            yield ("error", str(exc))
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 def call_codex_oneshot(
