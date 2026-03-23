@@ -63,7 +63,7 @@
 | POST | `/api/branches/<branch_id>/config` | 更新分支設定（merge，回傳含 `defaults`） | 任意 JSON（常用：`team_mode`, `image_gen_enabled`, `image_model`） |
 | POST | `/api/branches/edit` | 編輯歷史玩家訊息並生成新分支 | body: `parent_branch_id`, `branch_point_index`, `edited_message` |
 | POST | `/api/branches/edit/stream` | `edit` 的 SSE 版本 | 同上 |
-| POST | `/api/branches/regenerate` | 對既有玩家訊息重生成 GM 回覆（新分支） | body: `parent_branch_id`, `branch_point_index` |
+| POST | `/api/branches/regenerate` | 對既有玩家訊息重生成 GM 回覆（新分支；也可補發最後一則尚未有 GM 的玩家訊息） | body: `parent_branch_id`, `branch_point_index` |
 | POST | `/api/branches/regenerate/stream` | `regenerate` 的 SSE 版本 | 同上 |
 | POST | `/api/branches/promote` | Promote 某分支為主線路徑並剪枝 | body: `branch_id` |
 | POST | `/api/branches/merge` | 合併子分支回父分支 | body: `branch_id` |
@@ -74,7 +74,7 @@
 
 `/api/branches/edit*` / `/api/branches/regenerate*` 補充：
 - `edit` 的 `branch_point_index + 1` 必須命中一則既有 `user` 訊息，否則回 `invalid_edit_target`
-- `regenerate` 的 `branch_point_index` 必須命中一則既有 `user` 訊息，且其下一則必須是 `gm`，否則回 `invalid_regenerate_target`
+- `regenerate` 的 `branch_point_index` 必須命中一則既有 `user` 訊息；若下一則存在，必須是 `gm`。特例是它也接受「目前時間線最後一則、尚未有 GM 回覆」的 `user` 訊息作為補發目標，其他情況仍回 `invalid_regenerate_target`
 
 ## 故事（Story）管理
 
