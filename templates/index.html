@@ -387,15 +387,16 @@
       </div>
       <div id="debug-apply-result" class="debug-apply-result"></div>
     </div>
+  </div>
 
-    <!-- Pistol Prefs Modal -->
-    <div id="pistol-prefs-modal" class="modal-overlay hidden">
-      <div class="modal-content pistol-prefs-modal-content">
-        <div class="pistol-prefs-header">
-          <h2>偏好設定</h2>
-          <button id="pistol-prefs-close" class="summary-modal-close-btn">&times;</button>
-        </div>
-        <div class="pistol-prefs-body">
+  <!-- Pistol Prefs Modal -->
+  <div id="pistol-prefs-modal" class="modal-overlay hidden">
+    <div class="modal-content pistol-prefs-modal-content">
+      <div class="pistol-prefs-header">
+        <h2>偏好設定</h2>
+        <button id="pistol-prefs-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div class="pistol-prefs-body">
           <div class="pistol-chips-group">
             <div class="pistol-chips-label">風格</div>
             <div class="pistol-chips" data-group="style">
@@ -582,14 +583,14 @@
             <div class="pistol-chips-label">自訂補充</div>
             <textarea id="pistol-custom-prefs" rows="2" placeholder="額外描述（可選）…"></textarea>
           </div>
-        </div>
-        <div class="modal-actions">
-          <button id="pistol-prefs-save" class="modal-create-btn" onclick="savePistolPrefs()">儲存</button>
-        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="pistol-prefs-save" class="modal-create-btn" onclick="savePistolPrefs()">儲存</button>
       </div>
     </div>
+  </div>
 
-    <script src="/static/app.js?v={{ v }}"></script>
+  <script src="/static/app.js?v={{ v }}"></script>
 </body>
 
 </html>
