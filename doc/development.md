@@ -28,7 +28,7 @@ pip install -r requirements.txt
 `codex_agent` 備註：
 - 目前是 read-only provider，只會在臨時工作區內讀取 branch/lore/context 檔案。
 - 它不會直接寫 runtime JSON；最終仍由既有 Flask route + `gm_pipeline` 落盤。
-- 串流模式目前是 bridge 端相容層：Codex 先完成整段 GM 回覆，再切成 SSE chunk 回前端。
+- 串流模式走 `codex exec --json`；bridge 會在回覆生成期間維持 SSE 活性，並在收到 agent message 時盡快往前端轉發正文。
 
 ## 2) 本機啟動流程
 
