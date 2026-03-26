@@ -93,6 +93,10 @@ def _debug_directive_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "debug_directive.json")
 
 
+def _pending_debug_overrides_path(story_id: str, branch_id: str) -> str:
+    return os.path.join(_branch_dir(story_id, branch_id), "pending_debug_overrides.json")
+
+
 def _dungeon_progress_path(story_id: str, branch_id: str) -> str:
     return os.path.join(_branch_dir(story_id, branch_id), "dungeon_progress.json")
 
@@ -332,6 +336,7 @@ __all__ = [
     "_debug_chat_path",
     "_last_apply_backup_path",
     "_debug_directive_path",
+    "_pending_debug_overrides_path",
     "_dungeon_progress_path",
     "_dungeon_return_memory_path",
     "_story_messages_path",

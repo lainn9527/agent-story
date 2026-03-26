@@ -990,6 +990,38 @@ class TestDungeonAPI:
         data = resp.get_json()
         assert data["ok"] is True
 
+    def test_edit_replays_pending_debug_overrides_and_consumes_source_pending(self, client, setup_story, monkeypatch):
+        import app as app_module
+
+        apply_resp = client.post("/api/debug/apply", json={
+            "branch_id": "main",
+            "actions": [{"type": "state_patch", "update": {"reward_points_delta": 40}}],
+            "directives": [],
+        })
+        assert apply_resp.status_code == 200
+
+        source_pending_path = setup_story / "branches" / "main" / "pending_debug_overrides.json"
+        assert source_pending_path.exists()
+
+        monkeypatch.setattr(app_module, "call_claude_gm", lambda *a, **kw: ("GM回覆", None))
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+
+        resp = client.post("/api/branches/edit", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 1,
+            "edited_message": "改動後要沿用 debug 修正",
+        })
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        child_id = data["branch"]["id"]
+
+        child_state_path = setup_story / "branches" / child_id / "character_state.json"
+        child_state = json.loads(child_state_path.read_text(encoding="utf-8"))
+        assert child_state["reward_points"] == 5040
+        assert not source_pending_path.exists()
+        assert not (setup_story / "branches" / child_id / "pending_debug_overrides.json").exists()
+
     def test_edit_waits_for_pending_extract(self, client, setup_story, monkeypatch):
         """Edit route should wait for branch-point async extraction before snapshot lookup."""
         import app as app_module
@@ -1083,6 +1115,50 @@ class TestDungeonAPI:
         data = resp.get_data(as_text=True)
         assert "\"type\": \"done\"" in data
         assert "\"補發串流成功\"" in data
+
+    def test_regenerate_stream_replays_pending_debug_overrides_and_consumes_source_pending(self, client, setup_story, monkeypatch):
+        import app as app_module
+
+        apply_resp = client.post("/api/debug/apply", json={
+            "branch_id": "main",
+            "actions": [{"type": "state_patch", "update": {"reward_points_delta": 15}}],
+            "directives": [{"instruction": "下回合請沿用 debug 指示"}],
+        })
+        assert apply_resp.status_code == 200
+
+        source_pending_path = setup_story / "branches" / "main" / "pending_debug_overrides.json"
+        source_directive_path = setup_story / "branches" / "main" / "debug_directive.json"
+        assert source_pending_path.exists()
+        assert source_directive_path.exists()
+
+        def fake_call_claude_gm_stream(_user_text, _system_prompt, _recent, session_id=None, **kwargs):
+            assert session_id is None
+            assert "[Debug 修正指令（僅供 GM 內部參考，勿透露給玩家）]" in _user_text
+            yield ("done", {"response": "帶入 debug override 的串流回覆", "usage": None})
+
+        monkeypatch.setattr(app_module, "call_claude_gm_stream", fake_call_claude_gm_stream)
+        monkeypatch.setattr(app_module, "_extract_tags_async", lambda *a, **kw: None)
+
+        resp = client.post("/api/branches/regenerate/stream", json={
+            "parent_branch_id": "main",
+            "branch_point_index": 2,
+        })
+
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        done_lines = [line for line in body.splitlines() if line.startswith("data: ")]
+        assert done_lines
+        done_payload = json.loads(done_lines[-1][6:])
+        assert done_payload["type"] == "done"
+        child_id = done_payload["branch"]["id"]
+
+        child_state_path = setup_story / "branches" / child_id / "character_state.json"
+        child_state = json.loads(child_state_path.read_text(encoding="utf-8"))
+        assert child_state["reward_points"] == 5015
+        assert not source_pending_path.exists()
+        assert source_directive_path.exists()
+        assert not (setup_story / "branches" / child_id / "pending_debug_overrides.json").exists()
+        assert not (setup_story / "branches" / child_id / "debug_directive.json").exists()
 
     def test_edit_stream_no_change_rejected(self, client, setup_story):
         """Streaming edit with identical content should return error SSE event."""

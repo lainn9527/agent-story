@@ -583,6 +583,7 @@ def api_branches_edit():
         fallback_state=forked_state,
     )
     app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
+    app_module._replay_pending_debug_overrides(story_id, source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -691,6 +692,7 @@ def api_branches_edit():
         gm_msg["image"] = image_info
     gm_msg.update(snapshots)
     app_module._upsert_branch_message(story_id, branch_id, gm_msg)
+    app_module._clear_pending_debug_overrides(story_id, source_branch_id)
 
     recap = app_module.load_recap(story_id, branch_id)
     if app_module.should_compact(recap, len(full_timeline) + 1):
@@ -791,6 +793,7 @@ def api_branches_edit_stream():
         fallback_state=forked_state,
     )
     app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
+    app_module._replay_pending_debug_overrides(story_id, source_branch_id, branch_id)
 
     user_msg_index = branch_point_index + 1
     gm_msg_index = branch_point_index + 2
@@ -907,6 +910,7 @@ def api_branches_edit_stream():
                         gm_msg["image"] = image_info
                     gm_msg.update(snapshots)
                     app_module._upsert_branch_message(story_id, branch_id, gm_msg)
+                    app_module._clear_pending_debug_overrides(story_id, source_branch_id)
 
                     recap = app_module.load_recap(story_id, branch_id)
                     if app_module.should_compact(recap, len(full_timeline) + 1):
@@ -1005,6 +1009,7 @@ def api_branches_regenerate():
         fallback_state=forked_state,
     )
     app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
+    app_module._replay_pending_debug_overrides(story_id, source_branch_id, branch_id)
 
     app_module._save_branch_messages(story_id, branch_id, [])
 
@@ -1110,6 +1115,7 @@ def api_branches_regenerate():
         gm_msg["dice"] = dice_result
     gm_msg.update(snapshots)
     app_module._save_branch_messages(story_id, branch_id, [gm_msg])
+    app_module._clear_pending_debug_overrides(story_id, source_branch_id)
 
     recap = app_module.load_recap(story_id, branch_id)
     if app_module.should_compact(recap, len(full_timeline) + 1):
@@ -1190,6 +1196,8 @@ def api_branches_regenerate_stream():
         branch_point_index,
         fallback_state=forked_state,
     )
+    app_module._copy_debug_directive(story_id, source_branch_id, branch_id)
+    app_module._replay_pending_debug_overrides(story_id, source_branch_id, branch_id)
     app_module._save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
@@ -1301,6 +1309,7 @@ def api_branches_regenerate_stream():
                         gm_msg["dice"] = dice_result
                     gm_msg.update(snapshots)
                     app_module._save_branch_messages(story_id, branch_id, [gm_msg])
+                    app_module._clear_pending_debug_overrides(story_id, source_branch_id)
 
                     recap = app_module.load_recap(story_id, branch_id)
                     if app_module.should_compact(recap, len(full_timeline) + 1):

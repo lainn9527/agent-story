@@ -301,6 +301,28 @@ def test_debug_apply_infers_state_patch_from_action_patch_alias(client, setup_st
     assert state["reward_points"] == 1011
 
 
+def test_debug_apply_persists_successful_actions_as_pending_overrides(client, setup_story):
+    resp = client.post("/api/debug/apply", json={
+        "branch_id": "main",
+        "actions": [
+            {"type": "state_patch", "update": {"reward_points_delta": 25}},
+            {"type": "dungeon_patch", "progress_delta": 10},
+        ],
+        "directives": [],
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["results"][0]["ok"] is True
+    assert data["results"][1]["ok"] is False
+
+    pending_path = setup_story / "branches" / "main" / "pending_debug_overrides.json"
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert pending == [
+        {"type": "state_patch", "update": {"reward_points_delta": 25}},
+    ]
+
+
 def test_debug_undo_restores_snapshot_and_clears_directive(client, setup_story):
     apply_resp = client.post("/api/debug/apply", json={
         "branch_id": "main",
@@ -327,9 +349,40 @@ def test_debug_undo_restores_snapshot_and_clears_directive(client, setup_story):
 
     directive_path = setup_story / "branches" / "main" / "debug_directive.json"
     assert not directive_path.exists()
+    pending_path = setup_story / "branches" / "main" / "pending_debug_overrides.json"
+    assert not pending_path.exists()
 
     messages = json.loads((setup_story / "branches" / "main" / "messages.json").read_text(encoding="utf-8"))
     assert not any(m.get("message_type") == "debug_audit" for m in messages)
+
+
+def test_debug_undo_restores_previous_pending_overrides(client, setup_story):
+    pending_path = setup_story / "branches" / "main" / "pending_debug_overrides.json"
+    pending_path.write_text(
+        json.dumps([{"type": "state_patch", "update": {"reward_points_delta": 5}}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    apply_resp = client.post("/api/debug/apply", json={
+        "branch_id": "main",
+        "actions": [{"type": "state_patch", "update": {"reward_points_delta": 30}}],
+        "directives": [],
+    })
+    assert apply_resp.status_code == 200
+
+    pending_after_apply = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert pending_after_apply == [
+        {"type": "state_patch", "update": {"reward_points_delta": 5}},
+        {"type": "state_patch", "update": {"reward_points_delta": 30}},
+    ]
+
+    undo_resp = client.post("/api/debug/undo", json={"branch_id": "main"})
+    assert undo_resp.status_code == 200
+
+    restored_pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert restored_pending == [
+        {"type": "state_patch", "update": {"reward_points_delta": 5}},
+    ]
 
 
 def test_debug_undo_rejects_invalid_backup_world_day_without_partial_restore(client, setup_story):
@@ -377,3 +430,21 @@ def test_debug_undo_rejects_invalid_backup_world_day_without_partial_restore(cli
     assert current_state["reward_points"] == 1337
     assert directive_path.exists()
     assert backup_path.exists()
+
+
+def test_debug_clear_clears_pending_overrides(client, setup_story):
+    directive_path = setup_story / "branches" / "main" / "debug_directive.json"
+    directive_path.write_text(json.dumps({"instruction": "下回合補設定"}, ensure_ascii=False), encoding="utf-8")
+    pending_path = setup_story / "branches" / "main" / "pending_debug_overrides.json"
+    pending_path.write_text(
+        json.dumps([{"type": "state_patch", "update": {"reward_points_delta": 8}}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    resp = client.post("/api/debug/clear", json={"branch_id": "main"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+
+    assert not directive_path.exists()
+    assert not pending_path.exists()

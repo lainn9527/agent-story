@@ -249,6 +249,7 @@
   - 對應 index 的 state/NPC/world_day snapshot
   - recap、cheat、branch lore、events、dungeon progress、gm plan（若 `plan.updated_at_index <= branch_point_index`）
   - `dungeon_return_memory.json` 會依 source timeline 截到 `branch_point_index` 重建，避免未來拜訪過的副本洩漏到子分支
+  - 若 source branch 存在 `pending_debug_overrides.json`，會先把這些修正重播到 child seed；這份 pending 是一次性的，只有第一次成功的 edit/regenerate 會消耗它，之後若還要沿用需重新 apply
 
 ### 8.2 Promote
 

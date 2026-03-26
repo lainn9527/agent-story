@@ -119,8 +119,10 @@
 - `apply` 會先寫完整 backup，再逐項執行 action，回傳每項成功/失敗。
 - `actions` / `directives` 各自都有上限（預設 20，可由 env 覆蓋）；`directives` 只會採用最後一個非空 instruction。
 - `directive` 會獨立寫入 `debug_directive.json`，不受 action 失敗影響。
+- `apply` 成功的 action 也會累積寫入 branch 級 `pending_debug_overrides.json`。後續第一次成功的 `edit` / `regenerate` 建新分支時，會先把這些 overrides 套到新分支的 seed state/NPC/world_day/dungeon progress，再繼續生成 GM 回覆。
+- 這份 pending overrides 是一次性的：第一次成功的 edit/regenerate child branch 落下首則 GM 回覆後，就會從 source branch 清掉；若之後還要沿用，需重新 `apply`。child branch 不會保留自己的 `pending_debug_overrides.json`。
 - `audit_summary` 僅供 Debug Panel UI 顯示，不會另外寫入主聊天訊息。
-- `undo` 只支援最近一次 apply（同 debug unit，且 branch 要匹配）；若 backup 的 `world_day` 損壞，會直接回 `400`，不會 fallback 到目前值。
+- `undo` 只支援最近一次 apply（同 debug unit，且 branch 要匹配）；除了還原 state/NPC/world_day/dungeon snapshot，也會把 `pending_debug_overrides.json` 還原到 apply 前的狀態。若 backup 的 `world_day` 損壞，會直接回 `400`，不會 fallback 到目前值。
 
 ## NPC / Events / Images
 

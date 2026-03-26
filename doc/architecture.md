@@ -83,6 +83,7 @@ Browser (static/app.js, templates/index.html)
   - `world_day.json`
   - `dungeon_progress.json`
   - `debug_directive.json`（一次性隱藏 Debug 劇情指令）
+  - `pending_debug_overrides.json`（Debug apply 後待下一次 edit/regenerate 消耗的一次性 seed 修正）
   - `gm_cheats.json`
   - `branch_config.json`
 - `debug_units/<debug_unit_id>/`

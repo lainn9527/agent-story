@@ -40,6 +40,7 @@ def api_debug_session():
             "dungeon_progress": app_module._load_dungeon_progress(story_id, branch_id) or {},
             "gm_plan": app_module._load_gm_plan(story_id, branch_id),
             "pending_directive": app_module._load_debug_directive(story_id, branch_id),
+            "pending_overrides": app_module._load_pending_debug_overrides(story_id, branch_id),
         }
     )
 
@@ -206,19 +207,33 @@ def api_debug_apply():
             "current_dungeon": None,
             "total_dungeons_completed": 0,
         },
+        "pending_debug_overrides": app_module._load_pending_debug_overrides(story_id, branch_id),
     }
     app_module._save_last_apply_backup(story_id, debug_unit_id, backup)
 
     results: list[dict] = []
+    successful_pending_actions: list[dict] = []
     for raw_action in actions:
         if not isinstance(raw_action, dict):
             results.append({"type": "unknown", "ok": False, "error": "invalid action payload"})
             continue
+        normalized_action = app_module._normalize_debug_action_payload(raw_action)
+        action_payload = normalized_action if isinstance(normalized_action, dict) else raw_action
         try:
-            results.append(app_module._apply_debug_action(story_id, branch_id, raw_action))
+            result = app_module._apply_debug_action(story_id, branch_id, action_payload)
+            results.append(result)
+            if result.get("ok") and isinstance(normalized_action, dict):
+                successful_pending_actions.append(normalized_action)
         except Exception as exc:
             action_type = str(raw_action.get("type", "unknown"))
             results.append({"type": action_type, "ok": False, "error": str(exc)})
+
+    if successful_pending_actions:
+        app_module._append_pending_debug_overrides(
+            story_id,
+            branch_id,
+            successful_pending_actions,
+        )
 
     directive_result = {"ok": True, "applied": 0}
     latest_directive = app_module._pick_latest_debug_directive(directives)
@@ -273,6 +288,7 @@ def api_debug_undo():
     npcs_snapshot = backup.get("npcs_snapshot")
     world_day = backup.get("world_day")
     dungeon_snapshot = backup.get("dungeon_progress_snapshot")
+    pending_overrides = backup.get("pending_debug_overrides", [])
 
     if not isinstance(state_snapshot, dict):
         return jsonify({"ok": False, "error": "backup state invalid"}), 400
@@ -308,6 +324,10 @@ def api_debug_undo():
 
     app_module._save_json(app_module._dungeon_progress_path(story_id, branch_id), dungeon_snapshot)
     app_module._clear_debug_directive(story_id, branch_id)
+    if isinstance(pending_overrides, list):
+        app_module._save_pending_debug_overrides(story_id, branch_id, pending_overrides)
+    else:
+        app_module._clear_pending_debug_overrides(story_id, branch_id)
     app_module._clear_last_apply_backup(story_id, debug_unit_id)
 
     audit_summary = "已回滾 Debug 修正（還原至套用前）"
@@ -340,6 +360,7 @@ def api_debug_clear():
 
     app_module._save_json(app_module._debug_chat_path(story_id, debug_unit_id), [])
     app_module._clear_debug_directive(story_id, branch_id)
+    app_module._clear_pending_debug_overrides(story_id, branch_id)
     app_module._clear_last_apply_backup(story_id, debug_unit_id)
 
     return jsonify({"ok": True, "audit_summary": "已清除 Debug 對話與提案紀錄"})

@@ -17,6 +17,7 @@ from story_core.story_io import (
     _debug_directive_path,
     _last_apply_backup_path,
     _load_json,
+    _pending_debug_overrides_path,
     _load_tree,
     _save_json,
     _story_npcs_path,
@@ -155,12 +156,70 @@ def _clear_debug_directive(story_id: str, branch_id: str):
         os.remove(path)
 
 
+def _load_pending_debug_overrides(story_id: str, branch_id: str) -> list[dict]:
+    data = _load_json(_pending_debug_overrides_path(story_id, branch_id), [])
+    if not isinstance(data, list):
+        return []
+    normalized: list[dict] = []
+    for item in data:
+        payload = _normalize_debug_action_payload(item)
+        if isinstance(payload, dict):
+            normalized.append(payload)
+    return normalized
+
+
+def _save_pending_debug_overrides(story_id: str, branch_id: str, overrides: list[dict]):
+    normalized: list[dict] = []
+    for item in overrides:
+        payload = _normalize_debug_action_payload(item)
+        if isinstance(payload, dict):
+            normalized.append(payload)
+    path = _pending_debug_overrides_path(story_id, branch_id)
+    if not normalized:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    _save_json(path, normalized)
+
+
+def _clear_pending_debug_overrides(story_id: str, branch_id: str):
+    path = _pending_debug_overrides_path(story_id, branch_id)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def _append_pending_debug_overrides(story_id: str, branch_id: str, overrides: list[dict]):
+    existing = _load_pending_debug_overrides(story_id, branch_id)
+    _save_pending_debug_overrides(story_id, branch_id, existing + list(overrides or []))
+
+
+def _copy_pending_debug_overrides(story_id: str, from_bid: str, to_bid: str):
+    overrides = _load_pending_debug_overrides(story_id, from_bid)
+    if overrides:
+        _save_pending_debug_overrides(story_id, to_bid, overrides)
+    else:
+        _clear_pending_debug_overrides(story_id, to_bid)
+
+
 def _copy_debug_directive(story_id: str, from_bid: str, to_bid: str):
     directive = _load_debug_directive(story_id, from_bid)
     if directive:
         _save_debug_directive(story_id, to_bid, directive)
     else:
         _clear_debug_directive(story_id, to_bid)
+
+
+def _replay_pending_debug_overrides(story_id: str, from_bid: str, to_bid: str):
+    overrides = _load_pending_debug_overrides(story_id, from_bid)
+    for index, action in enumerate(overrides):
+        result = _apply_debug_action(story_id, to_bid, action)
+        if result.get("ok"):
+            continue
+        action_type = action.get("type", "unknown")
+        error = result.get("error", "unknown error")
+        raise RuntimeError(
+            f"failed to replay pending debug override #{index + 1} ({action_type}): {error}"
+        )
 
 
 def _build_debug_directive_injection_block(story_id: str, branch_id: str) -> str:
@@ -380,7 +439,13 @@ __all__ = [
     "_load_debug_directive",
     "_save_debug_directive",
     "_clear_debug_directive",
+    "_load_pending_debug_overrides",
+    "_save_pending_debug_overrides",
+    "_clear_pending_debug_overrides",
+    "_append_pending_debug_overrides",
+    "_copy_pending_debug_overrides",
     "_copy_debug_directive",
+    "_replay_pending_debug_overrides",
     "_build_debug_directive_injection_block",
     "_format_debug_recent_messages",
     "_build_debug_system_prompt",
