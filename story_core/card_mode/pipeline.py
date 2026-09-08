@@ -6,7 +6,7 @@ import copy
 import logging
 import threading
 
-from story_core.branch_tree import _next_timeline_index
+from story_core.branch_tree import _next_timeline_index, get_full_timeline
 from story_core.card_mode import clock
 from story_core.card_mode.card import load_card
 from story_core.card_mode.contract import RECORDER_INSTRUCTION
@@ -156,8 +156,12 @@ def run_card_turn(
         recap_text=recap_text,
     )
 
-    full_timeline = _load_branch_messages(story_id, branch_id)
-    recent = compaction.get_context_window(full_timeline)
+    full_timeline = get_full_timeline(story_id, branch_id)
+    if skip_user_message and full_timeline and full_timeline[-1].get("role") == "user":
+        history_for_context = full_timeline[:-1]
+    else:
+        history_for_context = full_timeline
+    recent = compaction.get_context_window(history_for_context)
 
     # PASS 1: Narrate
     narration, source = _generate_pass1(
@@ -261,7 +265,7 @@ def run_card_turn(
                     break
 
             # Trigger compaction if threshold met
-            updated_timeline = _load_branch_messages(story_id, branch_id)
+            updated_timeline = get_full_timeline(story_id, branch_id)
             cur_recap = compaction.load_recap(story_id, branch_id)
             if compaction.should_compact(cur_recap, len(updated_timeline)):
                 compaction.compact_async(story_id, branch_id, updated_timeline)

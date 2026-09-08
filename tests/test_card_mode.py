@@ -346,12 +346,13 @@ def test_card_api_routes(tmp_path, sample_card, monkeypatch):
 
     client = app.test_client()
 
-    # 1. /api/stories must NOT return card mode story
+    # 1. /api/stories includes card mode story
     res_stories = client.get("/api/stories")
     assert res_stories.status_code == 200
     stories_data = res_stories.get_json()["stories"]
     assert "rpg_story" in stories_data
-    assert "test_hanako" not in stories_data  # Filtered out!
+    assert "test_hanako" in stories_data
+    assert stories_data["test_hanako"].get("mode") == "card"
 
     # 2. /api/card/list must return card mode story
     res_cards = client.get("/api/card/list")
@@ -390,8 +391,8 @@ def test_card_api_routes(tmp_path, sample_card, monkeypatch):
     assert "角色卡模式" in res_index.get_data(as_text=True)
 
     res_chat = client.get("/card/test_hanako")
-    assert res_chat.status_code == 200
-    assert "card.js" in res_chat.get_data(as_text=True)
+    assert res_chat.status_code == 302
+    assert "/?story=test_hanako" in res_chat.headers.get("Location", "")
 
     # 7. Test rewind
     # First inject 3 messages
@@ -455,3 +456,50 @@ def test_card_fetishes_and_sensitive_spots(sample_card):
     assert "**生理敏感點與弱點（Sensitive Spots）**：後頸（發軟輕喘）、腰側軟肉" in prompt
     assert "肉體細節" in prompt
     assert "Sensitive Spots & Weak Points" in prompt
+
+
+def test_unified_core_send_card_mode(tmp_path, sample_card, monkeypatch):
+    """Verify that unified /api/send dispatches card mode stories to run_card_turn."""
+    from app import app
+
+    stories_dir = str(tmp_path / "stories")
+    design_dir = str(tmp_path / "design")
+    registry_file = str(tmp_path / "stories.json")
+
+    with open(registry_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "active_story_id": "test_hanako",
+            "stories": {
+                "test_hanako": {"id": "test_hanako", "name": "花子", "mode": "card"},
+            }
+        }, f)
+
+    monkeypatch.setattr("story_core.story_io.STORIES_REGISTRY_PATH", registry_file)
+    monkeypatch.setattr("story_core.story_io.DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("story_core.story_io.STORIES_DIR", stories_dir)
+    monkeypatch.setattr("story_core.card_mode.card.STORY_DESIGN_DIR", design_dir)
+
+    init_card_story(sample_card, stories_dir=stories_dir, design_dir=design_dir)
+
+    client = app.test_client()
+
+    # Mock PASS 1
+    mock_header = "📅 2026/5/16　⏰ 02:20　📌 福利社　🌤️ 陰\n\n花子看著你遞過去的餅乾：「給我的？」"
+    monkeypatch.setattr("story_core.card_mode.pipeline._generate_pass1", lambda **kw: (mock_header, "mock"))
+
+    # Send via unified /api/send
+    res = client.post("/api/send", json={"message": "給你吃餅乾", "branch_id": "main"})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["ok"] is True
+    assert data.get("card") is True
+    assert data["player"]["content"] == "給你吃餅乾"
+    assert "花子" in data["gm"]["content"]
+
+    # Status check
+    st_res = client.get("/api/status?branch_id=main")
+    assert st_res.status_code == 200
+    st_data = st_res.get_json()
+    assert st_data.get("is_card_mode") is True
+    assert st_data.get("card_meta", {}).get("display_name") == "花子"
+

@@ -49,6 +49,14 @@ def _v2_engine_on(app_module, story_id: str, branch_id: str) -> bool:
         return False
 
 
+def _is_card_mode(app_module, story_id: str) -> bool:
+    try:
+        reg = app_module._load_stories_registry()
+        return reg.get("stories", {}).get(story_id, {}).get("mode") == "card"
+    except Exception:
+        return False
+
+
 def _v2_transport(app_module, story_id: str, branch_id: str) -> str:
     try:
         t = (app_module._load_branch_config(story_id, branch_id) or {}).get("gm_transport")
@@ -142,6 +150,18 @@ def api_branches_create():
         branch_point_index,
         fallback_state=forked_state,
     )
+    if _is_card_mode(app_module, story_id):
+        from story_core.card_mode import clock
+        forked_clock = None
+        parent_timeline = app_module.get_full_timeline(story_id, parent_branch_id)
+        for m in reversed(parent_timeline):
+            if m.get("index") <= branch_point_index:
+                forked_clock = m.get("clock_snapshot")
+                if forked_clock:
+                    break
+        if not forked_clock:
+            forked_clock = clock.load_clock(story_id, parent_branch_id)
+        clock.save_clock(story_id, branch_id, forked_clock)
     app_module._save_branch_messages(story_id, branch_id, [])
 
     branches[branch_id] = {
@@ -1093,6 +1113,36 @@ def api_branches_regenerate():
     app_module._clear_loaded_save_preview(tree)
     app_module._save_tree(story_id, tree)
 
+    if _is_card_mode(app_module, story_id):
+        from story_core.card_mode import clock
+        from story_core.card_mode.pipeline import run_card_turn
+
+        forked_clock = None
+        for m in reversed(source_timeline):
+            if m.get("index") <= branch_point_index:
+                forked_clock = m.get("clock_snapshot")
+                if forked_clock:
+                    break
+        if not forked_clock:
+            forked_clock = clock.load_clock(story_id, parent_branch_id)
+        clock.save_clock(story_id, branch_id, forked_clock)
+
+        result = run_card_turn(
+            story_id,
+            branch_id,
+            user_msg_content,
+            skip_user_message=True,
+            async_recorder=False,
+        )
+        if not result.get("ok"):
+            app_module._cleanup_branch(story_id, branch_id)
+            return jsonify({"ok": False, "error": result.get("error", "GM error")}), 503
+        cur_msgs = app_module._load_branch_messages(story_id, branch_id)
+        gm_msg = next((m for m in cur_msgs if m.get("index") == result.get("gm_index")), None)
+        tree["last_played_branch_id"] = branch_id
+        app_module._save_tree(story_id, tree)
+        return jsonify({"ok": True, "branch": branches[branch_id], "gm": gm_msg, "pruned_branches": []})
+
     t0 = time.time()
     full_timeline = app_module.get_full_timeline(story_id, branch_id)
     state = app_module._load_character_state(story_id, branch_id)
@@ -1280,6 +1330,75 @@ def api_branches_regenerate_stream():
     tree["last_played_branch_id"] = branch_id
     app_module._clear_loaded_save_preview(tree)
     app_module._save_tree(story_id, tree)
+
+    # Card Mode: regenerate the GM reply only (user msg already in the forked timeline) — run_card_turn(skip_user_message=True)
+    if _is_card_mode(app_module, story_id):
+        from story_core.card_mode import clock
+        forked_clock = None
+        for m in reversed(source_timeline):
+            if m.get("index") <= branch_point_index:
+                forked_clock = m.get("clock_snapshot")
+                if forked_clock:
+                    break
+        if not forked_clock:
+            forked_clock = clock.load_clock(story_id, parent_branch_id)
+        clock.save_clock(story_id, branch_id, forked_clock)
+
+        def card_regen():
+            import queue as _queue
+            import threading as _threading
+            from story_core.card_mode.pipeline import run_card_turn
+
+            q: "_queue.Queue" = _queue.Queue()
+            box: dict = {}
+
+            def _emit(delta):
+                q.put(("text", delta))
+
+            def _worker():
+                try:
+                    box["result"] = run_card_turn(
+                        story_id,
+                        branch_id,
+                        user_msg_content,
+                        skip_user_message=True,
+                        emit_chunk=_emit,
+                        async_recorder=True,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception("/api/branches/regenerate/stream (card) EXCEPTION %s\n%s", exc, traceback.format_exc())
+                    box["error"] = str(exc)
+                finally:
+                    q.put(("__end__", None))
+
+            th = _threading.Thread(target=_worker, daemon=True)
+            th.start()
+
+            streamed_any = False
+            while True:
+                kind, payload = q.get()
+                if kind == "__end__":
+                    break
+                if kind == "text":
+                    streamed_any = True
+                    yield app_module._sse_event({"type": "text", "chunk": payload})
+            th.join(timeout=2)
+
+            result = box.get("result")
+            if box.get("error") or not result or not result.get("ok"):
+                app_module._cleanup_branch(story_id, branch_id)
+                yield app_module._sse_event({"type": "error", "message": box.get("error") or (result or {}).get("error") or "GM 生成失敗"})
+                return
+
+            if not streamed_any and result.get("narration"):
+                yield app_module._sse_event({"type": "text", "chunk": result["narration"]})
+
+            cur_msgs = app_module._load_branch_messages(story_id, branch_id)
+            gm_msg = next((m for m in cur_msgs if m.get("index") == result.get("gm_index")), None)
+            yield app_module._sse_event({"type": "done", "branch": tree["branches"][branch_id], "gm_msg": gm_msg})
+
+        return Response(stream_with_context(card_regen()), mimetype="text/event-stream")
 
     # GM v2: regenerate the GM reply only (user msg already in the forked timeline) — run_turn(skip_user).
     # The original reply lived at branch_point_index + 1 on the source branch; replay the UI ops it

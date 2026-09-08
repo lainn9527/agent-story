@@ -8,7 +8,7 @@ import os
 import queue
 import threading
 
-from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
+from flask import Blueprint, Response, jsonify, redirect, render_template, request, stream_with_context
 
 from story_core.card_mode import clock
 from story_core.card_mode.card import (
@@ -26,6 +26,7 @@ from story_core.story_io import (
     _load_branch_messages,
     _load_json,
     _load_stories_registry,
+    _save_stories_registry,
     _save_json,
     _story_character_state_path,
     _story_messages_path,
@@ -52,7 +53,7 @@ def card_index_page():
 
 @card_bp.route("/card/<slug>")
 def card_chat_page(slug: str):
-    """Card chat conversation page."""
+    """Card chat conversation page: redirect to unified app with active card story."""
     # Auto-initialize if card.json exists in story_design
     design_card_path = card_path(slug)
     if os.path.exists(design_card_path):
@@ -66,7 +67,14 @@ def card_chat_page(slug: str):
     elif slug not in _load_stories_registry().get("stories", {}):
         return f"Card {slug} not found", 404
 
-    return render_template("card_chat.html", slug=slug)
+    try:
+        reg = _load_stories_registry()
+        reg["active_story_id"] = slug
+        _save_stories_registry(reg)
+    except Exception:
+        pass
+
+    return redirect(f"/?story={slug}")
 
 
 # ---------------------------------------------------------------------------
