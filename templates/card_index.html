@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>角色卡大廳 — 主神空間 RPG</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/card.css">
+</head>
+<body>
+  <!-- Header (一致的主神空間導覽列) -->
+  <header id="header">
+    <div class="header-title">
+      <span class="header-icon">🎭</span>
+      <span class="header-title-full">角色卡模式 · 深度一對一互動</span>
+      <span class="header-title-short">角色卡大廳</span>
+    </div>
+
+    <div class="header-right-actions">
+      <div class="card-model-select-wrapper" title="切換 GM 語言模型">
+        <select id="modelSelect" class="card-model-select">
+          <option>載入模型中…</option>
+        </select>
+      </div>
+      <a href="/" class="header-lore-link" title="返回世界模擬器">↩ 世界模擬器</a>
+      <button class="header-power-btn" style="font-size: 0.85rem; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--gold);" onclick="openCreateModal()">＋ 新建角色卡</button>
+    </div>
+  </header>
+
+  <!-- 主內容區 -->
+  <main class="card-index-container">
+    <div class="card-index-header">
+      <h1>選擇對話角色卡</h1>
+      <p>窄而深的一對一互動管線 · 專屬人設與記憶 · 拒絕抽象形容詞</p>
+    </div>
+
+    <div class="card-grid" id="cardGrid">
+      <div style="color: var(--text-dim); grid-column: 1 / -1; text-align: center; padding: 40px;">
+        載入角色卡列表中……
+      </div>
+    </div>
+  </main>
+
+  <!-- Create Modal (比照 style.css 規範) -->
+  <div class="modal-overlay hidden" id="createModal">
+    <div class="modal-content">
+      <h2>＋ 建立全新角色卡</h2>
+      <p style="color: var(--text-dim); font-size: 0.9rem; margin-bottom: 16px; line-height: 1.6;">
+        角色卡模式支援透過 CLI 建卡精靈（互動問答展開）或手寫模板建立卡片：
+      </p>
+      <div style="margin-bottom: 16px; padding: 12px; background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 6px;">
+        <div style="font-size: 0.85rem; color: var(--gold); font-weight: 700; margin-bottom: 6px;">方法一：CLI 互動建卡精靈</div>
+        <code style="color: var(--text); font-family: monospace; font-size: 0.85rem;">python scripts/card_create.py</code>
+      </div>
+      <div style="margin-bottom: 20px; padding: 12px; background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 6px;">
+        <div style="font-size: 0.85rem; color: var(--gold); font-weight: 700; margin-bottom: 6px;">方法二：生成空白模板手寫</div>
+        <code style="color: var(--text); font-family: monospace; font-size: 0.85rem;">python scripts/card_create.py --blank &lt;slug&gt;</code>
+      </div>
+      <div style="display: flex; justify-content: flex-end;">
+        <button class="card-reset-action-btn" style="width: auto; padding: 6px 18px;" onclick="closeCreateModal()">好，我知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadCards() {
+      try {
+        const res = await fetch('/api/card/list');
+        const data = await res.json();
+        const grid = document.getElementById('cardGrid');
+        if (!data.ok || !data.cards || data.cards.length === 0) {
+          grid.innerHTML = '<div style="color: var(--text-dim); grid-column: 1 / -1; text-align: center; padding: 40px;">目前尚無角色卡，請點擊右上角「＋ 新建角色卡」。</div>';
+          return;
+        }
+
+        grid.innerHTML = data.cards.map(card => `
+          <a class="card-tile" href="/card/${card.id}">
+            <div class="tile-banner">
+              <div class="tile-avatar-ph">👻</div>
+            </div>
+            <div class="tile-body">
+              <div class="tile-name">${escapeHtml(card.name || card.display_name || card.id)}</div>
+              <div class="tile-tagline">${escapeHtml(card.tagline || '專屬單角色一對一互動')}</div>
+              <div class="tile-pitch">${escapeHtml(card.pitch || card.description || '')}</div>
+              <div class="tile-footer">
+                <span>點擊開啟對話</span>
+                <span>ID: ${escapeHtml(card.id)}</span>
+              </div>
+            </div>
+          </a>
+        `).join('');
+      } catch (err) {
+        document.getElementById('cardGrid').innerHTML = '<div style="color: var(--accent); grid-column: 1 / -1; text-align: center; padding: 40px;">載入列表失敗，請檢查伺服器連線。</div>';
+      }
+    }
+
+    function openCreateModal() {
+      document.getElementById('createModal').classList.remove('hidden');
+    }
+
+    function closeCreateModal() {
+      document.getElementById('createModal').classList.add('hidden');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.innerText = text;
+      return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadCards);
+  </script>
+  <script src="/static/card.js"></script>
+</body>
+</html>

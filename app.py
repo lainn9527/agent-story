@@ -48,6 +48,7 @@ from routes.story_routes import story_bp
 from routes.misc_routes import misc_bp
 from routes.core_routes import core_bp, _sse_event
 from routes.gm_v2_routes import gm_v2_bp
+from routes.card_routes import card_bp
 from story_core.app_helpers import *  # noqa: F401,F403
 
 # Flask App
@@ -62,6 +63,7 @@ app.register_blueprint(story_bp)
 app.register_blueprint(misc_bp)
 app.register_blueprint(core_bp)
 app.register_blueprint(gm_v2_bp)
+app.register_blueprint(card_bp)
 
 
 if __name__ == "__main__":

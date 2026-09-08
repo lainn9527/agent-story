@@ -88,12 +88,27 @@
 
 | Method | Path | 說明 | 主要參數 |
 |---|---|---|---|
-| GET | `/api/stories` | 列出故事與 active story | - |
+| GET | `/api/stories` | 列出故事與 active story（**自動過濾排除 `mode=="card"` 的角色卡**） | - |
 | POST | `/api/stories` | 建立新故事（含 prompt/schema/default state） | body: `name`, `description`, `system_prompt`, `character_schema`, `default_character_state` |
 | POST | `/api/stories/switch` | 切換 active story | body: `story_id` |
 | PATCH | `/api/stories/<story_id>` | 更新故事名稱/描述 | body: `name`, `description` |
 | DELETE | `/api/stories/<story_id>` | 刪除故事（不能刪最後一個） | - |
 | GET | `/api/stories/<story_id>/schema` | 取得角色 schema | - |
+
+## 角色卡模式（Card Mode）
+
+角色卡模式為獨立的一對一單角色對話管線（詳見 `doc/card_mode_proposal.md`），介面獨立但資料層複用 `story_io`。
+
+| Method | Path | 說明 | 主要參數 |
+|---|---|---|---|
+| GET | `/card` | 卡片牆頁面（`card_index.html`） | - |
+| GET | `/card/<slug>` | 單角色一對一對話頁面（`card_chat.html`） | - |
+| GET | `/api/card/list` | 列出所有角色卡（只回傳 registry 中 `mode=="card"` 的項目，含 tagline/pitch） | - |
+| GET | `/api/card/<slug>/state` | 取得卡片人設、關係、長期記憶、卡內時鐘、隨身物與訊息列表 | `after`（可選訊息 index 篩選） |
+| POST | `/api/card/<slug>/send/stream` | 對話送出（**SSE 串流**：`text` / `done` / `error`） | body: `message` |
+| POST | `/api/card/<slug>/regenerate` | 捨棄最後一則 GM 回覆並由 snapshot 還原後重新生成（支援 SSE） | body / header（支援串流） |
+| POST | `/api/card/<slug>/rewind` | 回捲至指定 index 並以 snapshot 還原狀態與截斷後續訊息 | body: `to_index` |
+| POST | `/api/card/<slug>/reset` | 重置該角色卡至開場白第 0 則初始狀態（清空記憶與還原時鐘） | - |
 
 ## Lore
 

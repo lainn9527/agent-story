@@ -378,3 +378,36 @@ DELTA-->
   - apply 後寫入 branch `debug_directive.json`
   - 下次主 GM 回合注入 `_build_augmented_message`
   - 該回合完成後由 `_process_gm_response` 自動清除（一次性）
+
+---
+
+## 角色卡模式（Card Mode）Prompt 設計
+
+Card Mode 將注意力預算全部保留給單一角色，摒除世界模擬器的雜項負擔（見 `doc/card_mode_proposal.md`）。
+
+### Prompt 四層結構 (`story_core/card_mode/prompt.py`)
+
+1. **角色扮演契約 (`ROLEPLAY_CONTRACT`)**：
+   - 只扮演單一角色與當前場景，無推劇情/維護世界義務。
+   - 反應優先於推進：先寫微表情、停頓、身體反應，再寫對白。
+   - **具體外觀與肉體細節（Physical & Sensory Grounding）**：每回合自然帶入具體肉體與外觀描寫（身形骨架、膚質觸感、微敞或緊繃的衣著狀態、光影下的線條、體溫或呼吸起伏）；肢體接觸或近身靠近時生動刻劃肌膚觸感與衣料摩擦。
+   - **性癖與情慾心理觸發（Fetishes & Psychological Triggers）**：觸及角色性癖與特定偏好時，展現強烈內心動搖與神態回饋（眼神躲閃、耳根泛紅、喉頭吞嚥、反差羞恥或順從沉溺）。
+   - **敏感點的即時生理反饋（Sensitive Spots & Weak Points）**：敏感部位被觸碰、吹氣或刺激時，第一時間給予細膩生理反饋（短暫屏息、背脊發麻、指尖抓皺衣料、喉間輕喘、體溫上升），並與心防相互拉扯。
+   - 人格為常數：`personality` / `speech_style` / `verbal_tics` 不受存檔影響；變更的是記憶與關係。
+   - 慾望驅動與認知邊界保護。
+   - 零機器標籤：不輸出任何 ACTIONS / STATE / DELTA 標記，純自然語言對話。
+
+2. **角色卡人設展開**：
+   - 角色身份、外觀、身體細節（`body_details`）、性癖偏好（`fetishes`）、生理敏感點（`sensitive_spots`）、個性、口吻、口癖、小動作、慾望、恐懼、Tells、底線、範例台詞。
+   - 玩家身份、處境、稱呼，以及場景地點與氛圍池。
+
+3. **Grounding（嚴格僅 4 項）**：
+   - **與你的關係**：`gm_v2.relationship.display()`。
+   - **她記得的事（長期）**：最近 8 條記憶 + recap 壓縮提要。
+   - **現在**：年月日、星期、時間 ｜ 地點 ｜ 天氣與氛圍。
+   - **你身上有**：玩家隨身裝備與物品狀態。
+   - **絕對禁止注入**：domains、戰力級、商店 vendor、任務、副本、功法樹、道德基調等。
+
+4. **輸出格式**：
+   - 標頭格式：`📅 YYYY/M/D　⏰ HH:MM　📌 地點　🌤️ 天氣氛圍`（由模型輸出，後端據此同步時鐘）。
+   - 建議字數長度提示。

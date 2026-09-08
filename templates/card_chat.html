@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>角色卡對話 — 主神空間 RPG</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/card.css">
+</head>
+<body>
+  <!-- Header (比照主神空間風格) -->
+  <header id="header">
+    <button id="drawer-toggle-btn" title="角色資訊與檔案">&#x2630;</button>
+    <div class="header-title">
+      <span class="header-icon">🎭</span>
+      <span class="header-title-full"><span id="navCharName">載入中…</span></span>
+      <span class="header-title-short" id="navCharShort">角色卡</span>
+    </div>
+    <div class="header-sub" id="navCharRole">專屬人設 · 深度互動</div>
+
+    <!-- 關係階梯常駐 HUD -->
+    <button id="state-hud" class="show" title="與你的關係（點擊展開角色檔案）">
+      <span class="hud-label">關係</span>
+      <span class="hud-sep">·</span>
+      <b id="hudTier">陌生</b>
+    </button>
+
+    <!-- 卡內時鐘 HUD -->
+    <div id="world-day-display" title="卡內環境與時鐘">
+      <span id="hudClock">--:--</span>
+    </div>
+
+    <!-- 右側功能區：模型選擇、重置、返回大廳 -->
+    <div class="header-right-actions">
+      <div class="card-model-select-wrapper" title="切換 GM 語言模型">
+        <select id="modelSelect" class="card-model-select">
+          <option>載入模型中…</option>
+        </select>
+      </div>
+      <button id="reset-btn" class="header-power-btn" title="回到開場白（清空歷史與記憶）">&#x21BA;</button>
+      <a href="/card" class="header-lore-link" title="返回卡片列表">&#x1F4D6;</a>
+    </div>
+  </header>
+
+  <!-- Drawer overlay -->
+  <div id="drawer-overlay" class="hidden"></div>
+
+  <!-- Slide-out Drawer (角色檔案面板，比照 index.html 抽屜) -->
+  <aside id="drawer" class="closed">
+    <div class="drawer-header">
+      <h2 id="sidebarName">角色檔案</h2>
+      <button id="drawer-close-btn" title="關閉">&times;</button>
+    </div>
+
+    <!-- 角色資訊 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>👤 角色資訊</span></div>
+      <div class="card-drawer-info">
+        <div id="sidebarRole" class="card-drawer-role"></div>
+        <div id="sidebarPitch" class="card-drawer-pitch"></div>
+        <div id="sidebarTraits" class="card-drawer-traits"></div>
+      </div>
+    </div>
+
+    <!-- 性癖與偏好情境 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>🔥 性癖與偏好</span></div>
+      <div id="sidebarFetishes" class="card-drawer-content"></div>
+    </div>
+
+    <!-- 生理敏感點與弱點 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>⚡ 生理敏感點</span></div>
+      <div id="sidebarSensitiveSpots" class="card-drawer-content"></div>
+    </div>
+
+    <!-- 關係階梯 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">
+        <span>🤝 與你的關係</span>
+        <span id="drawerTierBadge" class="drawer-tier-badge">陌生</span>
+      </div>
+      <div class="card-drawer-content">
+        <div class="ladder-bar" id="ladderBar"></div>
+        <div id="currentTierNote" class="card-tier-note"></div>
+      </div>
+    </div>
+
+    <!-- 卡內時鐘與環境 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>⏱️ 卡內環境</span></div>
+      <div class="card-drawer-content card-meta-list">
+        <div><span class="meta-label">時間：</span><strong id="clockTime">--</strong></div>
+        <div><span class="meta-label">地點：</span><span id="clockLocation">--</span></div>
+        <div><span class="meta-label">天氣：</span><span id="clockWeather">--</span></div>
+      </div>
+    </div>
+
+    <!-- 長期記憶 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>🧠 長期記憶</span></div>
+      <div id="memoryList" class="card-drawer-content memory-list-box"></div>
+    </div>
+
+    <!-- 隨身物 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>🎒 你的隨身物</span></div>
+      <div id="inventoryList" class="card-drawer-content inv-chips-box"></div>
+    </div>
+
+    <!-- 管理操作 -->
+    <div class="drawer-section">
+      <div class="drawer-section-title"><span>⚙️ 操作</span></div>
+      <div class="card-drawer-content">
+        <button id="drawerResetBtn" class="card-reset-action-btn">↺ 重置對話（回到初始狀態）</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 主對話區域 (完全承襲主神空間 #app / #chat-area / #messages / #input-area) -->
+  <div id="app">
+    <main id="chat-area">
+      <div id="messages">
+        <div id="message-list"></div>
+        <div id="loading-indicator" style="display:none;">
+          <div class="typing-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span id="loading-text">角色回應中…</span>
+        </div>
+      </div>
+
+      <div id="input-area">
+        <div id="input-area-inner">
+          <textarea id="user-input" placeholder="對她說些什麼……（Enter 送出，Shift+Enter 換行）" rows="1"></textarea>
+          <button id="send-btn" title="送出">&#10148;</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/card.js" data-slug="{{ slug }}"></script>
+</body>
+</html>

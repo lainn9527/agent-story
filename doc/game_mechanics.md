@@ -398,3 +398,31 @@
 - **NPC 顯式 lifecycle**：GM 給 active/offstage/terminal，無關鍵字 archive/reactivation；archived NPC 不會因被提到而復活。
 - **per-NPC append-only `memory[]`**：長期記憶不在壓縮時遺失。
 - **兩段式 evaluation**：deterministic gate（結構，免費）+ async critic（語義，離開關鍵路徑）。
+
+---
+
+## 14. 角色卡模式（Card Mode）機制
+
+對應 `routes/card_routes.py`、`story_core/card_mode/`，詳見 `doc/card_mode_proposal.md`。
+
+### 14.1 核心理念
+與世界模擬器不同，角色卡模式不負責推世界進度、不演多個 NPC。全部注意力預算只服務一個角色與玩家進行一對一深度對話。
+
+### 14.2 保留與關閉的機制
+- **保留的 4 樣機制**：
+  1. **關係階梯（Affinity Ladder）**：使用 `gm_v2.relationship` 具名階梯（敵對 < 戒備 < 陌生 < 相識 < 友好 < 信任 < 摯友），單回合正向至多推進 1 階。
+  2. **角色長期記憶（Long-term Memory）**：NPC 記錄保留 append-only `memory[]`；人設常數永遠從 `card.json` 讀取，不鎖死在存檔。
+  3. **卡內時鐘（In-card Clock）**：以分鐘為單位精確追蹤，由敘事標頭（`📅⏰📌🌤️`）自動同步（+12h 容忍上限防幻覺）。
+  4. **隨身物（Inventory）**：追蹤玩家當前持有的物品與備註狀態。
+- **關閉的機制**：
+  - 戰力等級、domains、商店 vendor、任務系統、副本進度、功法樹、貨幣/命運點數、命運骰。
+
+### 14.3 資料層複用與快照冪等
+- 一張卡 = 一個 story（儲存於 `data/stories/<slug>/`，registry 註記 `mode: "card"`）。
+- 複用 `story_io`、`npc_helpers`、`compaction`。
+- 支援完整的重生（regenerate）與回捲（rewind），利用每則訊息的 snapshot 保證狀態回溯的冪等性。
+
+### 14.4 人設規格：肉體外觀、性癖與敏感點
+- **外觀與身體細節（`appearance` / `body_details`）**：必須包含具體肉體特徵、衣著微敞或崩落細節、膚觸體溫，在肢體接觸或近身對話時提供生動的感官描寫。
+- **性癖與情慾張力（`fetishes`）**：角色專屬的心理渴望與偏好情境（如順從支配、撫摸後頸、被當作女人對待的反差等），觸及時產生強烈內心動搖與羞恥沉溺。
+- **生理敏感點（`sensitive_spots`）**：生理弱點部位（後頸、腰際、耳垂、掌心等）及被刺激時的第一即時生理反饋（屏息、輕喘、發顫、體溫飆升），隨關係階梯的心防產生拉扯。

@@ -1,0 +1,375 @@
+/**
+ * Card Mode (角色卡模式) 專屬擴充樣式
+ * 基底完全承襲 /static/style.css，此處僅提供角色卡專屬組件樣式
+ */
+
+/* ---------- Header 右側區域與模型選擇器 ---------- */
+.header-right-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-model-select-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.card-model-select {
+  background: var(--bg-user);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  outline: none;
+  cursor: pointer;
+  max-width: 220px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.card-model-select:focus {
+  border-color: var(--accent);
+}
+
+/* ---------- 常駐 HUD 按鈕修飾 ---------- */
+#state-hud {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+#state-hud:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--gold);
+}
+
+#state-hud .hud-label {
+  color: var(--text-dim);
+}
+
+#state-hud .hud-sep {
+  color: var(--border);
+}
+
+#state-hud b {
+  color: var(--gold);
+}
+
+/* ---------- 角色卡抽屜面板 (Drawer Sections) ---------- */
+.card-drawer-info,
+.card-drawer-content {
+  padding: 10px 16px;
+  font-size: 0.86rem;
+}
+
+.card-drawer-role {
+  color: var(--gold);
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+}
+
+.card-drawer-pitch {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.card-drawer-traits {
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.card-tag-badge {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-user);
+}
+
+.fetish-badge {
+  border-color: rgba(212, 168, 83, 0.4);
+  background: rgba(212, 168, 83, 0.08);
+  color: var(--gold);
+}
+
+.spot-badge {
+  border-color: rgba(233, 141, 141, 0.4);
+  background: rgba(233, 141, 141, 0.08);
+  color: #e98d8d;
+}
+
+.card-empty-hint {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.drawer-tier-badge {
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 0.82rem;
+  float: right;
+}
+
+.ladder-bar {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 6px;
+}
+
+.ladder-step {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.ladder-step.passed {
+  background: var(--accent);
+}
+
+.ladder-step.active {
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(212, 168, 83, 0.6);
+}
+
+.card-tier-note {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-top: 6px;
+}
+
+.card-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-meta-list .meta-label {
+  color: var(--text-dim);
+}
+
+.memory-list-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-item-card {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.memory-item-empty {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.inv-chips-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inv-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  background: var(--bg-user);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.inv-chip.empty {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.card-reset-action-btn {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(196, 112, 75, 0.1);
+  border: 1px solid rgba(196, 112, 75, 0.3);
+  color: var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.card-reset-action-btn:hover {
+  background: rgba(196, 112, 75, 0.2);
+  border-color: var(--accent);
+}
+
+/* ---------- 訊息泡泡與標頭微標籤 ---------- */
+.msg-turn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
+/* ---------- 卡片大廳 (/card) 排版 ---------- */
+.card-index-container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 40px 24px;
+  width: 100%;
+}
+
+.card-index-header {
+  margin-bottom: 32px;
+  text-align: center;
+}
+
+.card-index-header h1 {
+  font-size: 1.8rem;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.card-index-header p {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.card-tile {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.card-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.tile-banner {
+  height: 80px;
+  background: linear-gradient(135deg, #3d3c37 0%, #2b2a27 100%);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tile-avatar-ph {
+  font-size: 2rem;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-user);
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile-body {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.tile-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.tile-tagline {
+  font-size: 0.85rem;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+
+.tile-pitch {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-bottom: 16px;
+  flex: 1;
+}
+
+.tile-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* ---------- 響應式調整 ---------- */
+@media (max-width: 768px) {
+  #messages {
+    padding: 16px 5%;
+  }
+  #input-area {
+    padding: 10px 5%;
+  }
+  .card-model-select {
+    max-width: 140px;
+  }
+  #state-hud .hud-label {
+    display: none;
+  }
+  #state-hud .hud-sep {
+    display: none;
+  }
+}
