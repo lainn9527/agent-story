@@ -26,6 +26,46 @@ def _active_branch_id(story_id: str) -> str:
     return app_module._load_tree(story_id).get("active_branch_id", "main")
 
 
+def _enrich_owned_techniques(story_id: str, state: dict) -> None:
+    """Resolve owned 功法 from `technique_mastery` (the id-keyed single truth) into a display
+    map merged into `state['techniques']` — name → `[級..][成:..][性質:..]` markers, the SAME
+    format 天賦 use, which both the 功法 panel and the 戰力面板 already render (both read
+    `state.techniques`). After the single-truth move (tree 功法 live in technique_mastery, not
+    the techniques bucket), those UIs showed bought 功法 as missing; this restores them WITHOUT
+    re-introducing dual storage — it mutates only the /api/status response copy, never the file."""
+    import os
+    import re
+    import sys
+    mm = state.get("technique_mastery")
+    if not isinstance(mm, dict) or not mm:
+        return
+    try:
+        play_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "play")
+        if play_dir not in sys.path:
+            sys.path.insert(0, play_dir)
+        import catalog_tools as ct
+        cat = ct.load_catalog(story_id)
+        levels = ct.MASTERY_LEVELS
+    except Exception:
+        return
+    items = {it.get("id"): it for it in cat.get("items", []) if isinstance(it, dict) and it.get("id")}
+    techs = dict(state.get("techniques")) if isinstance(state.get("techniques"), dict) else {}
+    for iid, ordv in mm.items():
+        if not isinstance(ordv, int) or isinstance(ordv, bool):
+            continue
+        it = items.get(iid, {})
+        parts = []
+        lvl = re.match(r"\s*(\d+)", str(it.get("level") or ""))
+        if lvl:
+            parts.append(f"[級{lvl.group(1)}]")
+        parts.append(f"[成:{levels[max(0, min(ordv, len(levels) - 1))]}]")
+        doms = it.get("domains")
+        if isinstance(doms, list) and doms:
+            parts.append("[性質:" + "·".join(str(d) for d in doms if str(d).strip()) + "]")
+        techs[it.get("name") or iid] = "".join(parts)
+    state["techniques"] = techs
+
+
 @misc_bp.route("/api/status")
 def api_status():
     app_module = _app()
@@ -55,6 +95,7 @@ def api_status():
         app_module._story_dir(story_id), branch_id
     )
     state["pistol_mode"] = app_module.get_pistol_mode(app_module._story_dir(story_id), branch_id)
+    _enrich_owned_techniques(story_id, state)  # surface tree 功法 (live in technique_mastery) in the 功法/戰力面板
     return jsonify(state)
 
 
@@ -400,6 +441,11 @@ def api_config_get():
                 "model": gemini_cfg.get("model", "gemini-2.0-flash"),
                 "key_count": key_count,
             },
+            "vertex": {
+                "model": cfg.get("vertex", {}).get("model", "gemini-2.5-flash"),
+                "project": cfg.get("vertex", {}).get("project"),
+                "region": cfg.get("vertex", {}).get("region", "us-central1"),
+            },
             "claude_cli": {
                 "model": cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929"),
             },
@@ -429,6 +475,13 @@ def api_config_set():
             cfg["gemini"] = {}
         if "model" in data["gemini"]:
             cfg["gemini"]["model"] = data["gemini"]["model"]
+
+    if "vertex" in data and isinstance(data["vertex"], dict):
+        if "vertex" not in cfg:
+            cfg["vertex"] = {}
+        for k in ("model", "project", "region"):
+            if k in data["vertex"]:
+                cfg["vertex"][k] = data["vertex"][k]
 
     if "claude_cli" in data and isinstance(data["claude_cli"], dict):
         if "claude_cli" not in cfg:

@@ -1,0 +1,11 @@
+{
+  "fields": [
+    { "key": "name", "label": "姓名", "type": "text" },
+    { "key": "current_status", "label": "當前狀態", "type": "text" }
+  ],
+  "lists": [
+    { "key": "inventory", "label": "隨身物品", "type": "map" },
+    { "key": "abilities", "label": "個人特質", "state_add_key": "abilities_add", "state_remove_key": "abilities_remove" }
+  ],
+  "direct_overwrite_keys": ["current_status"]
+}

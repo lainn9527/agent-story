@@ -33,6 +33,48 @@ from story_core.story_io import (
 
 log = logging.getLogger("rpg")
 
+# Legacy seeds used solely by `_migrate_to_stories` to bootstrap story_original
+# on a fresh install where the design files weren't checked in. Do NOT use
+# these as a generic fallback — see DEFAULT_CHARACTER_STATE / SCHEMA in
+# app_helpers.py for the neutral fallback.
+_LEGACY_STORY_ORIGINAL_STATE = {
+    "name": "Eddy",
+    "current_phase": "主神空間",
+    "gene_lock": "未開啟（進度 15%）",
+    "physique": "普通人類（稍強）",
+    "spirit": "普通人類（偏高）",
+    "reward_points": 5000,
+    "inventory": {"封印之鏡": "紀念品", "自省之鏡玉佩": "", "鎮魂符": "×3"},
+    "completed_missions": ["咒怨 — 完美通關 8/8"],
+    "relationships": {
+        "小薇": "信任/曖昧",
+        "阿豪": "兄弟情",
+        "美玲": "好感",
+        "Jack": "戰友",
+        "小林": "崇拜",
+        "佐藤神主": "約定",
+    },
+    "current_status": "即將返回主神空間，5000點待兌換",
+}
+
+_LEGACY_STORY_ORIGINAL_SCHEMA = {
+    "fields": [
+        {"key": "name", "label": "姓名", "type": "text"},
+        {"key": "current_phase", "label": "階段", "type": "text"},
+        {"key": "gene_lock", "label": "基因鎖", "type": "text"},
+        {"key": "physique", "label": "體質", "type": "text"},
+        {"key": "spirit", "label": "精神力", "type": "text"},
+        {"key": "reward_points", "label": "獎勵點", "type": "number", "highlight": True, "suffix": " 點"},
+        {"key": "current_status", "label": "狀態", "type": "text"},
+    ],
+    "lists": [
+        {"key": "inventory", "label": "道具欄", "type": "map"},
+        {"key": "completed_missions", "label": "已完成任務", "state_add_key": "completed_missions_add"},
+        {"key": "relationships", "label": "人際關係", "type": "map", "render": "inline"},
+    ],
+    "direct_overwrite_keys": ["gene_lock", "physique", "spirit", "current_status", "current_phase"],
+}
+
 
 class _DynamicPath(os.PathLike):
     def __init__(self, resolver):
@@ -142,15 +184,17 @@ def _migrate_to_stories():
         with open(prompt_path, "w", encoding="utf-8") as f:
             f.write(SYSTEM_PROMPT_TEMPLATE)
 
-    from story_core.app_helpers import DEFAULT_CHARACTER_SCHEMA, DEFAULT_CHARACTER_STATE
-
+    # Legacy bootstrap for story_original only. The pre-multi-story RPG was
+    # 主神空間-themed; preserve those seeds locally so that DEFAULT_CHARACTER_*
+    # in app_helpers.py can be neutral universal fallbacks without polluting
+    # newly-created stories.
     schema_path = _story_character_schema_path(story_id)
     if not os.path.exists(schema_path):
-        _save_json(schema_path, DEFAULT_CHARACTER_SCHEMA)
+        _save_json(schema_path, _LEGACY_STORY_ORIGINAL_SCHEMA)
 
     default_state_path = _story_default_character_state_path(story_id)
     if not os.path.exists(default_state_path):
-        _save_json(default_state_path, DEFAULT_CHARACTER_STATE)
+        _save_json(default_state_path, _LEGACY_STORY_ORIGINAL_STATE)
 
     parsed_path = _story_parsed_path(story_id)
     if not os.path.exists(parsed_path):
@@ -218,7 +262,15 @@ def _migrate_branch_files(story_id: str):
 
 
 def _migrate_schema_abilities(story_id: str):
-    """One-time migration: add 'abilities' list field to character schema and default state."""
+    """One-time migration: add 'abilities' list field to character schema and default state.
+
+    Only runs for stories that have a real on-disk schema file. Skipping
+    stories without one prevents the DEFAULT_CHARACTER_SCHEMA fallback from
+    being persisted to disk for fresh stories that don't need it.
+    """
+    schema_path = _story_character_schema_path(story_id)
+    if not os.path.exists(schema_path):
+        return
     schema = _load_character_schema(story_id)
     lists = schema.get("lists", [])
     has_abilities = any(l.get("key") == "abilities" for l in lists)
@@ -282,9 +334,7 @@ def _migrate_design_files(story_id: str):
 
 def _init_lore_indexes():
     """Rebuild lore search indexes for all stories on startup."""
-    if not os.path.exists(story_io.STORY_DESIGN_DIR):
-        return
-    for story_dir_name in os.listdir(story_io.STORY_DESIGN_DIR):
+    for story_dir_name in story_io._list_story_design_ids():
         lore_path = os.path.join(story_io.STORY_DESIGN_DIR, story_dir_name, "world_lore.json")
         if os.path.exists(lore_path):
             rebuild_lore_index(story_dir_name)

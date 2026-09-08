@@ -162,41 +162,9 @@ def _trace_llm(stage: str, story_id: str, branch_id: str = "",
 
 
 DEFAULT_CHARACTER_STATE = {
-    "name": "Eddy",
-    "current_phase": "主神空間",
-    "gene_lock": "未開啟（進度 15%）",
-    "physique": "普通人類（稍強）",
-    "spirit": "普通人類（偏高）",
-    "reward_points": 5000,
-    "inventory": {"封印之鏡": "紀念品", "自省之鏡玉佩": "", "鎮魂符": "×3"},
-    "completed_missions": ["咒怨 — 完美通關 8/8"],
-    "relationships": {
-        "小薇": "信任/曖昧",
-        "阿豪": "兄弟情",
-        "美玲": "好感",
-        "Jack": "戰友",
-        "小林": "崇拜",
-        "佐藤神主": "約定",
-    },
-    "current_status": "即將返回主神空間，5000點待兌換",
 }
 
 DEFAULT_CHARACTER_SCHEMA = {
-    "fields": [
-        {"key": "name", "label": "姓名", "type": "text"},
-        {"key": "current_phase", "label": "階段", "type": "text"},
-        {"key": "gene_lock", "label": "基因鎖", "type": "text"},
-        {"key": "physique", "label": "體質", "type": "text"},
-        {"key": "spirit", "label": "精神力", "type": "text"},
-        {"key": "reward_points", "label": "獎勵點", "type": "number", "highlight": True, "suffix": " 點"},
-        {"key": "current_status", "label": "狀態", "type": "text"},
-    ],
-    "lists": [
-        {"key": "inventory", "label": "道具欄", "type": "map"},
-        {"key": "completed_missions", "label": "已完成任務", "state_add_key": "completed_missions_add"},
-        {"key": "relationships", "label": "人際關係", "type": "map", "render": "inline"},
-    ],
-    "direct_overwrite_keys": ["gene_lock", "physique", "spirit", "current_status", "current_phase"],
 }
 
 VALID_PHASES = {"主神空間", "副本中", "副本結算", "傳送中", "死亡"}

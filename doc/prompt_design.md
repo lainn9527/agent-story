@@ -309,6 +309,45 @@
 
 ---
 
+## 9. GM v2 單次 grounded 契約（平行路徑，實驗中）
+
+對應 `POST /api/v2/send` 與 `story_core/gm_v2/`。與第 2~4 節的「主 prompt + sync tag + 雙層 async 抽取」並存，但理念相反：**GM 在單次呼叫裡同時敘事並「自己宣告」結構化狀態變更**，不再由第二個 LLM 逆向 prose。
+
+### 9.1 輸出契約
+
+GM 先寫敘事（同主 prompt 規則：第二人稱、繁中、結尾 `<!--ACTIONS-->`），最後輸出恰好一個 delta 區塊：
+
+```
+<!--DELTA
+{ "state_delta": {...}, "npcs": [...], "lore": [...], "time": {...}, "recap": "..." }
+DELTA-->
+```
+
+- marker 用 HTML comment，前端本就隱藏；`parse.py` 容錯切分（缺/壞只記 note，不影響敘事）。
+- `state_delta`：同既有 canonical 形狀（直接欄位 / `*_delta` / `*_add`/`*_remove` / map upsert，`""`/`null` 移除）。只放永久變化；一次性爆發/暫時/邊緣只進敘事。
+- `npcs`：顯式 `lifecycle_status`（active/offstage/terminal）+ `memory_add`（append-only 長期記憶）。
+- `lore`：只放通用設定；不同步入庫，交給 critic 審。
+
+### 9.2 Grounding
+
+`prompt.py` 把當前 state + active NPC（含 `memory[]`）塞進 system prompt，所以 GM 是「看著現況」寫 delta，不是盲寫——這移除了舊雙層抽取的逆向誤差。
+
+### 9.3 兩段式 evaluation（取代 lossy guard）
+
+- **`gate.py`（deterministic，無 LLM）**：丟結構錯（scene/型別/off-schema），flag 高風險（`base_power_level`/`systems`/`gene_lock`、terminal+memory、lore）。**不做 transient-marker 砍值**（舊 `_sanitize` 的誤砍正是 state-update-incomplete 來源）。
+- **`critic.py`（async LLM）**：離開關鍵路徑審 flagged，撤銷被誤升的暫時狀態、決定 lore 入不入庫。
+
+### 9.4 與舊抽取的對照
+
+| 舊（§4 雙層抽取） | v2 |
+|---|---|
+| `_extract_tags_async` 第二讀者 | GM 自己出 delta |
+| `_sanitize` / `_run_state_gate` / `_review_state_update_llm` | gate(B) + async critic(C) |
+| `_save_npc` 關鍵字 reactivation | 顯式 lifecycle |
+| 無 per-NPC 記憶 | append-only `memory[]` |
+
+---
+
 ## Debug Panel Prompt（V1）
 
 路由：`POST /api/debug/chat/stream`

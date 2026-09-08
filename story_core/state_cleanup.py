@@ -371,7 +371,7 @@ def _run_cleanup_core(story_id: str, branch_id: str) -> dict:
         systems = {}
     recap = get_recap_text(story_id, branch_id)
 
-    current_phase = (state.get("current_phase") or "主神空間").strip()
+    current_phase = (state.get("current_phase") or "").strip()
     current_dungeon = (state.get("current_dungeon") or "").strip()
 
     prompt = _build_cleanup_prompt(

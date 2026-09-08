@@ -1197,6 +1197,13 @@ def _find_state_at_index(story_id: str, branch_id: str, target_index: int) -> di
         if "state_snapshot" in message:
             return message["state_snapshot"]
 
+    # Snapshot-less branch (e.g. /play-harness writes state.json directly, no
+    # per-message snapshot): fall back to the live state rather than a blank
+    # default — otherwise a fork resets name/realm/currency/inventory to zero.
+    live = app_module._load_character_state(story_id, branch_id)
+    if live:
+        return live
+
     default_path = app_module._story_default_character_state_path(story_id)
     state = app_module._load_json(default_path, {})
     if not state:
@@ -1214,7 +1221,14 @@ def _backfill_forked_state(forked_state: dict, story_id: str, source_branch_id: 
 
 
 def _find_npcs_at_index(story_id: str, branch_id: str, target_index: int) -> list[dict]:
-    """Walk timeline backwards to find the most recent NPC snapshot."""
+    """Walk timeline backwards to find the most recent NPC snapshot.
+
+    Fallback: when NO message carries an `npcs_snapshot` (e.g. /play-harness
+    branches, which write npcs.json directly but skip per-message snapshots),
+    reconstruction would otherwise yield [] and a fork/regen would reset the cast
+    to empty → every reappearing NPC gets re-fabricated. Fall back to the branch's
+    live roster (include_archived) so forks keep canonical NPCs. Only triggers when
+    snapshots were never recorded; a present-but-empty snapshot is returned as-is."""
     app_module = _app()
 
     timeline = app_module.get_full_timeline(story_id, branch_id)
@@ -1223,11 +1237,15 @@ def _find_npcs_at_index(story_id: str, branch_id: str, target_index: int) -> lis
             continue
         if "npcs_snapshot" in message:
             return message["npcs_snapshot"]
-    return []
+    return app_module._load_npcs(story_id, branch_id, include_archived=True)
 
 
 def _find_world_day_at_index(story_id: str, branch_id: str, target_index: int) -> float:
-    """Walk timeline backwards to find the most recent world_day snapshot."""
+    """Walk timeline backwards to find the most recent world_day snapshot.
+
+    Fallback to the branch's live world clock when no snapshot exists (snapshot-less
+    /play-harness branches) so a fork doesn't reset the world day to 0 (which would
+    desync the time economy / 魔潮 deadlines)."""
     app_module = _app()
 
     timeline = app_module.get_full_timeline(story_id, branch_id)
@@ -1236,7 +1254,10 @@ def _find_world_day_at_index(story_id: str, branch_id: str, target_index: int) -
             continue
         if "world_day_snapshot" in message:
             return message["world_day_snapshot"]
-    return 0
+    try:
+        return app_module.get_world_day(story_id, branch_id)
+    except Exception:
+        return 0
 
 
 def _sync_gm_message_snapshot_after_async(story_id: str, branch_id: str, msg_index: int):
@@ -1269,6 +1290,35 @@ def _sync_gm_message_snapshot_after_async(story_id: str, branch_id: str, msg_ind
         branch_id,
         msg_index,
     )
+
+
+def _sync_latest_gm_snapshot(story_id: str, branch_id: str) -> bool:
+    """Refresh the LATEST GM message's snapshot to live state after an out-of-band
+    deterministic mutation (catalog buy/refund, menu action — paths that write
+    character_state.json directly, NOT through a GM turn).
+
+    `_find_state_at_index` restores a fork/regenerate from the message `state_snapshot`,
+    NOT the live json. Without this sync a fork at that turn rewinds the purchase
+    (currency un-spent, item lost) — the『買了功法卻沒扣命運點數』bug. Idempotent; no-op on a
+    branch with no own GM message yet (fresh fork before its first turn). Best-effort:
+    never raises (a sync failure must not break the buy that already succeeded)."""
+    try:
+        app_module = _app()
+        path = app_module._story_messages_path(story_id, branch_id)
+        delta = app_module._load_json(path, [])
+        gm_idx = None
+        for message in delta:
+            idx = message.get("index")
+            if message.get("role") == "gm" and isinstance(idx, int) and not isinstance(idx, bool):
+                if gm_idx is None or idx > gm_idx:
+                    gm_idx = idx
+        if gm_idx is None:
+            return False
+        _sync_gm_message_snapshot_after_async(story_id, branch_id, gm_idx)
+        return True
+    except Exception:
+        log.exception("sync_latest_gm_snapshot failed (story=%s branch=%s)", story_id, branch_id)
+        return False
 
 
 def _build_augmented_message(
@@ -1411,5 +1461,6 @@ __all__ = [
     "_find_npcs_at_index",
     "_find_world_day_at_index",
     "_sync_gm_message_snapshot_after_async",
+    "_sync_latest_gm_snapshot",
     "_build_augmented_message",
 ]

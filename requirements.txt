@@ -3,3 +3,4 @@ flask-compress
 markdown
 numpy
 fastembed
+google-genai

@@ -12,7 +12,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STORIES_DIR = os.path.join(DATA_DIR, "stories")
 STORY_DESIGN_DIR = os.path.join(BASE_DIR, "story_design")
+SHARED_DESIGN_DIR = os.path.join(STORY_DESIGN_DIR, "_shared")
+STORY_TEMPLATE_DIR = os.path.join(SHARED_DESIGN_DIR, "_template")
 STORIES_REGISTRY_PATH = os.path.join(DATA_DIR, "stories.json")
+import re as _re
+_STORY_ID_RE = _re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _LLM_CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
 
 # Track in-flight async tag extraction jobs keyed by (story, branch, msg_index).
@@ -53,6 +57,31 @@ def _story_dir(story_id: str) -> str:
 
 def _story_design_dir(story_id: str) -> str:
     return os.path.join(STORY_DESIGN_DIR, story_id)
+
+
+def _is_valid_story_id(story_id: str) -> bool:
+    """Slug rules: lowercase alphanumeric + underscore, must start with a letter,
+    max 40 chars. Names starting with `_` or `.` are reserved (shared/template/hidden)."""
+    if not isinstance(story_id, str):
+        return False
+    return bool(_STORY_ID_RE.match(story_id))
+
+
+def _is_story_design_entry(name: str) -> bool:
+    """Filter for story_design/ listing: real story dirs only (skip _shared, _template, dotfiles)."""
+    return bool(name) and not name.startswith("_") and not name.startswith(".")
+
+
+def _list_story_design_ids() -> list[str]:
+    """List concrete story ids under story_design/, skipping reserved names."""
+    if not os.path.isdir(STORY_DESIGN_DIR):
+        return []
+    return [
+        name
+        for name in os.listdir(STORY_DESIGN_DIR)
+        if _is_story_design_entry(name)
+        and os.path.isdir(os.path.join(STORY_DESIGN_DIR, name))
+    ]
 
 
 def _story_tree_path(story_id: str) -> str:
@@ -315,7 +344,12 @@ __all__ = [
     "DATA_DIR",
     "STORIES_DIR",
     "STORY_DESIGN_DIR",
+    "SHARED_DESIGN_DIR",
+    "STORY_TEMPLATE_DIR",
     "STORIES_REGISTRY_PATH",
+    "_is_valid_story_id",
+    "_is_story_design_entry",
+    "_list_story_design_ids",
     "_LLM_CONFIG_PATH",
     "_PENDING_EXTRACT_LOCK",
     "_PENDING_EXTRACT",

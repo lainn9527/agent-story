@@ -41,7 +41,20 @@ def api_stories_create():
     character_schema = body.get("character_schema")
     default_state = body.get("default_character_state")
 
-    story_id = f"story_{uuid.uuid4().hex[:8]}"
+    requested_id = (body.get("id") or "").strip()
+    registry = app_module._load_stories_registry()
+    if requested_id:
+        if not app_module._is_valid_story_id(requested_id):
+            return jsonify({
+                "ok": False,
+                "error": "invalid story id (use lowercase letters, digits, underscore; must start with a letter; reserved names start with _)",
+            }), 400
+        if requested_id in registry.get("stories", {}):
+            return jsonify({"ok": False, "error": f"story id already exists: {requested_id}"}), 409
+        story_id = requested_id
+    else:
+        story_id = f"story_{uuid.uuid4().hex[:8]}"
+
     now = datetime.now(timezone.utc).isoformat()
     story_dir = app_module._story_dir(story_id)
     os.makedirs(story_dir, exist_ok=True)
@@ -51,11 +64,12 @@ def api_stories_create():
         with open(app_module._story_system_prompt_path(story_id), "w", encoding="utf-8") as handle:
             handle.write(system_prompt_text)
 
+    schema_path = app_module._story_character_schema_path(story_id)
     if character_schema:
-        app_module._save_json(app_module._story_character_schema_path(story_id), character_schema)
-    else:
+        app_module._save_json(schema_path, character_schema)
+    elif not os.path.exists(schema_path):
         app_module._save_json(
-            app_module._story_character_schema_path(story_id),
+            schema_path,
             {
                 "fields": [{"key": "name", "label": "姓名", "type": "text"}],
                 "lists": [],
@@ -63,12 +77,15 @@ def api_stories_create():
             },
         )
 
+    default_state_path = app_module._story_default_character_state_path(story_id)
     if default_state:
-        app_module._save_json(app_module._story_default_character_state_path(story_id), default_state)
-    else:
-        app_module._save_json(app_module._story_default_character_state_path(story_id), {"name": "—"})
+        app_module._save_json(default_state_path, default_state)
+    elif not os.path.exists(default_state_path):
+        app_module._save_json(default_state_path, {"name": "—"})
 
-    app_module._save_json(app_module._story_parsed_path(story_id), [])
+    parsed_path = app_module._story_parsed_path(story_id)
+    if not os.path.exists(parsed_path):
+        app_module._save_json(parsed_path, [])
 
     tree = {
         "active_branch_id": "main",

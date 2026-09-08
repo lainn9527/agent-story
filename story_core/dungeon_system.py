@@ -576,12 +576,30 @@ def build_dungeon_context(story_id: str, branch_id: str) -> str:
 # ========== Branch Inheritance ==========
 
 def copy_dungeon_progress(story_id: str, from_bid: str, to_bid: str):
-    """Copy dungeon progress to new branch (for edit/regen/fork)."""
+    """Copy dungeon progress to new branch (for edit/regen/fork), AND carry the 副本
+    blueprint (scenario.json) alongside it. The blueprint is a per-branch dungeon-lifecycle
+    file; if a fork/regen lands mid-dungeon WITHOUT it, exit_dungeon on the new branch reads
+    no blueprint and settles `clear_reward`=0 — the lost-命運點數 fork bug (a whole 副本 run
+    cleared, reward never paid). Copying it here covers every fork/regen/edit path in one place
+    (all call copy_dungeon_progress), so it can't be missed per-site."""
     progress = _load_dungeon_progress(story_id, from_bid)
     if progress:
         # Deep copy to avoid reference issues
         _save_dungeon_progress(story_id, to_bid, copy.deepcopy(progress))
         log.info(f"Copied dungeon progress: {from_bid} → {to_bid}")
+    # blueprint travels with the dungeon lifecycle (outside the `if progress` guard: the
+    # blueprint can exist even when dungeon_progress is empty — exactly the bug case).
+    try:
+        src = os.path.join(_branch_dir(story_id, from_bid), "scenario.json")
+        if os.path.exists(src):
+            with open(src, "r", encoding="utf-8") as f:
+                blueprint = json.load(f)
+            dst = os.path.join(_branch_dir(story_id, to_bid), "scenario.json")
+            with open(dst, "w", encoding="utf-8") as f:
+                json.dump(blueprint, f, ensure_ascii=False, indent=2)
+            log.info(f"Copied dungeon blueprint (scenario.json): {from_bid} → {to_bid}")
+    except Exception:
+        log.warning("copy scenario.json failed: %s → %s", from_bid, to_bid, exc_info=True)
 
 
 def get_dungeon_progress_snapshot(story_id: str, branch_id: str) -> dict:

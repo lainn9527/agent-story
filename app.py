@@ -47,6 +47,7 @@ from routes.debug_routes import debug_bp
 from routes.story_routes import story_bp
 from routes.misc_routes import misc_bp
 from routes.core_routes import core_bp, _sse_event
+from routes.gm_v2_routes import gm_v2_bp
 from story_core.app_helpers import *  # noqa: F401,F403
 
 # Flask App
@@ -60,6 +61,7 @@ app.register_blueprint(debug_bp)
 app.register_blueprint(story_bp)
 app.register_blueprint(misc_bp)
 app.register_blueprint(core_bp)
+app.register_blueprint(gm_v2_bp)
 
 
 if __name__ == "__main__":
@@ -68,4 +70,7 @@ if __name__ == "__main__":
     _init_lore_indexes()
     _init_dungeon_templates()
     port = int(os.environ.get("PORT", 5051))
-    app.run(debug=True, host="0.0.0.0", port=port)
+    # NO_RELOAD=1 disables the Werkzeug auto-reloader (its fork breaks process managers
+    # like the preview launcher, which then loses track of the server). Default on.
+    app.run(debug=True, host="0.0.0.0", port=port,
+            use_reloader=os.environ.get("NO_RELOAD") != "1")

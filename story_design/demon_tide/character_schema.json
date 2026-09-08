@@ -1,0 +1,104 @@
+{
+  "fields": [
+    {
+      "key": "name",
+      "label": "姓名",
+      "type": "text"
+    },
+    {
+      "key": "sect",
+      "label": "宗門",
+      "type": "text"
+    },
+    {
+      "key": "sect_rank",
+      "label": "宗門職位",
+      "type": "text"
+    },
+    {
+      "key": "major_realm",
+      "label": "大境界",
+      "type": "text"
+    },
+    {
+      "key": "minor_realm",
+      "label": "小境界",
+      "type": "number",
+      "suffix": " 層"
+    },
+    {
+      "key": "fate_points",
+      "label": "命運點數",
+      "type": "number",
+      "highlight": true,
+      "suffix": " 點",
+      "engine_managed": true
+    },
+    {
+      "key": "current_phase",
+      "label": "當前階段",
+      "type": "text"
+    },
+    {
+      "key": "current_status",
+      "label": "當前狀態",
+      "type": "text"
+    },
+    {
+      "key": "current_dungeon",
+      "label": "當前秘境",
+      "type": "text"
+    },
+    {
+      "key": "dungeon_identity",
+      "label": "秘境身份",
+      "type": "text"
+    }
+  ],
+  "lists": [
+    {
+      "key": "techniques",
+      "label": "功法",
+      "type": "map",
+      "render": "inline"
+    },
+    {
+      "key": "inventory",
+      "label": "命運道具/法寶",
+      "type": "map"
+    },
+    {
+      "key": "talents",
+      "label": "天賦",
+      "type": "map",
+      "render": "inline"
+    },
+    {
+      "key": "relationships",
+      "label": "人際好感",
+      "type": "map",
+      "render": "inline"
+    },
+    {
+      "key": "completed_dungeons",
+      "label": "已通關秘境",
+      "state_add_key": "completed_dungeons_add"
+    },
+    {
+      "key": "abilities",
+      "label": "功法與技能",
+      "state_add_key": "abilities_add",
+      "state_remove_key": "abilities_remove"
+    }
+  ],
+  "direct_overwrite_keys": [
+    "sect",
+    "sect_rank",
+    "major_realm",
+    "minor_realm",
+    "current_phase",
+    "current_status",
+    "current_dungeon",
+    "dungeon_identity"
+  ]
+}

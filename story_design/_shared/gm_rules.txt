@@ -1,0 +1,7 @@
+# Shared GM rules placeholder
+#
+# Put cross-story GM guidelines here (style, tone, action-list format,
+# do/don'ts that apply regardless of world). Reference from a story prompt
+# via:  @include _shared/gm_rules.txt
+#
+# This file is intentionally empty — fill with your reusable rule snippets.

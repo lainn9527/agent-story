@@ -386,3 +386,15 @@
   - 達到 max turns / max dungeons
   - 連續錯誤達上限
   - 出現 `auto_play.stop`
+
+---
+
+## 13. GM v2 狀態維護（平行路徑，實驗中）
+
+對應 `POST /api/v2/send`、`story_core/gm_v2/`，詳見 `doc/architecture.md` §9 與 `doc/prompt_design.md` §9。與第 5 節的 STATE Update **並存**。狀態維護的差異重點：
+
+- **GM 自己宣告 delta**（敘事 + `<!--DELTA-->` 區塊），不靠第二個 LLM 逆向 prose。
+- **thin apply，無 lossy guard**：重用 `_apply_state_update_inner`（含 state.db sync），但跳過 `_sanitize_async_state_update` 的 transient-marker 砍值——避免合理的永久升級被誤刪。
+- **NPC 顯式 lifecycle**：GM 給 active/offstage/terminal，無關鍵字 archive/reactivation；archived NPC 不會因被提到而復活。
+- **per-NPC append-only `memory[]`**：長期記憶不在壓縮時遺失。
+- **兩段式 evaluation**：deterministic gate（結構，免費）+ async critic（語義，離開關鍵路徑）。

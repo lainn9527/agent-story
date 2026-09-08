@@ -4,7 +4,7 @@
 
 set -e
 
-PROD_DIR="/Users/eddylai/story-prod"
+PROD_DIR="/Users/eddylai/self/story-prod"
 
 echo "==> Updating story-prod..."
 cd "$PROD_DIR"

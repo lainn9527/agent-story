@@ -1,0 +1,76 @@
+<svg viewBox="0 0 900 700" xmlns="http://www.w3.org/2000/svg" role="img" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+  <title>v2 架構：確定性引擎 ⊕ 生成式旁白</title>
+  <desc>玩家有兩條輸入路徑：選單動作走確定性路徑直達引擎（不經 LLM）；自由文字走生成路徑經旁白 LLM，旁白只能發 delta 經 gate/apply 落地、並從引擎讀 grounding。引擎分兩層：上層模組（功法樹/商城/domain/錨點/副本/任務，每世界可插拔），下層底層 kernel（時間經濟/命運點數/級/骰子/state+delta/NPC生命週期/旁白管線，跨世界不變式）。</desc>
+  <defs>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#7ee0a0"/></marker>
+    <marker id="ap" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#c79df0"/></marker>
+    <marker id="ago" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#e0b25a"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="700" rx="14" fill="#0f1117"/>
+  <text x="28" y="30" fill="#e0b25a" font-size="16" font-weight="700" letter-spacing="1">v2 架構：確定性引擎 ⊕ 生成式旁白</text>
+  <text x="28" y="50" fill="#8b91a3" font-size="11.5">傳統 RPG 骨幹 ＋ 一個非常強的旁白 ＋ 受約束的無邊界 RNG　·　LLM 永不直接改 state，只能發 delta 經 gate→apply</text>
+
+  <!-- player -->
+  <rect x="335" y="66" width="230" height="40" rx="9" fill="#171a23" stroke="#3a4150"/>
+  <text x="450" y="91" fill="#e6e8ef" font-size="14" font-weight="700" text-anchor="middle">玩家 / UI</text>
+
+  <!-- paths -->
+  <path d="M395 106 C300 150 175 250 175 392" fill="none" stroke="#7ee0a0" stroke-width="2.2" marker-end="url(#ag)"/>
+  <text x="150" y="150" fill="#7ee0a0" font-size="11" font-weight="600">選單動作</text>
+  <text x="150" y="165" fill="#7ee0a0" font-size="9.5">確定性·不經 LLM·即時</text>
+
+  <path d="M505 106 C560 124 640 130 690 148" fill="none" stroke="#c79df0" stroke-width="2.2" marker-end="url(#ap)"/>
+  <text x="556" y="120" fill="#c79df0" font-size="11" font-weight="600">自由文字（生成）</text>
+
+  <!-- narrator -->
+  <rect x="585" y="150" width="293" height="172" rx="11" fill="#15101d" stroke="#8a5ac0" stroke-width="1.6"/>
+  <text x="601" y="174" fill="#c79df0" font-size="13.5" font-weight="700">旁白 NARRATOR（LLM · 生成）</text>
+  <text x="601" y="198" fill="#a78bc0" font-size="10.5">ground → generate → gate → apply → critic</text>
+  <rect x="601" y="212" width="261" height="96" rx="8" fill="#1a1322" stroke="#46305a"/>
+  <text x="613" y="231" fill="#c79df0" font-size="10.5" font-weight="600">連接點（只在這些縫生成/判決）</text>
+  <text x="613" y="252" fill="#d9c7f0" font-size="11">· NPC 對話　　· 場景 / 世界觀</text>
+  <text x="613" y="272" fill="#d9c7f0" font-size="11">· 戰鬥過程＋創意招式判決</text>
+  <text x="613" y="292" fill="#d9c7f0" font-size="11">· 副本 / 事件設計（預生成）</text>
+
+  <!-- narrator <-> engine -->
+  <path d="M690 322 L690 358" fill="none" stroke="#c79df0" stroke-width="2.2" marker-end="url(#ap)"/>
+  <text x="700" y="344" fill="#c79df0" font-size="10">delta → gate → apply</text>
+  <path d="M812 358 L812 322" fill="none" stroke="#e0b25a" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#ago)"/>
+  <text x="822" y="344" fill="#e0b25a" font-size="9.5" text-anchor="middle" transform="rotate(0 822 344)">grounding</text>
+
+  <!-- engine -->
+  <rect x="22" y="358" width="856" height="316" rx="13" fill="#0c0e14" stroke="#6b5526" stroke-width="1.6"/>
+  <text x="38" y="382" fill="#e0b25a" font-size="14" font-weight="700">引擎 ENGINE　—　確定性 · 無 LLM · 即時免費 · 唯一真相</text>
+
+  <!-- modules band -->
+  <rect x="38" y="394" width="824" height="66" rx="9" fill="#10171c" stroke="#2f4a5a"/>
+  <text x="52" y="412" fill="#8db8e8" font-size="11.5" font-weight="700">模組 MODULES（每世界可插拔 — 加新世界＝只增這層）</text>
+  <g font-size="10.5" text-anchor="middle">
+    <rect x="54" y="422" width="74" height="28" rx="7" fill="#11202a" stroke="#2f4a5a"/><text x="91" y="440" fill="#8db8e8">功法樹</text>
+    <rect x="138" y="422" width="60" height="28" rx="7" fill="#11202a" stroke="#2f4a5a"/><text x="168" y="440" fill="#8db8e8">商城</text>
+    <rect x="208" y="422" width="98" height="28" rx="7" fill="#11202a" stroke="#2f4a5a"/><text x="257" y="440" fill="#8db8e8">domain 詞庫</text>
+    <rect x="316" y="422" width="86" height="28" rx="7" fill="#11202a" stroke="#2f4a5a"/><text x="359" y="440" fill="#8db8e8">錨點階梯</text>
+    <rect x="412" y="422" width="104" height="28" rx="7" fill="#11202a" stroke="#2f4a5a"/><text x="464" y="440" fill="#8db8e8">副本 blueprint</text>
+    <rect x="526" y="422" width="92" height="28" rx="7" fill="#1a1410" stroke="#5a4520" stroke-dasharray="4 3"/><text x="572" y="440" fill="#c0a060">任務（待建）</text>
+  </g>
+
+  <!-- kernel band -->
+  <rect x="38" y="470" width="824" height="192" rx="9" fill="#141008" stroke="#6b5526"/>
+  <text x="52" y="490" fill="#e0b25a" font-size="11.5" font-weight="700">底層 KERNEL（跨世界不變式 — 換任何世界都一樣，永不 per-world 抽換）</text>
+  <g font-size="10.5" text-anchor="middle">
+    <rect x="54" y="502" width="92" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="100" y="521" fill="#e0b25a">時間經濟</text>
+    <rect x="156" y="502" width="92" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="202" y="521" fill="#e0b25a">資源帳本</text>
+    <rect x="258" y="502" width="96" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="306" y="521" fill="#e0b25a">級 / power</text>
+    <rect x="364" y="502" width="92" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="410" y="521" fill="#e0b25a">骰子 / 命運</text>
+    <rect x="466" y="502" width="190" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="561" y="521" fill="#e0b25a">state ＋ delta / gate / apply</text>
+    <rect x="666" y="502" width="184" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="758" y="521" fill="#e0b25a">NPC 生命週期 / 記憶</text>
+    <rect x="54" y="540" width="240" height="30" rx="7" fill="#1d1810" stroke="#6b5526"/><text x="174" y="559" fill="#e0b25a">旁白契約管線 ground→…→critic</text>
+  </g>
+  <text x="54" y="592" fill="#8b91a3" font-size="10">判準：換個完全不同類型的世界（賽博龐克／克蘇魯／武俠），它還一模一樣存在嗎？</text>
+  <text x="54" y="608" fill="#8b91a3" font-size="10">　　會 ＝ 底層（kernel）　·　不會 ＝ 模組（per-world，插在底層上）</text>
+  <text x="54" y="632" fill="#7ee0a0" font-size="10">綠＝確定性路徑（選單動作直達引擎）</text>
+  <text x="300" y="632" fill="#c79df0" font-size="10">紫＝生成路徑（旁白 LLM，delta 落地）</text>
+  <text x="560" y="632" fill="#e0b25a" font-size="10">金＝底層／引擎　·　藍＝模組</text>
+  <text x="54" y="650" fill="#8b91a3" font-size="10">大部分回合走綠線（即時免費）；只有要敘述或做選單外的事才付一次 LLM 成本。兩條都寫同一個 state。</text>
+</svg>

@@ -1,0 +1,4 @@
+# Shared tag format placeholder
+#
+# STATE / LORE / NPC / EVENT / IMG / TIME tag specs that don't depend on the
+# world. Reference via:  @include _shared/tag_format.txt

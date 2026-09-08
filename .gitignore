@@ -2,6 +2,10 @@ __pycache__/
 llm_config.json
 server.log*
 server_stderr.log
+*.out
+.DS_Store
+.pytest_cache/
+*.bak_*
 
 # Runtime data (source of truth for design files is story_design/, not data/stories/)
 data/

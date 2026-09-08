@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import time
 
 from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
@@ -38,6 +37,28 @@ def _serialize_message_for_response(message: dict) -> dict:
     }
 
 
+def _merged_turn_ops(app_module, story_id: str, branch_id: str) -> dict:
+    """The UI ops (購買/解鎖/⚡) a GM reply acknowledged, keyed by that reply's index — for the
+    timeline so the player can see "this turn I bought X" and rewind to re-pick. `turn_ops.json`
+    is per-branch and NOT copied on fork, so walk the ancestor chain and merge (parent first,
+    child overrides — absolute indices don't overlap, so this just unions inherited + own)."""
+    tree = app_module._load_tree(story_id)
+    branches = tree.get("branches", {})
+    chain, cur, seen = [], branch_id, set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        chain.append(cur)
+        b = branches.get(cur)
+        cur = b.get("parent_branch_id") if b else None
+    merged: dict = {}
+    for bid in reversed(chain):  # main → … → current
+        path = os.path.join(app_module._branch_dir(story_id, bid), "turn_ops.json")
+        snap = app_module._load_json(path, {})
+        if isinstance(snap, dict):
+            merged.update(snap)
+    return merged
+
+
 @core_bp.route("/")
 def index():
     app_module = _app()
@@ -63,16 +84,11 @@ def api_init():
     app_module._migrate_design_files(story_id)
 
     parsed_path = app_module._story_parsed_path(story_id)
+    # Legacy 主神空間 conversation bootstrap moved into _migrate_to_stories
+    # (which only fires for story_original on a registry-less install). For
+    # any other story we just ensure the file exists as an empty list.
     if not os.path.exists(parsed_path):
-        if os.path.exists(app_module.CONVERSATION_PATH):
-            app_module.save_parsed(
-                app_module.parse_conversation(os.fspath(app_module.CONVERSATION_PATH)),
-                output=os.fspath(app_module.LEGACY_PARSED_PATH),
-            )
-            if os.path.exists(app_module.LEGACY_PARSED_PATH):
-                shutil.copy2(app_module.LEGACY_PARSED_PATH, parsed_path)
-        else:
-            app_module._save_json(parsed_path, [])
+        app_module._save_json(parsed_path, [])
     original = app_module._load_json(parsed_path, [])
 
     app_module._migrate_to_timeline_tree(story_id)
@@ -138,6 +154,7 @@ def api_messages():
     page = [_serialize_message_for_response(message) for message in page]
     fork_points = app_module._get_fork_points(story_id, branch_id)
     sibling_groups = app_module._get_sibling_groups(story_id, branch_id)
+    turn_ops = _merged_turn_ops(app_module, story_id, branch_id)
 
     result = {
         "messages": page,
@@ -146,6 +163,7 @@ def api_messages():
         "original_count": original_count,
         "fork_points": fork_points,
         "sibling_groups": sibling_groups,
+        "turn_ops": turn_ops,
         "branch_id": branch_id,
         "world_day": app_module.get_world_day(story_id, branch_id),
         "dice_modifier": app_module.get_dice_modifier(app_module._story_dir(story_id), branch_id),
@@ -198,6 +216,32 @@ def api_messages():
     return jsonify(result)
 
 
+def _v2_engine_on(app_module, story_id: str, branch_id: str) -> bool:
+    """True when this branch is flagged (branch_config gm_engine=v2) for the Gemini v2 pipeline."""
+    try:
+        return (app_module._load_branch_config(story_id, branch_id) or {}).get("gm_engine") == "v2"
+    except Exception:
+        return False
+
+
+def _v2_transport(app_module, story_id: str, branch_id: str) -> str:
+    """Per-branch transport: 'delta' (default) | 'tools' (2-pass cheap) | 'tools-inline'
+    (single capable-model FC). branch_config `gm_transport`."""
+    try:
+        t = (app_module._load_branch_config(story_id, branch_id) or {}).get("gm_transport")
+        return t if t in ("delta", "tools", "tools-inline") else "delta"
+    except Exception:
+        return "delta"
+
+
+def _v2_turn_messages(story_id: str, branch_id: str, result: dict):
+    """Read back the player + GM messages that gm_v2.run_turn committed."""
+    from story_core.story_io import _load_branch_messages
+
+    by_index = {m.get("index"): m for m in _load_branch_messages(story_id, branch_id)}
+    return by_index.get(result.get("user_index")), by_index.get(result.get("gm_index"))
+
+
 @core_bp.route("/api/send", methods=["POST"])
 def api_send():
     app_module = _app()
@@ -217,6 +261,20 @@ def api_send():
 
     if app_module._clear_loaded_save_preview(tree):
         app_module._save_tree(story_id, tree)
+
+    # GM v2 (parallel) — dispatch BEFORE any legacy player-msg write; run_turn persists both.
+    if _v2_engine_on(app_module, story_id, branch_id):
+        from story_core.gm_v2.pipeline import run_turn
+
+        result = run_turn(story_id, branch_id, user_text, transport=_v2_transport(app_module, story_id, branch_id), length=(body.get("length") or "").strip() or None)
+        if result.get("error"):
+            log.warning("/api/send (v2) GM error: %s", result["error"])
+            return jsonify({"ok": False, "error": result["error"]}), 503
+        player_msg, gm_msg = _v2_turn_messages(story_id, branch_id, result)
+        tree["last_played_branch_id"] = branch_id
+        app_module._save_tree(story_id, tree)
+        log.info("/api/send (v2 engine) DONE branch=%s", branch_id)
+        return jsonify({"ok": True, "player": player_msg, "gm": gm_msg, "pruned_branches": [], "v2": True})
 
     log.info("/api/send START  msg=%s branch=%s", user_text[:30], branch_id)
 
@@ -371,6 +429,74 @@ def api_send_stream():
 
     if app_module._clear_loaded_save_preview(tree):
         app_module._save_tree(story_id, tree)
+
+    # GM v2 (parallel) — 邊串流邊 buffer：背景 thread 跑 run_turn(emit_chunk→queue)，本 generator
+    # 逐塊轉發 SSE text。PASS1 旁白逐字流給玩家，整段仍在 server 端 buffer 供 commit/PASS2；只有
+    # 串流「第一塊之前」失敗才退回阻塞 retry/fallback（見 pipeline._run_turn_tools / _stream_gm）。
+    if _v2_engine_on(app_module, story_id, branch_id):
+        def v2_generate():
+            import queue as _queue
+            import threading as _threading
+            from story_core.gm_v2.pipeline import run_turn
+
+            q: "_queue.Queue" = _queue.Queue()
+            box: dict = {}
+
+            def _emit(delta):
+                q.put(("text", delta))
+
+            def _worker():
+                try:
+                    box["result"] = run_turn(
+                        story_id, branch_id, user_text,
+                        transport=_v2_transport(app_module, story_id, branch_id),
+                        emit_chunk=_emit,
+                        length=(body.get("length") or "").strip() or None,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.info("/api/send/stream (v2 stream) EXCEPTION %s\n%s", exc, traceback.format_exc())
+                    box["error"] = str(exc)
+                finally:
+                    q.put(("__end__", None))
+
+            th = _threading.Thread(target=_worker, daemon=True)
+            th.start()
+
+            streamed_any = False
+            while True:
+                kind, payload = q.get()
+                if kind == "__end__":
+                    break
+                if kind == "text":
+                    streamed_any = True
+                    yield _sse_event({"type": "text", "chunk": payload})
+            th.join(timeout=2)
+
+            result = box.get("result")
+            if box.get("error") or not result or result.get("error"):
+                yield _sse_event({"type": "error", "message": box.get("error") or (result or {}).get("error") or "GM 生成失敗"})
+                return
+            if result.get("dice"):
+                yield _sse_event({"type": "dice", "dice": result["dice"]})
+            if not streamed_any:  # 串流不可用/退回阻塞 → 整段補送一次（維持原非串流行為）
+                yield _sse_event({"type": "text", "chunk": result["narration"]})
+            player_msg, gm_msg = _v2_turn_messages(story_id, branch_id, result)
+            tree_now = app_module._load_tree(story_id)
+            tree_now["last_played_branch_id"] = branch_id
+            app_module._save_tree(story_id, tree_now)
+            yield _sse_event({
+                "type": "done",
+                "user_msg": player_msg,
+                "gm_msg": gm_msg,
+                "branch": tree_now.get("branches", {}).get(branch_id),
+                "pruned_branches": [],
+                "v2": True,
+                # B3: 敘事進了副本但引擎沒登記 → 前端跳「確認進入」一鍵補登記
+                "dungeon_entry_suggestion": result.get("dungeon_entry_suggestion"),
+            })
+
+        return Response(stream_with_context(v2_generate()), mimetype="text/event-stream")
 
     log.info("/api/send/stream START  msg=%s branch=%s", user_text[:30], branch_id)
 

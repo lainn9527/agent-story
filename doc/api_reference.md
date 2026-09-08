@@ -45,8 +45,16 @@
 | GET | `/api/messages` | 取得分支完整 timeline（含 fork/sibling/world_day；不含 per-message snapshot 欄位） | `branch_id`, `offset`, `limit`, `after_index`, `tail` |
 | POST | `/api/send` | 送出玩家訊息，取得完整 GM 回覆 | body: `message`, `branch_id` |
 | POST | `/api/send/stream` | `send` 的 SSE 版本 | body: `message`, `branch_id` |
+| POST | `/api/v2/send` | **（實驗）GM v2 單次 grounded 管線**；與 `/api/send` 並存、互不影響 | body: `message`(或 `action`), `branch_id`(可選), `story_id`(可選) |
 | GET | `/api/status` | 取得角色狀態（含 world_day、cheat 狀態） | `branch_id` |
 | POST | `/api/state/rebuild` | 由 canonical JSON 強制重建分支 `state.db` | body: `branch_id`（可選，預設 active branch） |
+
+`/api/v2/send` 補充（實驗中，見 `doc/architecture.md` §9 / `doc/prompt_design.md` §9）：
+
+- 非串流，回傳 `{"ok": true, "narration", "dice", "next_dice", "flagged", "dropped", "apply", "parse_note", "user_index", "gm_index", "story_id", "branch_id"}`。
+- GM 在單次呼叫產出敘事 + `<!--DELTA {json} DELTA-->` 區塊；server 端 parse → deterministic gate → 以 production 持久層落盤（含 state.db sync）→ async critic 審高風險項目。
+- 與舊 `/api/send` 的差異：不走 sync tag + 雙層 async extractor + lossy guard；改由 GM 自己宣告 delta（grounded）。
+- `dice` 為本回合骰、`next_dice` 為預擲下一回合（pipeline 化）；`flagged` 是交給 async critic 的高風險項，`dropped` 是 gate 擋下的結構性錯誤。
 
 ## 分支管理
 

@@ -64,6 +64,9 @@ pytest -m "not slow"
 
 ## 建議閱讀順序
 
+0. `doc/architecture_v2.md`: **v2 北極星** — 確定性引擎 ⊕ 生成式旁白；底層/模組/內容分層（新功能先讀這份歸位）。含 §7「如何新增一顆動作按鈕 / 動詞 / module」配方。
+   - `doc/design_decisions_v2.md`: 邊界決策的「為什麼」（沈浸感=敘事、引擎獨佔欄位、GM 提議引擎執行、動詞/名詞）
+   - `doc/v2_state_lifecycle.md`: **runtime 狀態與除錯地圖** — branch 檔案地圖、副本生命週期、snapshot/fork 怎麼搬、recap 壓縮，以及「確定性變更在 fork 後被回捲」這類反覆 bug 的修法＋手術式改狀態配方。**debug 狀態/fork/副本前先讀這份**，省得每次重新考古。
 1. `doc/architecture.md`: 系統結構與請求管線
 2. `doc/prompt_design.md`: LLM prompt 組裝與 tag 契約
 3. `doc/game_mechanics.md`: 分支、骰子、副本、存檔等規則
@@ -72,6 +75,8 @@ pytest -m "not slow"
 
 ## 既有文件
 
+- `doc/card_mode_proposal.md`: **角色卡模式（Card Mode）實作規格** — 提案待實作；單角色一對一形態、獨立介面、只留關係/記憶/時間/隨身物
+- `doc/world_authoring.md`: **新增一個世界（story）** — 檔案清單、引擎咬住的欄位（貨幣/身分/階段/`phases`）、catalog、無副本世界的設定；開新世界前先讀這份
 - `doc/testing_plan.md`: 測試策略與覆蓋現況
 - `doc/wsl2_setup.md`: WSL2 部署與 systemd 啟動
 - `doc/sync.md`: 多機資料同步流程

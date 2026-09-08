@@ -1,0 +1,27 @@
+{
+  "fields": [
+    { "key": "name", "label": "姓名", "type": "text" },
+    { "key": "sect_rank", "label": "職業／身份", "type": "text" },
+    { "key": "major_realm", "label": "能力階段", "type": "text" },
+    { "key": "minor_realm", "label": "段", "type": "number", "suffix": " 段" },
+    { "key": "fate_points", "label": "現金", "type": "number", "highlight": true, "suffix": " 元", "engine_managed": true },
+    { "key": "current_phase", "label": "當前階段", "type": "text" },
+    { "key": "current_status", "label": "當前狀態", "type": "text" }
+  ],
+  "lists": [
+    { "key": "techniques", "label": "微光能力", "type": "map", "render": "inline" },
+    { "key": "inventory", "label": "隨身物品", "type": "map" },
+    { "key": "conditions", "label": "身心狀況", "type": "map", "render": "inline" },
+    { "key": "talents", "label": "天賦／生活專長", "type": "map", "render": "inline" },
+    { "key": "relationships", "label": "人際關係", "type": "map", "render": "inline" },
+    { "key": "abilities", "label": "能力與技能", "state_add_key": "abilities_add", "state_remove_key": "abilities_remove" }
+  ],
+  "direct_overwrite_keys": [
+    "sect_rank",
+    "major_realm",
+    "minor_realm",
+    "current_phase",
+    "current_status"
+  ],
+  "phases": ["日常", "事件中", "危機", "靜養", "死亡"]
+}

@@ -17,6 +17,7 @@ from story_core.npc_helpers import (
 )
 from story_core.prompts import build_system_prompt
 from story_core.story_io import (
+    STORY_DESIGN_DIR,
     _get_image_model,
     _is_image_gen_enabled,
     _load_branch_config,
@@ -157,8 +158,6 @@ def _load_character_state(story_id: str, branch_id: str = "main") -> dict:
         state = _load_json(default_path, {})
     if not state:
         state = copy.deepcopy(DEFAULT_CHARACTER_STATE)
-    if "current_phase" not in state:
-        state["current_phase"] = "主神空間"
 
     dirty = False
     schema = _load_character_schema(story_id)
@@ -344,6 +343,49 @@ def _build_core_state_text(story_id: str, state: dict) -> str:
     return "\n".join(lines) if lines else "（尚無角色核心狀態）"
 
 
+_INCLUDE_DIRECTIVE_RE = re.compile(r"^[ \t]*@include[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+_INCLUDE_MAX_DEPTH = 5
+_INCLUDE_MAX_BYTES = 256 * 1024
+
+
+def _resolve_prompt_includes(text: str, depth: int = 0) -> str:
+    """Expand `@include <relpath>` directives. Path is relative to story_design/.
+
+    Resolved AFTER `.format(...)` so included files may freely contain `{`/`}`.
+    Cyclic / runaway includes are bounded by _INCLUDE_MAX_DEPTH.
+    Missing or unsafe paths are left as a clear inline marker so failures are visible
+    in the rendered prompt rather than silently disappearing.
+    """
+    if depth > _INCLUDE_MAX_DEPTH:
+        return text
+
+    def _replace(match: "re.Match[str]") -> str:
+        rel = match.group(1).strip().strip('"').strip("'")
+        if not rel or ".." in rel.split(os.sep) or os.path.isabs(rel):
+            log.warning("system_prompt include: rejected path %r", rel)
+            return f"<!-- @include {rel} (rejected: unsafe path) -->"
+        target = os.path.normpath(os.path.join(STORY_DESIGN_DIR, rel))
+        if not target.startswith(STORY_DESIGN_DIR + os.sep):
+            log.warning("system_prompt include: path escapes story_design/: %r", rel)
+            return f"<!-- @include {rel} (rejected: out of tree) -->"
+        if not os.path.exists(target):
+            log.warning("system_prompt include: file not found: %s", target)
+            return f"<!-- @include {rel} (file not found) -->"
+        try:
+            size = os.path.getsize(target)
+            if size > _INCLUDE_MAX_BYTES:
+                log.warning("system_prompt include: file too large (%d bytes): %s", size, target)
+                return f"<!-- @include {rel} (file too large) -->"
+            with open(target, "r", encoding="utf-8") as handle:
+                content = handle.read()
+        except OSError as exc:
+            log.warning("system_prompt include: read failed %s: %s", target, exc)
+            return f"<!-- @include {rel} (read error) -->"
+        return _resolve_prompt_includes(content, depth + 1)
+
+    return _INCLUDE_DIRECTIVE_RE.sub(_replace, text)
+
+
 def _build_story_system_prompt(
     story_id: str,
     state_text: str,
@@ -454,7 +496,7 @@ def _build_story_system_prompt(
             "- 本分支已關閉場景插圖。\n"
             "- 禁止輸出任何 IMG tag。\n"
         )
-    return result
+    return _resolve_prompt_includes(result)
 
 
 __all__ = [

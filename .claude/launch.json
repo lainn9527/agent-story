@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "story-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "NO_RELOAD=1 /usr/local/bin/python3 app.py"],
+      "port": 5056,
+      "autoPort": true
+    }
+  ]
+}

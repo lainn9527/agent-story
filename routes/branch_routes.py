@@ -41,6 +41,42 @@ def _resolve_regenerate_user_message(app_module, timeline: list[dict], branch_po
     return user_msg
 
 
+# --- GM v2 routing (mirror routes.core_routes; regenerate/edit must honour gm_engine=v2) ---
+def _v2_engine_on(app_module, story_id: str, branch_id: str) -> bool:
+    try:
+        return (app_module._load_branch_config(story_id, branch_id) or {}).get("gm_engine") == "v2"
+    except Exception:
+        return False
+
+
+def _v2_transport(app_module, story_id: str, branch_id: str) -> str:
+    try:
+        t = (app_module._load_branch_config(story_id, branch_id) or {}).get("gm_transport")
+        return t if t in ("delta", "tools", "tools-inline") else "delta"
+    except Exception:
+        return "delta"
+
+
+def _v2_turn_messages(app_module, story_id: str, branch_id: str, result: dict):
+    """Read back the player + GM messages run_turn committed (user_index may be None for regen)."""
+    by_index = {m.get("index"): m for m in app_module._load_branch_messages(story_id, branch_id)}
+    return by_index.get(result.get("user_index")), by_index.get(result.get("gm_index"))
+
+
+def _v2_turn_ops(story_id: str, branch_id: str, gm_index: int) -> list:
+    """UI ops (購買/解鎖/⚡行動/閉關/副本) the GM reply at gm_index acknowledged — so a
+    regenerate of that reply can replay them (pending_ops is cleared per-turn + not forked)."""
+    try:
+        play_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "play")
+        import sys
+        if play_dir not in sys.path:
+            sys.path.insert(0, play_dir)
+        import catalog_tools
+        return catalog_tools.turn_ops(story_id, branch_id, gm_index)
+    except Exception:
+        return []
+
+
 @branch_bp.route("/api/branches")
 def api_branches():
     app_module = _app()
@@ -799,7 +835,11 @@ def api_branches_edit_stream():
     gm_msg_index = branch_point_index + 2
 
     user_msg = {"role": "user", "content": edited_message, "index": user_msg_index}
-    app_module._save_branch_messages(story_id, branch_id, [user_msg])
+    # v2 run_turn (below) writes BOTH the edited user msg (with a fresh die) AND the GM reply, so
+    # seeding the user msg here would DUPLICATE it — a dice-less orphan at +1 plus run_turn's copy
+    # at +2, i.e. two identical user messages in a row. Only the legacy path needs the seed.
+    _edit_v2 = _v2_engine_on(app_module, story_id, source_branch_id)
+    app_module._save_branch_messages(story_id, branch_id, [] if _edit_v2 else [user_msg])
 
     branches[branch_id] = {
         "id": branch_id,
@@ -814,6 +854,33 @@ def api_branches_edit_stream():
     tree["last_played_branch_id"] = branch_id
     app_module._clear_loaded_save_preview(tree)
     app_module._save_tree(story_id, tree)
+
+    # GM v2: replay the edited action — run_turn writes the edited user msg + a fresh GM reply
+    if _v2_engine_on(app_module, story_id, source_branch_id):
+        def v2_edit():
+            try:
+                from story_core.gm_v2.pipeline import run_turn
+                result = run_turn(story_id, branch_id, edited_message,
+                                  transport=_v2_transport(app_module, story_id, source_branch_id))
+                if result.get("error"):
+                    app_module._cleanup_branch(story_id, branch_id)
+                    yield app_module._sse_event({"type": "error", "message": result["error"]})
+                    return
+                if result.get("dice"):
+                    yield app_module._sse_event({"type": "dice", "dice": result["dice"]})
+                yield app_module._sse_event({"type": "text", "chunk": result["narration"]})
+                u_msg, gm_msg = _v2_turn_messages(app_module, story_id, branch_id, result)
+                yield app_module._sse_event({"type": "done", "branch": tree["branches"][branch_id],
+                                             "user_msg": u_msg, "gm_msg": gm_msg})
+            except Exception as exc:
+                import traceback
+                log.info("/api/branches/edit/stream (v2) EXCEPTION %s\n%s", exc, traceback.format_exc())
+                app_module._cleanup_branch(story_id, branch_id)
+                yield app_module._sse_event({"type": "error", "message": str(exc)})
+            finally:
+                if not app_module._load_branch_messages(story_id, branch_id):
+                    app_module._cleanup_branch(story_id, branch_id)
+        return Response(stream_with_context(v2_edit()), mimetype="text/event-stream")
 
     full_timeline = app_module.get_full_timeline(story_id, branch_id)
     state = app_module._load_character_state(story_id, branch_id)
@@ -1213,6 +1280,36 @@ def api_branches_regenerate_stream():
     tree["last_played_branch_id"] = branch_id
     app_module._clear_loaded_save_preview(tree)
     app_module._save_tree(story_id, tree)
+
+    # GM v2: regenerate the GM reply only (user msg already in the forked timeline) — run_turn(skip_user).
+    # The original reply lived at branch_point_index + 1 on the source branch; replay the UI ops it
+    # acknowledged so the regenerated reply still承接 the player's purchases/actions.
+    if _v2_engine_on(app_module, story_id, source_branch_id):
+        replay_ops = _v2_turn_ops(story_id, source_branch_id, branch_point_index + 1)
+        def v2_regen():
+            try:
+                from story_core.gm_v2.pipeline import run_turn
+                result = run_turn(story_id, branch_id, user_msg_content,
+                                  transport=_v2_transport(app_module, story_id, source_branch_id),
+                                  skip_user_message=True, replay_ops=replay_ops)
+                if result.get("error"):
+                    app_module._cleanup_branch(story_id, branch_id)
+                    yield app_module._sse_event({"type": "error", "message": result["error"]})
+                    return
+                if result.get("dice"):
+                    yield app_module._sse_event({"type": "dice", "dice": result["dice"]})
+                yield app_module._sse_event({"type": "text", "chunk": result["narration"]})
+                _, gm_msg = _v2_turn_messages(app_module, story_id, branch_id, result)
+                yield app_module._sse_event({"type": "done", "branch": tree["branches"][branch_id], "gm_msg": gm_msg})
+            except Exception as exc:
+                import traceback
+                log.info("/api/branches/regenerate/stream (v2) EXCEPTION %s\n%s", exc, traceback.format_exc())
+                app_module._cleanup_branch(story_id, branch_id)
+                yield app_module._sse_event({"type": "error", "message": str(exc)})
+            finally:
+                if not app_module._load_branch_messages(story_id, branch_id):
+                    app_module._cleanup_branch(story_id, branch_id)
+        return Response(stream_with_context(v2_regen()), mimetype="text/event-stream")
 
     full_timeline = app_module.get_full_timeline(story_id, branch_id)
     state = app_module._load_character_state(story_id, branch_id)

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "story-gm": {
+      "command": "python3",
+      "args": ["scripts/play/mcp_server.py"],
+      "env": {}
+    }
+  }
+}

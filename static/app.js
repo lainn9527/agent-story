@@ -279,6 +279,12 @@ const API = {
   // Event APIs
   events: (branchId) =>
     fetch(`/api/events?branch_id=${branchId || ""}`).then(r => r.json()),
+  // v2 quests (deterministic quest tracker; engine-settled)
+  v2quests: (branchId) =>
+    fetch(`/api/v2/quests?branch_id=${branchId || ""}`).then(r => r.json()),
+  // v2 world clock + upcoming deadlines (shown in the unified 事件追蹤 panel)
+  v2time: (branchId) =>
+    fetch(`/api/v2/time?branch_id=${branchId || ""}`).then(r => r.json()),
   updateEventStatus: (eventId, status) =>
     fetch(`/api/events/${eventId}`, {
       method: "PATCH",
@@ -403,11 +409,13 @@ let isSending = false;
 
 // Branch state
 let currentBranchId = "main";
+let currentOutputLength = "normal";  // per-turn GM output length: short|normal|long (UI selector)
 let branches = {};
 let lastPlayedBranchId = null;
 let forkPoints = {};
 let activeStreamController = null;
 let siblingGroups = {};
+let turnOps = {}; // {gm_index: [ {op,item,amount,...} ]} — UI ops a GM reply acknowledged
 
 // Story state
 let currentStoryId = null;
@@ -729,11 +737,11 @@ function openDrawer() {
   $drawerOverlay.classList.remove("hidden");
   renderStoryList();
   renderBranchList();
-  loadNpcs();
-  loadEvents();
+  loadNpcs();           // keeps knownNpcNames fresh (NPC view itself is now ⚔ 戰力面板)
   loadDungeonProgress();
   loadSummaries();
   loadConfigPanel();
+  loadEngineControls();
 }
 
 function closeDrawer() {
@@ -744,6 +752,20 @@ function closeDrawer() {
 $drawerToggleBtn.addEventListener("click", openDrawer);
 $drawerCloseBtn.addEventListener("click", closeDrawer);
 $drawerOverlay.addEventListener("click", closeDrawer);
+
+// 角色狀態 HUD → 詳情 modal；事件/任務 → 📋 modal（v2 範式：header/HUD → data-driven modal）
+function openModal(id) { const m = document.getElementById(id); if (m) m.classList.remove("hidden"); }
+function closeModal(id) { const m = document.getElementById(id); if (m) m.classList.add("hidden"); }
+function wireModal(openerId, modalId, closeId, onOpen) {
+  const opener = document.getElementById(openerId);
+  const closer = document.getElementById(closeId);
+  const modal = document.getElementById(modalId);
+  if (opener) opener.addEventListener("click", () => { openModal(modalId); if (onOpen) onOpen(); });
+  if (closer) closer.addEventListener("click", () => closeModal(modalId));
+  if (modal) modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(modalId); });
+}
+wireModal("state-hud", "state-modal", "state-close");           // 角色狀態詳情（已即時 render，開即看）
+wireModal("events-btn", "events-modal", "events-close", loadEvents);  // 事件/任務（開時刷新）
 
 // ---------------------------------------------------------------------------
 // Init
@@ -1726,9 +1748,11 @@ async function loadMessages(branchId, { tail, loadAll } = {}) {
   originalCount = msgResult.original_count || originalCount;
   forkPoints = msgResult.fork_points || {};
   siblingGroups = msgResult.sibling_groups || {};
+  turnOps = msgResult.turn_ops || {};
   renderMessages(allMessages);
   updateLoadEarlierButton(branchId);
   updateWorldDayDisplay(msgResult.world_day);
+  refreshPendingOps();  // reflect any uncommitted player ops for this branch in the header chip
 
   // Handle incomplete branch (edit/regen interrupted before GM response)
   if (msgResult.incomplete) {
@@ -1755,6 +1779,125 @@ async function createBranchFromIndex(msgIndex) {
     showAlert(res.error || "建立分支失敗");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Timeline UI ops (購買/解鎖/⚡) + "rewind to re-pick" — a turn's deterministic
+// player actions are recorded in turnOps[gm_index]; surface them so the player can
+// see "this turn I bought X" and fork back to BEFORE the purchase to re-decide.
+// ---------------------------------------------------------------------------
+function _formatTurnOp(o) {
+  if (!o || typeof o !== "object") return "";
+  const item = o.item || o.item_id || o.action || "";
+  switch (o.op) {
+    case "buy":
+    case "purchase": return "買「" + item + "」" + (o.amount ? "（-" + o.amount + "）" : "");
+    case "refund": return "退「" + item + "」";
+    case "cultivate": return "閉關修煉「" + item + "」";
+    case "action": return "行動：" + item;
+    case "enter_dungeon": return "進入副本";
+    case "exit_dungeon": return "離開副本";
+    case "complete_quest": return "完成任務";
+    default: return o.op ? o.op + (item ? "：" + item : "") : "";
+  }
+}
+
+function _renderTurnOpsRow(msg) {
+  // informational only: shows the deterministic UI ops this turn acknowledged, so you know
+  // which turn a purchase happened in (rollback is the persistent ↩ on each GM message).
+  const ops = turnOps[String(msg.index)];
+  if (!Array.isArray(ops) || !ops.length) return null;
+  const labels = ops.map(_formatTurnOp).filter(Boolean);
+  if (!labels.length) return null;
+  const row = document.createElement("div");
+  row.className = "turn-ops";
+  const tag = document.createElement("span");
+  tag.className = "turn-ops-label";
+  tag.textContent = "📦 此回合介面操作：" + labels.join("、");
+  row.appendChild(tag);
+  return row;
+}
+
+// persistent per-message rollback: fork a new branch AT this point (story + state rewound to
+// here), then keep playing — re-pick purchases/actions and go forward. Original branch is kept.
+// To undo a purchase made in turn N, fork from the message BEFORE it (the 📦 row shows where).
+async function forkFromHere(msgIndex) {
+  const ok = await showConfirm(
+    "回到 #" + msgIndex + " 這個時間點，開一條新分支從這裡往下走？\n" +
+    "劇情與狀態都會倒回此刻；你可以重新選擇購買／行動再繼續。原分支保留不變。"
+  );
+  if (!ok) return;
+  const res = await API.createBranch("從#" + msgIndex, currentBranchId, msgIndex);
+  if (res.ok && res.branch) {
+    await loadBranches();
+    await switchToBranch(res.branch.id);
+  } else {
+    showAlert(res.error || "建立分支失敗");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pending-ops undo panel — the player's deterministic UI ops this turn (買/退/解鎖/
+// ⚡行動/閉關/副本) accumulate until sent to the GM; list them in one place + cancel.
+// Cancel = snapshot-restore (LIFO): undoing op i rolls back i and everything after it.
+// ---------------------------------------------------------------------------
+let _pendingOps = [];
+
+async function refreshPendingOps() {
+  try {
+    const res = await fetch("/api/v2/ops/pending?branch_id=" + encodeURIComponent(currentBranchId || "main")).then(r => r.json());
+    _pendingOps = (res && res.ok && Array.isArray(res.ops)) ? res.ops : [];
+  } catch (e) { _pendingOps = []; }
+  const chip = document.getElementById("pending-ops-chip");
+  if (chip) {
+    chip.textContent = "↩ " + _pendingOps.length + " 筆未送出";
+    chip.classList.toggle("show", _pendingOps.length > 0);
+  }
+  const modal = document.getElementById("ops-modal");
+  if (modal && !modal.classList.contains("hidden")) renderOpsPanel();
+}
+window.refreshPendingOps = refreshPendingOps;  // shop/actions/tree call this after an op
+
+function renderOpsPanel() {
+  const panel = document.getElementById("ops-panel");
+  if (!panel) return;
+  if (!_pendingOps.length) {
+    panel.innerHTML = '<div class="ops-empty">本回合尚無未送出的操作。<br>在商店💰／功法樹🌳／⚡行動做的買賣、解鎖、閉關、副本動作會列在這裡，送出訊息給 GM 前都能撤銷。</div>';
+    return;
+  }
+  let html = '<div class="ops-hint">這些是你這回合在介面做的操作，還沒送給 GM。撤銷某一筆會還原到那筆之前（一併取消其後的操作）；送出訊息給 GM 後就定案——之後要改用訊息下方的「↩ 從這裡重新選擇」開分支。</div>';
+  _pendingOps.forEach((o, i) => {
+    const label = _formatTurnOp(o.op) || o.label || ("操作 " + (i + 1));
+    html += '<div class="ops-row">' +
+      '<span class="ops-seq">' + (i + 1) + '</span>' +
+      '<span class="ops-label">' + escapeHtml(label) + '</span>' +
+      '<button class="ops-cancel" data-index="' + o.index + '">撤銷</button>' +
+      '</div>';
+  });
+  panel.innerHTML = html;
+  panel.querySelectorAll(".ops-cancel").forEach(btn => {
+    btn.addEventListener("click", () => undoOp(parseInt(btn.getAttribute("data-index"), 10)));
+  });
+}
+
+async function undoOp(index) {
+  const after = _pendingOps.length - 1 - index;  // ops that will ALSO roll back (LIFO)
+  if (after > 0) {
+    const ok = await showConfirm("撤銷這筆會一併取消其後的 " + after + " 筆操作（共 " + (after + 1) + " 筆）。確定？");
+    if (!ok) return;
+  }
+  try {
+    const res = await fetch("/api/v2/ops/undo", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId, index })
+    }).then(r => r.json());
+    if (!res || !res.ok) { showAlert("撤銷失敗：" + ((res && (res.reason || res.error)) || "未知")); return; }
+  } catch (e) { showAlert("撤銷失敗：網路錯誤"); return; }
+  await refreshPendingOps();
+  try { renderCharacterStatus(await API.status(currentBranchId)); } catch (e) {}  // HUD/命運點數
+  refreshWorldDay();
+}
+
+wireModal("pending-ops-chip", "ops-modal", "ops-close", renderOpsPanel);
 
 // ---------------------------------------------------------------------------
 // Edit flow
@@ -2203,6 +2346,19 @@ function renderMessages(messages) {
         regenerateGmMessage(msg, el);
       });
       actionsContainer.appendChild(actionBtn);
+
+      // persistent rollback: open a new branch FROM this point and keep playing — always
+      // available, not gated on ops. "rollback 回過去某個時間點 → 選擇動作 → 往下走"
+      const forkBtn = document.createElement("button");
+      forkBtn.className = "msg-action-btn";
+      forkBtn.textContent = "↩";  // arrow back
+      forkBtn.title = "從這裡開新分支重玩（回到此刻、重新選擇後續）";
+      forkBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        haptic();
+        forkFromHere(msg.index);
+      });
+      actionsContainer.appendChild(forkBtn);
     }
 
     // Bug report button (#6)
@@ -2219,6 +2375,12 @@ function renderMessages(messages) {
     el.appendChild(roleTag);
     el.appendChild(indexLabel);
     el.appendChild(content);
+
+    // surface the player's deterministic UI ops for this turn + a "rewind to re-pick" fork
+    if (msg.role === "gm") {
+      const opsRow = _renderTurnOpsRow(msg);
+      if (opsRow) el.appendChild(opsRow);
+    }
 
     // Render image if present
     if (msg.image && currentStoryId) {
@@ -2560,8 +2722,55 @@ function escapeHtml(text) {
 // ---------------------------------------------------------------------------
 // Character status panel — schema-driven
 // ---------------------------------------------------------------------------
+// 世界時鐘「第 N 天」常駐在 header（外面）；從 v2 time 引擎取（角色 state 不一定有 world_day）
+function refreshWorldDay() {
+  const el = document.getElementById("world-day-display");
+  if (!el) return;
+  fetch("/api/v2/time?branch_id=" + encodeURIComponent(currentBranchId || "main"))
+    .then(r => r.json())
+    .then(d => { if (d && d.ok) el.textContent = "第 " + Math.round(d.now || 0) + " " + (d.unit || "天"); })
+    .catch(() => {});
+}
+window.refreshWorldDay = refreshWorldDay;  // so the ⚡ action menu can refresh it after spending time
+
+// 常駐 HUD：核心數值隨時可見（境界/命運點數），點開看 #state-modal 詳情
+function renderStateHud(state) {
+  const hud = document.getElementById("state-hud");
+  if (!hud || !state) return;
+  refreshWorldDay();
+  const name = state.name || "—";
+  // 小境界單位是 per-story 的（demon_tide「層」、urban_daily「段」）——讀 schema 的 suffix，
+  // 硬寫「層」會讓其他世界的 HUD 顯示錯的單位。
+  const minorField = (characterSchema.fields || []).find((f) => f && f.key === "minor_realm") || {};
+  const minorUnit = String(minorField.suffix || "層").trim();
+  const realm = (state.major_realm || "") + (state.minor_realm != null ? " " + state.minor_realm + minorUnit : "");
+  const fate = state.fate_points != null ? Number(state.fate_points).toLocaleString() : "—";
+  const sep = '<span class="hud-sep">·</span>';
+  const parts = ['<span class="hud-name">' + escapeHtml(name) + "</span>"];
+  if (realm.trim()) parts.push('<span class="hud-realm">' + escapeHtml(realm.trim()) + "</span>");
+  parts.push('<span class="hud-row">🪙 <b>' + escapeHtml(String(fate)) + "</b></span>");
+  hud.innerHTML = parts.join(sep);
+  hud.classList.add("show");
+}
+
+// 功法/天賦 的值用 [級..][成:..][性質:..][天花板:..] 標記存放（戰力面板會解析成 chip）；
+// 在角色狀態面板把它轉成可讀字串，避免顯示一堆中括號標記。
+function _prettyMarkers(s) {
+  if (typeof s !== "string" || s.indexOf("[") === -1) return s;
+  const out = [];
+  const lv = s.match(/\[級([\d.]+)\]/); if (lv) out.push(lv[1] + "級");
+  const ch = s.match(/\[成[:：](.+?)\]/); if (ch) out.push(ch[1]);
+  const dm = s.match(/\[性質[:：](.+?)\]/); if (dm) out.push(dm[1]);
+  const cl = s.match(/\[天花板[:：](.+?)\]/); if (cl) out.push("天花板" + cl[1]);
+  const free = s.replace(/\[[^\]]*\]/g, "").trim();  // any prose after the markers
+  if (free) out.push(free);
+  return out.length ? out.join(" · ") : s;
+}
+
 function renderCharacterStatus(state) {
+  renderStateHud(state);
   const panel = document.getElementById("char-panel");
+  if (!panel) return;
   panel.innerHTML = "";
 
   const schema = characterSchema;
@@ -2683,11 +2892,15 @@ function renderCharacterStatus(state) {
 
     if (listType === "map" && data && typeof data === "object") {
       const renderMode = listDef.render || "block";
-      Object.entries(data).forEach(([name, val]) => {
+      Object.entries(data).forEach(([name, raw]) => {
+        // relationships value may be {tier,note}; flatten to a display string
+        const val = (raw && typeof raw === "object")
+          ? [raw.tier, (raw.note || raw.desc)].filter(Boolean).join("·")
+          : raw;
         const li = document.createElement("li");
         if (val && renderMode === "inline") {
-          // Inline: "name：value" on one line (for relationships etc.)
-          li.textContent = `${name}：${val}`;
+          // Inline: "name：value" on one line (for relationships etc.); 功法/天賦 markers → readable
+          li.textContent = `${name}：${_prettyMarkers(val)}`;
         } else if (val) {
           // Block: name bold on top, description below (for inventory etc.)
           const nameSpan = document.createElement("span");
@@ -2700,6 +2913,19 @@ function renderCharacterStatus(state) {
           li.appendChild(descSpan);
         } else {
           li.textContent = name;
+        }
+        // 物品欄：每件可一鍵丟棄（清掉 GM 漏移除的任務／戰利品）。無確認框，可在『本回合操作』撤銷。
+        if (listDef.key === "inventory") {
+          const del = document.createElement("button");
+          del.className = "inv-del-li";
+          del.title = "丟棄此道具";
+          del.textContent = "✕";
+          del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            discardInventoryItem(name, del);
+          });
+          li.classList.add("has-del");
+          li.appendChild(del);
         }
         ul.appendChild(li);
       });
@@ -2728,6 +2954,22 @@ function renderCharacterStatus(state) {
   }
 }
 
+// 丟棄一件物品欄道具（角色狀態面板的 ✕）。deterministic + undo + snapshot-sync（扛得過 regen），
+// 與戰力面板 / shop 同一條 /api/v2/inventory/remove。無確認框 — 可在標題列『本回合操作』撤銷。
+async function discardInventoryItem(name, btn) {
+  if (!name) return;
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  try {
+    await fetch("/api/v2/inventory/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch_id: currentBranchId, name }),
+    });
+  } catch (e) { /* ignore network errors; re-render below reflects真實狀態 */ }
+  try { await refreshPendingOps(); } catch (e) {}   // header chip = undo affordance
+  try { renderCharacterStatus(await API.status(currentBranchId)); } catch (e) {}  // re-render panel
+}
+
 // ---------------------------------------------------------------------------
 // NPC Panel
 // ---------------------------------------------------------------------------
@@ -2742,6 +2984,7 @@ async function loadNpcs() {
 
 function renderNpcPanel(npcs) {
   const panel = document.getElementById("npc-panel");
+  if (!panel) return;  // NPC 已改用 ⚔ 戰力面板；drawer 面板已移除（loadNpcs 仍維護 knownNpcNames）
   panel.innerHTML = "";
 
   if (!npcs.length) {
@@ -2987,23 +3230,81 @@ function renderSavesList(saves) {
 // Events Panel
 // ---------------------------------------------------------------------------
 async function loadEvents() {
+  const branchAtLoad = currentBranchId;
+  let events = [];
+  let quests = [];
+  let deadlines = [];
+  let now = 0, unit = "天";
+  try { events = (await API.events(currentBranchId)).events || []; } catch (e) { /* ignore */ }
+  try { quests = (await API.v2quests(currentBranchId)).quests || []; } catch (e) { /* ignore */ }
   try {
-    const result = await API.events(currentBranchId);
-    renderEventsPanel(result.events || []);
+    const t = await API.v2time(currentBranchId);
+    deadlines = t.upcoming || []; now = t.now || 0; unit = t.unit || "天";
   } catch (e) { /* ignore */ }
+  if (currentBranchId !== branchAtLoad) return;  // avoid stale render after branch switch
+  renderEventsPanel(events, quests, deadlines, now, unit);
 }
 
-function renderEventsPanel(events) {
+function renderEventsPanel(events, quests, deadlines, now, unit) {
   const panel = document.getElementById("events-panel");
   panel.innerHTML = "";
+  quests = quests || [];
+  deadlines = deadlines || [];
+  unit = unit || "天";
 
-  if (!events.length) {
+  if (!events.length && !quests.length && !deadlines.length) {
     const empty = document.createElement("div");
     empty.className = "npc-empty";
     empty.textContent = "尚無追蹤事件";
     panel.appendChild(empty);
     return;
   }
+
+  // scheduled deadlines (世界時鐘 + 距期限) — same UI as quests/events, no bespoke widget
+  deadlines.forEach(dl => {
+    const item = document.createElement("div");
+    item.className = "event-item deadline-item" + (dl.warn ? " urgent" : "");
+    const badge = document.createElement("span");
+    badge.className = "event-badge deadline-badge";
+    badge.textContent = "期限";
+    const dot = document.createElement("span");
+    dot.className = "event-status-dot " + (dl.warn ? "event-status-triggered" : "event-status-planted");
+    const title = document.createElement("span");
+    title.className = "event-title";
+    title.textContent = dl.label;
+    const desc = document.createElement("div");
+    desc.className = "event-desc";
+    desc.textContent = `第 ${Math.round(now || 0)} ${unit}　·　還有 ${Math.max(0, Math.round(dl.in_n))} ${unit}` + (dl.warn ? " ⚠" : "");
+    item.appendChild(badge); item.appendChild(dot); item.appendChild(title); item.appendChild(desc);
+    panel.appendChild(item);
+  });
+
+  // v2 deterministic quests first (active on top), then legacy v1 events (untouched)
+  const order = { active: 0, done: 1, failed: 2 };
+  quests.slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9)).forEach(q => {
+    const item = document.createElement("div");
+    item.className = "event-item quest-item";
+    const badge = document.createElement("span");
+    badge.className = "event-badge quest-badge";
+    badge.textContent = "任務";
+    const statusClass = { active: "event-status-triggered", done: "event-status-resolved", failed: "event-status-abandoned" }[q.status] || "";
+    const statusDot = document.createElement("span");
+    statusDot.className = `event-status-dot ${statusClass}`;
+    statusDot.title = q.status;
+    const title = document.createElement("span");
+    title.className = "event-title";
+    title.textContent = q.title || q.id;
+    if (q.status === "done") title.style.textDecoration = "line-through";
+    const desc = document.createElement("div");
+    desc.className = "event-desc";
+    const reward = q.reward_fate ? `　🪙${q.reward_fate}${(q.reward_items && q.reward_items.length) ? "＋" + q.reward_items.join("、") : ""}` : "";
+    desc.textContent = (q.desc || "") + reward;
+    item.appendChild(badge);
+    item.appendChild(statusDot);
+    item.appendChild(title);
+    item.appendChild(desc);
+    panel.appendChild(item);
+  });
 
   for (const ev of events) {
     const item = document.createElement("div");
@@ -3177,18 +3478,20 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 // Config Panel (provider / model switcher)
 // ---------------------------------------------------------------------------
 
-const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-3-flash-preview"];
+const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+const VERTEX_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"];
 const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
-const CODEX_MODELS = ["gpt-5.4"];
+const CODEX_MODELS = ["gpt-5.4", "gpt-5.4-mini"];
 const GEMINI_IMAGE_MODELS = [
   "imagen-4.0-ultra-generate-001",
   "gemini-3.1-flash-image-preview",
   "gemini-2.5-flash-image",
 ];
 let serverDefaultImageModel = "";
-const PROVIDER_LABELS = { gemini: "Gemini", claude_cli: "Claude", codex_agent: "Codex" };
+const PROVIDER_LABELS = { gemini: "Gemini", vertex: "Vertex", claude_cli: "Claude", codex_agent: "Codex" };
 const PROVIDER_MODELS = {
   gemini: GEMINI_MODELS,
+  vertex: VERTEX_MODELS,
   claude_cli: CLAUDE_MODELS,
   codex_agent: CODEX_MODELS,
 };
@@ -3199,6 +3502,7 @@ function getModelsForProvider(provider) {
 
 function getCurrentProviderModel(cfg, provider) {
   if (provider === "gemini") return cfg.gemini?.model;
+  if (provider === "vertex") return cfg.vertex?.model;
   if (provider === "codex_agent") return cfg.codex_agent?.model;
   return cfg.claude_cli?.model;
 }
@@ -3207,6 +3511,24 @@ function getDefaultImageModel() {
   const model = (serverDefaultImageModel || "").trim();
   if (model) return model;
   return GEMINI_IMAGE_MODELS[0] || "";
+}
+
+// GM 引擎 (v1/v2) + 敘事傳輸 (delta/tools/tools-inline) — per-branch (branch_config)
+async function loadEngineControls() {
+  const engSel = document.getElementById("gm-engine-select");
+  const transSel = document.getElementById("gm-transport-select");
+  const transField = document.getElementById("gm-transport-field");
+  if (!engSel || !transSel) return;
+  const syncVis = () => { if (transField) transField.style.display = (engSel.value === "v2") ? "" : "none"; };
+  try {
+    const res = await API.getBranchConfig(currentBranchId);
+    const cfg = (res && res.config) || {};
+    engSel.value = (cfg.gm_engine === "v2") ? "v2" : "v1";
+    transSel.value = ["delta", "tools", "tools-inline"].includes(cfg.gm_transport) ? cfg.gm_transport : "delta";
+  } catch (e) { /* keep defaults */ }
+  syncVis();
+  engSel.onchange = async () => { syncVis(); await API.setBranchConfig(currentBranchId, { gm_engine: engSel.value }); };
+  transSel.onchange = async () => { await API.setBranchConfig(currentBranchId, { gm_transport: transSel.value }); };
 }
 
 async function loadConfigPanel() {
@@ -3251,6 +3573,7 @@ async function loadConfigPanel() {
       updateModelDropdown(newProv, models[0]);
       const update = { provider: newProv };
       if (newProv === "gemini") update.gemini = { model: models[0] };
+      else if (newProv === "vertex") update.vertex = { model: models[0] };
       else if (newProv === "codex_agent") update.codex_agent = { model: models[0] };
       else update.claude_cli = { model: models[0] };
       await API.setConfig(update);
@@ -3261,6 +3584,7 @@ async function loadConfigPanel() {
       const prov = provSel.value;
       const update = {};
       if (prov === "gemini") update.gemini = { model: modelSel.value };
+      else if (prov === "vertex") update.vertex = { model: modelSel.value };
       else if (prov === "codex_agent") update.codex_agent = { model: modelSel.value };
       else update.claude_cli = { model: modelSel.value };
       await API.setConfig(update);
@@ -3652,6 +3976,7 @@ async function loadAddonPanelState() {
           const [newProv, newModel] = sel.value.split("|");
           const update = { provider: newProv };
           if (newProv === "gemini") update.gemini = { model: newModel };
+          else if (newProv === "vertex") update.vertex = { model: newModel };
           else if (newProv === "codex_agent") update.codex_agent = { model: newModel };
           else update.claude_cli = { model: newModel };
           await API.setConfig(update);
@@ -4277,6 +4602,12 @@ function renderMessageImage(parentEl, msg, storyId, { fresh = false, recent = tr
 // ---------------------------------------------------------------------------
 // Send message
 // ---------------------------------------------------------------------------
+function setOutputLength(len, btn) {
+  currentOutputLength = len;
+  const grp = btn && btn.parentElement;
+  if (grp) grp.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === btn));
+}
+
 async function sendMessage() {
   haptic();
   const text = $input.value.trim();
@@ -4338,7 +4669,7 @@ async function sendMessage() {
   try {
     await streamFromSSE(
       "/api/send/stream",
-      { message: text, branch_id: currentBranchId },
+      { message: text, branch_id: currentBranchId, length: currentOutputLength },
       // onChunk
       (chunk) => {
         streamedText += chunk;
@@ -4409,6 +4740,48 @@ async function sendMessage() {
 
         gmEl.appendChild(actionsContainer);
 
+        // B3: 敘事進了副本但引擎沒登記 enter_dungeon → narration 下方跳「確認進入」一鍵補登記
+        // （不登記＝沒劇本、沒通關獎勵、換線會消失；見 doc/v2_state_lifecycle.md §8）
+        if (data.dungeon_entry_suggestion && data.dungeon_entry_suggestion.ip) {
+          const dip = String(data.dungeon_entry_suggestion.ip);
+          const dec = document.createElement("div");
+          dec.className = "dungeon-entry-confirm";
+          const decText = document.createElement("span");
+          decText.className = "dec-text";
+          decText.textContent = "⚠️ 你似乎進入了副本【" + dip + "】，但引擎尚未登記（不登記＝沒劇本、沒通關獎勵、換線會消失）。";
+          dec.appendChild(decText);
+          const decBtn = document.createElement("button");
+          decBtn.className = "dec-btn";
+          decBtn.textContent = "🌀 確認進入【" + dip + "】";
+          decBtn.addEventListener("click", async () => {
+            decBtn.disabled = true;
+            decBtn.textContent = "登記中…";
+            try {
+              const res = await fetch("/api/v2/actions/do", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ branch_id: currentBranchId, action: "enter_dungeon", args: { ip: dip } })
+              }).then(r => r.json());
+              if (res && res.ok) {
+                decText.textContent = "✅ 已登記進入【" + (res.current_dungeon || dip) + "】，劇本生成中。";
+                decText.classList.add("dec-ok");
+                decBtn.remove();
+                const st = await API.status(currentBranchId);
+                renderCharacterStatus(st);
+                updateWorldDayDisplay(st.world_day);
+                loadDungeonProgress();
+              } else {
+                decBtn.disabled = false;
+                decBtn.textContent = "🌀 重試確認進入";
+              }
+            } catch (e) {
+              decBtn.disabled = false;
+              decBtn.textContent = "🌀 重試確認進入";
+            }
+          });
+          dec.appendChild(decBtn);
+          gmEl.appendChild(dec);
+        }
+
         // Only auto-scroll at the end if user was following along
         if (wasAtBottom && !userScrolledDuringStream) {
           smartScrollToBottom();
@@ -4417,6 +4790,7 @@ async function sendMessage() {
         const status = await API.status(currentBranchId);
         renderCharacterStatus(status);
         updateWorldDayDisplay(status.world_day);
+        refreshPendingOps();  // GM turn committed → engine cleared the undo stack; clear the chip
         loadNpcs();
         loadEvents();
         // UX-C2: show hint BEFORE loadDungeonProgress so it's visible while async extraction runs;
@@ -4468,15 +4842,15 @@ async function sendMessage() {
       (msg) => {
         container.removeEventListener('scroll', scrollHandler);
         gmEl.remove();
-        appendSystemError(msg || "未知錯誤");
-        _addRetryButtonToLastUserMessage();
+        const errEl = appendSystemError(msg || "未知錯誤");
+        _addRetrySend(text, playerMsg, playerEl, errEl);
       }
     );
   } catch (err) {
     container.removeEventListener('scroll', scrollHandler);
     gmEl.remove();
-    appendSystemError("網路錯誤：" + err.message);
-    _addRetryButtonToLastUserMessage();
+    const errEl = appendSystemError("網路錯誤：" + err.message);
+    _addRetrySend(text, playerMsg, playerEl, errEl);
   }
 
   isSending = false;
@@ -4594,10 +4968,36 @@ function _addRetryButtonToLastUserMessage() {
 
 function appendSystemError(text) {
   const el = document.createElement("div");
-  el.className = "message gm";
+  el.className = "message gm system-error";
   el.innerHTML = `<div class="role-tag">系統</div><div class="content"><span class="god-hint">【系統錯誤】</span> ${escapeHtml(text)}</div>`;
   $messages.appendChild(el);
   scrollToBottom();
+  return el;
+}
+
+// 重試（不是 regenerate）：上一回合失敗時 v2 send 什麼都沒寫進存檔，所以直接「重新送出同一個
+// 行動」最乾淨——丟掉這個未落地的 user 氣泡＋錯誤氣泡，再 sendMessage。
+function _addRetrySend(text, playerMsg, playerEl, errEl) {
+  if (!playerEl) return;
+  const actionsContainer = playerEl.querySelector(".msg-actions");
+  if (!actionsContainer || actionsContainer.querySelector(".msg-retry-btn")) return;
+
+  const retryBtn = document.createElement("button");
+  retryBtn.className = "msg-action-btn msg-retry-btn";
+  retryBtn.textContent = "↻";
+  retryBtn.title = "重試（重新送出這一步）";
+  retryBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    haptic();
+    if (isSending) return;
+    // failed turn persisted nothing -> drop the ghost user msg + error bubble, then re-send
+    if (allMessages.length && allMessages[allMessages.length - 1] === playerMsg) allMessages.pop();
+    if (playerEl) playerEl.remove();
+    if (errEl) errEl.remove();
+    $input.value = text;
+    sendMessage();
+  });
+  actionsContainer.appendChild(retryBtn);
 }
 
 // ---------------------------------------------------------------------------

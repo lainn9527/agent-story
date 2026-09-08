@@ -6,6 +6,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>主神空間 — 無限輪迴 RPG</title>
   <link rel="stylesheet" href="/static/style.css?v={{ v }}">
+  <style>
+    /* 戰力面板 (power panel) — scoped */
+    .header-power-btn{background:none;border:none;cursor:pointer;font-size:18px;color:#e0b25a;padding:4px 6px}
+    .header-power-btn:hover{filter:brightness(1.3)}
+    /* 事件追蹤面板：任務 / 期限 chip (deadline = 事件，併入同一個 UI，無專屬 header widget) */
+    #events-panel .quest-badge{background:#1d2a3a;color:#8db8e8;border-color:#2f4a5a}
+    #events-panel .deadline-badge{background:#2a2410;color:#e0b25a;border-color:#6b5526}
+    #events-panel .deadline-item.urgent .event-title{color:#e98d8d}
+    #events-panel .event-badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid #2a2f3e;margin-right:6px;vertical-align:middle}
+    #power-panel-modal .power-panel-content{max-width:920px;width:92vw;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0;background:#0f1117;color:#e6e8ef}
+    #power-panel-modal .pp-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f1117;border-bottom:1px solid #2a2f3e}
+    #power-panel-modal .pp-head h2{margin:0;color:#e0b25a;font-size:16px;letter-spacing:2px}
+    #power-panel-modal .pp-body{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px 18px}
+    @media(max-width:720px){
+      #power-panel-modal .power-panel-content{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0}
+      #power-panel-modal .pp-body{grid-template-columns:1fr;gap:10px;padding:12px 14px}
+      #power-panel-modal .npc .mu,#power-panel-modal .npc .ally{float:none;display:inline-block;margin:4px 0 0}
+    }
+    #power-panel-modal .pp-sec{color:#e0b25a;font-size:11px;letter-spacing:1px;margin:14px 0 6px;opacity:.85}
+    #power-panel-modal .lvlbadge{display:inline-block;background:linear-gradient(135deg,#3a2f15,#5a4520);color:#e0b25a;border:1px solid #6b5526;border-radius:8px;padding:6px 12px;font-size:18px;font-weight:700}
+    #power-panel-modal .ablv{display:inline-block;min-width:30px;text-align:center;background:#2a2410;color:#e0b25a;border:1px solid #6b5526;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:700;margin-right:6px}
+    #power-panel-modal .meta{color:#8b91a3;font-size:12px;line-height:1.6}
+    #power-panel-modal .chip{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;border:1px solid #2a2f3e;background:#1d2130;color:#8b91a3}
+    #power-panel-modal .chip.kill{color:#7ee0a0;border-color:#2f5a3f}
+    #power-panel-modal .chip.regen{color:#e98d8d;border-color:#5a2f2f}
+    #power-panel-modal .chip.hax{color:#c79df0;border-color:#46305a}
+    #power-panel-modal .chip.sense{color:#8db8e8;border-color:#2f4a5a}
+    #power-panel-modal .chip.inv{padding-right:4px;display:inline-flex;align-items:center}
+    #power-panel-modal .chip .inv-del{margin-left:6px;border:none;background:transparent;color:#8b91a3;font-size:11px;line-height:1;cursor:pointer;padding:0 2px;opacity:.5;transition:color .12s,opacity .12s}
+    #power-panel-modal .chip .inv-del:hover{color:#e98d8d;opacity:1}
+    #power-panel-modal .npc{display:flex;gap:10px;align-items:flex-start;padding:11px;border:1px solid #2a2f3e;border-radius:10px;margin-bottom:9px;background:#171a23}
+    #power-panel-modal .npc.off{opacity:.5}
+    #power-panel-modal .npc .nlvl{flex:0 0 50px;text-align:center}
+    #power-panel-modal .npc .nlvl b{display:block;font-size:20px;color:#e0b25a;font-weight:700;line-height:1.1}
+    #power-panel-modal .npc .nlvl span{font-size:10px;color:#8b91a3}
+    #power-panel-modal .npc .nbody{flex:1;min-width:0}
+    #power-panel-modal .npc .nname{font-weight:600}
+    #power-panel-modal .npc .nrank{color:#8b91a3;font-size:11px;margin-left:6px}
+    #power-panel-modal .npc .nmem{color:#8b91a3;font-size:11px;margin-top:5px;line-height:1.5}
+    #power-panel-modal .npc .npersona{color:#b3a07a;font-size:11px;margin-top:5px;line-height:1.5;font-style:italic}
+    #power-panel-modal .npc .nrel{color:#8b91a3;font-size:11px;margin-top:4px;line-height:1.5}
+    #power-panel-modal .npc .nrel .rtier{display:inline-block;background:#13201a;color:#7ee0a0;border:1px solid #2f5a3f;border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;margin-right:4px}
+    #power-panel-modal .npc .nskills{margin-top:6px}
+    #power-panel-modal .npc .skill{display:inline-block;margin-right:14px;font-size:12px}
+    #power-panel-modal .recall{margin-left:8px;font-size:10px;color:#8db8e8;border:1px solid #2f4a5a;border-radius:5px;padding:1px 6px}
+    #power-panel-modal .mu{float:right;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid}
+    #power-panel-modal .mu.adv{color:#7ee0a0;border-color:#2f5a3f}
+    #power-panel-modal .mu.even{color:#e0b25a;border-color:#6b5526}
+    #power-panel-modal .mu.warn{color:#e0b25a;border-color:#6b5526}
+    #power-panel-modal .mu.danger{color:#e98d8d;border-color:#5a2f2f}
+    #power-panel-modal .mu.unknown{color:#8b91a3;border-color:#2a2f3e}
+    #power-panel-modal .ally{float:right;font-size:11px;color:#8db8e8;border:1px solid #2f4a5a;border-radius:6px;padding:2px 8px}
+    #power-panel-modal .veil{color:#8b91a3;font-style:italic}
+  </style>
 </head>
 
 <body>
@@ -18,11 +72,18 @@
       <span class="header-title-short">無限輪迴</span>
     </div>
     <div class="header-sub">諸天無限流 · 文字冒險</div>
+    <button id="state-hud" title="角色狀態（點開詳情）"></button>
+    <div id="world-day-display" title="世界時鐘"></div>
+    <button id="pending-ops-chip" title="本回合操作（未送出，可撤銷）"></button>
     <div id="branch-indicator" class="branch-indicator"></div>
-    <div id="world-day-display"></div>
     <span id="cheat-badge">金手指</span>
     <span id="pistol-badge">手槍</span>
     <a href="/lore" class="header-lore-link" title="世界設定知識庫">&#x1F4D6;</a>
+    <button id="power-panel-btn" class="header-power-btn" title="戰力面板">&#x2694;</button>
+    <button id="shop-btn" class="header-power-btn" title="商城／兌換">&#x1F4B0;</button>
+    <button id="tree-btn" class="header-power-btn" title="功法樹">&#x1F333;</button>
+    <button id="actions-btn" class="header-power-btn" title="行動">&#x26A1;</button>
+    <button id="events-btn" class="header-power-btn" title="事件／任務">&#x1F4CB;</button>
   </header>
 
   <!-- Drawer overlay -->
@@ -79,14 +140,7 @@
     </div>
 
     <!-- Character Status section -->
-    <div class="drawer-section">
-      <div class="drawer-section-title">
-        <span>&#x1F9D9; 角色狀態</span>
-      </div>
-      <div id="char-panel">
-        <!-- Dynamically generated by JS based on character_schema -->
-      </div>
-    </div>
+    <!-- 角色狀態 已移到常駐 HUD + #state-modal（drawer 只留 session 管理）-->
 
     <!-- Dungeon Progress section -->
     <div class="drawer-section" id="dungeon-section" style="display:none;">
@@ -140,24 +194,7 @@
     </div>
 
     <!-- NPC section -->
-    <div class="drawer-section">
-      <div class="drawer-section-title">
-        <span>&#x1F465; NPC 角色</span>
-      </div>
-      <div id="npc-panel">
-        <!-- Dynamically generated by JS -->
-      </div>
-    </div>
-
-    <!-- Events section -->
-    <div class="drawer-section">
-      <div class="drawer-section-title">
-        <span>&#x1F4CB; 事件追蹤</span>
-      </div>
-      <div id="events-panel">
-        <!-- Dynamically generated by JS -->
-      </div>
-    </div>
+    <!-- NPC 角色 已移到 ⚔ 戰力面板（移除 drawer 重複）；事件/任務 已移到 📋 #events-modal -->
 
     <!-- Settings section -->
     <div class="drawer-section">
@@ -170,6 +207,21 @@
         <div class="config-field">
           <label>模型</label>
           <select id="model-select"></select>
+        </div>
+        <div class="config-field">
+          <label>GM 引擎 <span class="config-hint">本分支</span></label>
+          <select id="gm-engine-select">
+            <option value="v1">v1（舊管線）</option>
+            <option value="v2">v2（Gemini 新引擎）</option>
+          </select>
+        </div>
+        <div class="config-field" id="gm-transport-field">
+          <label>敘事傳輸 <span class="config-hint">v2</span></label>
+          <select id="gm-transport-select">
+            <option value="tools-inline">tools-inline（單次FC·品質佳）</option>
+            <option value="tools">tools（2-pass·便宜）</option>
+            <option value="delta">delta（舊·delta 區塊）</option>
+          </select>
         </div>
         <div class="config-field cheat-field">
           <label>命運走向</label>
@@ -198,6 +250,11 @@
       </div>
 
       <div id="input-area">
+        <div id="length-select" class="length-select" title="這一回合的 GM 輸出長度">
+          <button type="button" data-len="short" onclick="setOutputLength('short', this)">簡短</button>
+          <button type="button" data-len="normal" class="active" onclick="setOutputLength('normal', this)">標準</button>
+          <button type="button" data-len="long" onclick="setOutputLength('long', this)">精彩</button>
+        </div>
         <div id="input-area-inner">
           <textarea id="user-input" placeholder="輸入你的行動…" rows="1"></textarea>
           <button id="send-btn">&#10148;</button>
@@ -590,7 +647,232 @@
     </div>
   </div>
 
+  <!-- Power Panel (戰力面板) Modal -->
+  <div id="power-panel-modal" class="modal-overlay hidden">
+    <div class="modal-content power-panel-content">
+      <div class="pp-head">
+        <h2>&#x2694; 戰力面板</h2>
+        <button id="power-panel-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="power-panel-body" class="pp-body"></div>
+    </div>
+  </div>
+
+  <!-- Shop (商城／兌換) Modal -->
+  <style>
+    #shop-modal .shop-content{max-width:760px;width:92vw;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0;background:#0f1117;color:#e6e8ef}
+    #shop-modal .pp-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f1117;border-bottom:1px solid #2a2f3e}
+    #shop-modal .pp-head h2{margin:0;color:#e0b25a;font-size:16px;letter-spacing:2px}
+    #shop-modal .shop-body{padding:14px 18px}
+    @media (max-width:640px){ #shop-modal .shop-content{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0} #shop-modal .sitems{grid-template-columns:1fr!important} }
+    #shop-modal .svendor{margin-bottom:18px}
+    #shop-modal .svhead{display:flex;align-items:baseline;justify-content:space-between;color:#e0b25a;font-size:14px;letter-spacing:1px;border-bottom:1px solid #2a2f3e;padding-bottom:6px;margin-bottom:10px}
+    #shop-modal .svbal{color:#7ee0a0;font-size:12px}
+    #shop-modal .sitems{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    #shop-modal .sitem{border:1px solid #2a2f3e;border-radius:10px;padding:10px 12px;background:#171a23;display:flex;flex-direction:column;gap:6px}
+    #shop-modal .sitem.dim{opacity:.6}
+    #shop-modal .sitop{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+    #shop-modal .sname{font-weight:600}
+    #shop-modal .sablv{display:inline-block;background:#2a2410;color:#e0b25a;border:1px solid #6b5526;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:700;margin-right:6px}
+    #shop-modal .sown{margin-left:8px;font-size:10px;color:#8db8e8;border:1px solid #2f4a5a;border-radius:5px;padding:1px 6px}
+    #shop-modal .sprice{color:#e0b25a;font-weight:700;font-size:15px;white-space:nowrap}
+    #shop-modal .sdesc{color:#8b91a3;font-size:12px;line-height:1.5}
+    #shop-modal .smeta{font-size:11px}
+    #shop-modal .sreq{color:#e98d8d;font-size:11px;margin-left:4px}
+    #shop-modal .chip{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;border:1px solid #2a2f3e;background:#1d2130;color:#8b91a3}
+    #shop-modal .chip.kill{color:#7ee0a0;border-color:#2f5a3f}
+    #shop-modal .chip.regen{color:#e98d8d;border-color:#5a2f2f}
+    #shop-modal .chip.hax{color:#c79df0;border-color:#46305a}
+    #shop-modal .chip.sense{color:#8db8e8;border-color:#2f4a5a}
+    #shop-modal .sact{margin-top:2px}
+    #shop-modal .sbtn{display:inline-block;font-size:12px;border-radius:7px;padding:5px 12px;font-weight:600}
+    #shop-modal .sbtn.buy{cursor:pointer;background:linear-gradient(135deg,#3a2f15,#5a4520);color:#e0b25a;border:1px solid #6b5526}
+    #shop-modal .sbtn.buy:hover{background:linear-gradient(135deg,#4a3c1c,#6b5429)}
+    #shop-modal .sbtn.buy:disabled{opacity:.6;cursor:default}
+    #shop-modal .sbtn.lock{color:#8b91a3;border:1px solid #2a2f3e;background:#1d2130}
+    #shop-modal .sbtn.refund{cursor:pointer;color:#e98d8d;border:1px solid #5a2f2f;background:#1d2130}
+    #shop-modal .sbtn.refund:hover{background:#2a1d22}
+    #shop-modal .sbtn.refund:disabled{opacity:.6;cursor:default}
+    #shop-modal .veil{color:#8b91a3;font-style:italic}
+    #shop-flash{position:sticky;bottom:0;background:#1d2130;border-top:1px solid #2a2f3e;color:#7ee0a0;font-size:12px;padding:8px 18px;opacity:0;transition:opacity .2s;pointer-events:none}
+    #shop-flash.show{opacity:1}
+    #tree-modal .tree-content{max-width:880px;width:94vw;max-height:90vh;overflow:hidden;padding:0;background:#0f1117;color:#e6e8ef}
+    #tree-modal .pp-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f1117;border-bottom:1px solid #2a2f3e}
+    #tree-modal .pp-head h2{margin:0;color:#e0b25a;font-size:16px;letter-spacing:2px}
+    #tree-modal .tree-head{display:flex;justify-content:space-between;align-items:baseline;padding:10px 18px;color:#e0b25a;font-size:13px;letter-spacing:1px;border-bottom:1px solid #2a2f3e}
+    #tree-modal .th-bal{color:#7ee0a0;font-size:12px}
+    #tree-modal .tree-tabs{display:flex;gap:8px;padding:10px 18px 0;flex-wrap:wrap}
+    #tree-modal .tree-tab{font-size:12px;border-radius:8px 8px 0 0;padding:6px 14px;cursor:pointer;background:#171a23;border:1px solid #2a2f3e;border-bottom:none;color:#8b91a3}
+    #tree-modal .tree-tab:hover{color:#e6e8ef}
+    #tree-modal .tree-tab.on{background:#0f1117;color:#e0b25a;border-color:#6b5526;font-weight:700}
+    #tree-modal .tree-scroll{overflow:auto;max-height:72vh;padding:8px 0 18px}
+    #tree-modal .tree-canvas{position:relative;margin:0 auto}
+    #tree-modal .tree-edges{position:absolute;left:0;top:0;pointer-events:none}
+    #tree-modal .tnode{position:absolute;box-sizing:border-box;min-height:150px;overflow:hidden;border:1px solid #2a2f3e;border-radius:10px;background:#171a23;padding:7px 9px;display:flex;flex-direction:column;gap:4px;transition:box-shadow .2s}
+    #tree-modal .tnode.locked{opacity:.5}
+    #tree-modal .tnode.available{border-color:#6b5526;box-shadow:0 0 12px rgba(224,178,90,.35)}
+    #tree-modal .tnode.unlocked{border-color:#2f5a3f;background:#13201a}
+    #tree-modal .tnode.broke{border-color:#5a4520;opacity:.85}
+    #tree-modal .tnode.ult{border-width:2px}
+    #tree-modal .tnode.ult.locked{opacity:.7;border-color:#46305a;box-shadow:0 0 14px rgba(150,90,200,.25)}
+    #tree-modal .tnode.ult.available,#tree-modal .tnode.ult.unlocked{border-color:#c79df0;box-shadow:0 0 18px rgba(170,110,230,.5)}
+    #tree-modal .tn-top{display:flex;justify-content:space-between;align-items:center}
+    #tree-modal .tn-lvl{background:#2a2410;color:#e0b25a;border:1px solid #6b5526;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700}
+    #tree-modal .tn-ico{font-size:12px}
+    #tree-modal .tn-name{font-weight:600;font-size:13px;line-height:1.25}
+    #tree-modal .tn-doms{line-height:1.4}
+    #tree-modal .tn-desc{color:#8b91a3;font-size:10px;line-height:1.45;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+    #tree-modal .tn-foot{margin-top:auto}
+    #tree-modal .tn-mast{color:#7ee0a0;font-size:11px;font-weight:600}
+    #tree-modal .tn-lock{color:#8b91a3;font-size:10px;line-height:1.3}
+    #tree-modal .tn-btn{display:inline-block;font-size:11px;border-radius:7px;padding:4px 10px;font-weight:600;cursor:pointer}
+    #tree-modal .tn-btn.unlock{background:linear-gradient(135deg,#3a2f15,#5a4520);color:#e0b25a;border:1px solid #6b5526}
+    #tree-modal .tn-btn.unlock:hover{background:linear-gradient(135deg,#4a3c1c,#6b5429)}
+    #tree-modal .tn-btn.unlock:disabled{opacity:.6;cursor:default}
+    #tree-modal .tn-btn.broke{color:#8b91a3;border:1px solid #2a2f3e;background:#1d2130;cursor:default}
+    #tree-modal .chip{display:inline-block;border-radius:6px;padding:1px 6px;font-size:10px;margin:1px 3px 1px 0;border:1px solid #2a2f3e;background:#1d2130;color:#8b91a3}
+    #tree-modal .chip.kill{color:#7ee0a0;border-color:#2f5a3f}
+    #tree-modal .chip.regen{color:#e98d8d;border-color:#5a2f2f}
+    #tree-modal .chip.hax{color:#c79df0;border-color:#46305a}
+    #tree-modal .chip.sense{color:#8db8e8;border-color:#2f4a5a}
+    #tree-modal .veil{color:#8b91a3;font-style:italic;padding:18px;display:block}
+    #tree-modal #tree-flash{position:sticky;bottom:0;background:#1d2130;border-top:1px solid #2a2f3e;color:#7ee0a0;font-size:12px;padding:8px 18px;opacity:0;transition:opacity .2s;pointer-events:none}
+    #tree-modal #tree-flash.show{opacity:1}
+    @media (max-width:640px){ #tree-modal .tree-content{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0} }
+    #actions-modal .ac-content{max-width:680px;width:92vw;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0;background:#0f1117;color:#e6e8ef}
+    #actions-modal .pp-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f1117;border-bottom:1px solid #2a2f3e}
+    #actions-modal .pp-head h2{margin:0;color:#e0b25a;font-size:16px;letter-spacing:2px}
+    #actions-modal #actions-body{padding:14px 18px}
+    #actions-modal .ac-status{font-size:12.5px;color:#cfd3df;border:1px solid #2a2f3e;border-radius:8px;padding:8px 12px;margin-bottom:12px;background:#171a23}
+    #actions-modal .ac-status b{color:#e0b25a}
+    #actions-modal .ac-cat{color:#e0b25a;font-size:11px;letter-spacing:1px;margin:12px 0 6px;opacity:.85}
+    #actions-modal .ac-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    #actions-modal .ac-item{display:flex;flex-direction:column;gap:4px;text-align:left;border:1px solid #2a2f3e;border-radius:10px;padding:10px 12px;background:#171a23;color:#e6e8ef;cursor:pointer;font:inherit}
+    #actions-modal .ac-item:hover{border-color:#6b5526;background:#1c2030}
+    #actions-modal .ac-item:disabled{opacity:.5;cursor:default}
+    #actions-modal .ac-item.cultivate{border-color:#46305a}
+    #actions-modal .ac-item.cultivate:hover{border-color:#8a5ac0}
+    #actions-modal .ac-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+    #actions-modal .ac-name{font-weight:600}
+    #actions-modal .ac-cost{color:#8db8e8;font-size:12px;white-space:nowrap}
+    #actions-modal .ac-desc{color:#8b91a3;font-size:11px;line-height:1.45}
+    #actions-modal .ac-foot{color:#7ee0a0;font-size:11px}
+    #actions-modal .ac-item.structural{border-color:#2f4a5a}
+    #actions-modal .ac-item.structural:hover{border-color:#5a8db8}
+    #actions-modal .ac-params{display:flex;flex-direction:column;gap:4px;margin-top:2px}
+    #actions-modal .ac-pl{color:#8db8e8;font-size:11px;letter-spacing:.5px}
+    #actions-modal .ac-sel{background:#0f1117;color:#e6e8ef;border:1px solid #2a2f3e;border-radius:7px;padding:6px 8px;font:inherit;font-size:12px}
+    #actions-modal .ac-sel:focus{outline:none;border-color:#5a8db8}
+    #actions-modal .ac-run{margin-top:4px;align-self:flex-start;cursor:pointer;font-size:12px;font-weight:600;border-radius:7px;padding:5px 14px;background:linear-gradient(135deg,#1d3340,#2f4a5a);color:#9ed0f0;border:1px solid #3f6b80}
+    #actions-modal .ac-run:hover{background:linear-gradient(135deg,#244050,#3a5a70)}
+    #actions-modal .ac-run:disabled{opacity:.6;cursor:default}
+    #actions-modal .veil{color:#8b91a3;font-style:italic}
+    #actions-flash{position:sticky;bottom:0;background:#1d2130;border-top:1px solid #2a2f3e;color:#7ee0a0;font-size:12px;padding:8px 18px;opacity:0;transition:opacity .2s;pointer-events:none}
+    #actions-flash.show{opacity:1}
+    #actions-flash.warn{color:#e98d8d}
+    @media (max-width:640px){ #actions-modal .ac-content{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0} #actions-modal .ac-grid{grid-template-columns:1fr} }
+    /* 角色狀態 inline chip (嵌進 menu bar；點開 #state-modal) */
+    #state-hud{display:none;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid #2a2f3e;border-radius:6px;padding:4px 12px;color:#e6e8ef;font:inherit;font-size:12px;line-height:1.2;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}
+    #state-hud:hover{background:rgba(255,255,255,.09);border-color:#6b5526}
+    #state-hud.show{display:inline-flex}
+    #state-hud .hud-name{font-weight:700}
+    #state-hud .hud-realm{color:#9ed0f0}
+    #state-hud .hud-sep{color:#3a3f4e}
+    #state-hud .hud-row b{color:#e0b25a}
+    #config-panel .config-hint{font-size:10px;color:#8b91a3;font-weight:400;margin-left:4px}
+    /* 世界時鐘 第N天 — 常駐在 header，chip 旁的小標 */
+    #header #world-day-display{display:inline-flex;align-items:center;background:rgba(224,178,90,.10);border:1px solid #6b5526;border-radius:6px;padding:4px 10px;font-size:12px;line-height:1.2;color:#e0b25a;white-space:nowrap;font-weight:600}
+    #header #world-day-display:empty{display:none}
+    /* 本回合待送操作 chip — 只在有未送出 op 時顯示 */
+    #header #pending-ops-chip{display:none;align-items:center;gap:5px;background:rgba(196,112,75,.14);border:1px solid #c4704b;border-radius:6px;padding:4px 10px;font:inherit;font-size:12px;line-height:1.2;color:#e6a07a;white-space:nowrap;font-weight:600;cursor:pointer;transition:background .15s}
+    #header #pending-ops-chip.show{display:inline-flex}
+    #header #pending-ops-chip:hover{background:rgba(196,112,75,.28)}
+    @media (max-width:640px){ #state-hud .hud-name{display:none} #state-hud .hud-name + .hud-sep{display:none} }
+    /* 角色狀態 / 事件 / 操作 modal — 沿用 actions-modal 外觀 */
+    #state-modal .ac-content,#events-modal .ac-content,#ops-modal .ac-content{max-width:560px;width:92vw;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0;background:#0f1117;color:#e6e8ef}
+    #state-modal .pp-head,#events-modal .pp-head,#ops-modal .pp-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f1117;border-bottom:1px solid #2a2f3e}
+    #state-modal .pp-head h2,#events-modal .pp-head h2,#ops-modal .pp-head h2{margin:0;color:#e0b25a;font-size:16px;letter-spacing:2px}
+    #state-modal #char-panel,#events-modal #events-panel,#ops-modal #ops-panel{padding:14px 18px}
+    /* 操作清單 */
+    #ops-panel .ops-hint{color:#9b9689;font-size:12px;margin-bottom:10px;line-height:1.5}
+    #ops-panel .ops-row{display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:7px;background:rgba(255,255,255,.03);border:1px solid #2a2f3e;border-radius:6px}
+    #ops-panel .ops-seq{color:#6b6f7e;font-size:12px;min-width:18px}
+    #ops-panel .ops-label{flex:1;font-size:13px;color:#e6e8ef}
+    #ops-panel .ops-cancel{padding:4px 11px;font-size:12px;color:#e6a07a;background:transparent;border:1px solid #c4704b;border-radius:5px;cursor:pointer;white-space:nowrap}
+    #ops-panel .ops-cancel:hover{background:#c4704b;color:#fff}
+    #ops-panel .ops-empty{color:#6b6f7e;font-size:13px;text-align:center;padding:24px 0}
+    @media (max-width:640px){ #state-modal .ac-content,#events-modal .ac-content,#ops-modal .ac-content{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0} #state-hud{max-width:60vw} }
+  </style>
+  <div id="shop-modal" class="modal-overlay hidden">
+    <div class="modal-content shop-content">
+      <div class="pp-head">
+        <h2>&#x1F4B0; 商城／兌換</h2>
+        <button id="shop-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="shop-body" class="shop-body"></div>
+      <div id="shop-flash"></div>
+    </div>
+  </div>
+
+  <div id="tree-modal" class="modal-overlay hidden">
+    <div class="modal-content tree-content">
+      <div class="pp-head">
+        <h2>&#x1F333; 功法樹</h2>
+        <button id="tree-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="tree-body"></div>
+      <div id="tree-flash"></div>
+    </div>
+  </div>
+
+  <div id="actions-modal" class="modal-overlay hidden">
+    <div class="modal-content ac-content">
+      <div class="pp-head">
+        <h2>&#x26A1; 行動</h2>
+        <button id="actions-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="actions-body"></div>
+      <div id="actions-flash"></div>
+    </div>
+  </div>
+
+  <!-- 角色狀態 詳情 modal (常駐 HUD 點開) -->
+  <div id="state-modal" class="modal-overlay hidden">
+    <div class="modal-content ac-content">
+      <div class="pp-head">
+        <h2>&#x1F9D9; 角色狀態</h2>
+        <button id="state-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="char-panel"><!-- renderCharacterStatus() 填充 --></div>
+    </div>
+  </div>
+
+  <!-- 事件／任務 modal (📋；任務＋期限＋事件統一在此) -->
+  <div id="events-modal" class="modal-overlay hidden">
+    <div class="modal-content ac-content">
+      <div class="pp-head">
+        <h2>&#x1F4CB; 事件／任務</h2>
+        <button id="events-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="events-panel"><!-- loadEvents() 填充 --></div>
+    </div>
+  </div>
+
+  <div id="ops-modal" class="modal-overlay hidden">
+    <div class="modal-content ac-content">
+      <div class="pp-head">
+        <h2>&#x21A9; 本回合操作</h2>
+        <button id="ops-close" class="summary-modal-close-btn">&times;</button>
+      </div>
+      <div id="ops-panel"><!-- renderOpsPanel() 填充 --></div>
+    </div>
+  </div>
+
   <script src="/static/app.js?v={{ v }}"></script>
+  <script src="/static/power_panel.js?v={{ v }}"></script>
+  <script src="/static/shop.js?v={{ v }}"></script>
+  <script src="/static/tree.js?v={{ v }}"></script>
+  <script src="/static/actions.js?v={{ v }}"></script>
 </body>
 
 </html>

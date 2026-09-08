@@ -1,7 +1,7 @@
 """LLM Bridge — dispatches GM calls to the configured provider.
 
 Swap provider by editing llm_config.json (auto-reloads on file change).
-Supported providers: "gemini", "claude_cli", "codex_agent"
+Supported providers: "gemini", "vertex", "claude_cli", "codex_agent"
 """
 
 import json
@@ -70,6 +70,9 @@ def _capture_usage(provider: str, model: str):
     if provider == "gemini":
         from story_core.gemini_bridge import get_last_usage as _gemini_usage
         usage = _gemini_usage()
+    elif provider == "vertex":
+        from story_core.vertex_bridge import get_last_usage as _vertex_usage
+        usage = _vertex_usage()
     elif provider == "codex_agent":
         usage = None
     else:
@@ -103,6 +106,18 @@ def call_claude_gm(
         result = call_gemini_gm(
             user_message, system_prompt, recent_messages,
             gemini_cfg=g, model=model,
+            session_id=session_id,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "vertex":
+        from story_core.vertex_bridge import call_vertex_gm
+        v = cfg.get("vertex", {})
+        model = v.get("model", "gemini-2.5-flash")
+        result = call_vertex_gm(
+            user_message, system_prompt, recent_messages,
+            vertex_cfg=v, model=model,
             session_id=session_id,
         )
         _capture_usage(provider, model)
@@ -170,6 +185,22 @@ def call_claude_gm_stream(
             yield (event_type, payload)
         return
 
+    if provider == "vertex":
+        from story_core.vertex_bridge import call_vertex_gm_stream
+        v = cfg.get("vertex", {})
+        model = v.get("model", "gemini-2.5-flash")
+        for event_type, payload in call_vertex_gm_stream(
+            user_message, system_prompt, recent_messages,
+            vertex_cfg=v, model=model,
+            session_id=session_id, tools=tools,
+        ):
+            if event_type == "done" and isinstance(payload, dict):
+                usage = payload.get("usage")
+                if usage:
+                    payload["usage"] = {**usage, "provider": provider, "model": model}
+            yield (event_type, payload)
+        return
+
     if provider == "codex_agent":
         if tools:
             log.debug("llm_bridge: tools=%s ignored for provider %s", tools, provider)
@@ -219,6 +250,14 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
             gemini_cfg=g, model=model,
             system_prompt=system_prompt,
         )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "vertex":
+        from story_core.vertex_bridge import call_vertex_oneshot
+        v = cfg.get("vertex", {})
+        model = v.get("model", "gemini-2.5-flash")
+        result = call_vertex_oneshot(prompt, vertex_cfg=v, model=model, system_prompt=system_prompt)
         _capture_usage(provider, model)
         return result
 

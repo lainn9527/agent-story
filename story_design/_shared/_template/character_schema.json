@@ -1,0 +1,13 @@
+{
+  "fields": [
+    { "key": "name", "label": "姓名", "type": "text" },
+    { "key": "current_phase", "label": "當前階段", "type": "text" },
+    { "key": "current_status", "label": "當前狀態", "type": "text" }
+  ],
+  "lists": [
+    { "key": "inventory", "label": "道具", "type": "map" },
+    { "key": "relationships", "label": "人際關係", "type": "map", "render": "inline" },
+    { "key": "abilities", "label": "技能", "state_add_key": "abilities_add", "state_remove_key": "abilities_remove" }
+  ],
+  "direct_overwrite_keys": ["current_phase", "current_status"]
+}

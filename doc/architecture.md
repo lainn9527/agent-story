@@ -53,6 +53,9 @@ Browser (static/app.js, templates/index.html)
   - `world_day` 與 `<!--TIME ... TIME-->` 處理
 - `story_core/gm_cheats.py` / `story_core/dice.py`
   - 命運骰與金手指狀態
+- `story_core/gm_v2/`（平行實驗管線，見 §9）
+  - `contract` / `parse` / `gate` / `apply` / `prompt` / `critic` / `pipeline`
+  - 單次 grounded GM 呼叫 + delta block，取代 sync/async extractor + guard stack
 
 ## 3) 資料分層
 
@@ -169,3 +172,41 @@ Browser (static/app.js, templates/index.html)
 - 檔案儲存採「寫入 `.tmp` 後 `os.replace`」避免半寫入。
 - `world_timer`、`dungeon_system`、`lore_organizer` 有 branch/story 等級 lock。
 - SQLite 使用 WAL（各 DB 模組內設定）。
+
+## 9) GM v2 管線（平行路徑，實驗中）
+
+把 in-session GM 原型搬上 production 的新路徑，與既有 `/api/send` **並存、互不影響**（入口 `POST /api/v2/send`）。核心理念：**一個 applier core，可換的 brain**——GM（Gemini）在單次呼叫裡同時產出敘事與「自己宣告的」結構化狀態變更，取代「第二個 LLM 逆向工程 prose」的 sync/async extractor。
+
+### 動機
+
+舊路徑用無狀態單次抽取維護 durable state，再用 lossy guard 補它的不可靠（`_sanitize_async_state_update` 砍 transient marker、`_save_npc` 關鍵字 archive/reactivation）。這些 guard 本身就是「state 更新不完全」「已退場 NPC 復活」的近因。v2 改成 **grounded + 驗證 + 累積**的多步流程。
+
+### 模組（`story_core/gm_v2/`）
+
+- `contract.py`：輸出契約。GM 在敘事後輸出一個 `<!--DELTA {json} DELTA-->` 區塊（HTML comment marker，前端本就隱藏）。
+- `parse.py`：容錯切 `(narration, delta, note)`；缺/壞只記 note、不丟例外。
+- `gate.py`：**deterministic gate**（無 LLM）。丟結構性錯誤（scene/instruction/型別/off-schema），flag 高風險欄位（`base_power_level`/`systems`/`gene_lock`、terminal NPC + memory、lore）給 critic。**刻意不重蹈 lossy 砍值**。
+- `apply.py`：**applier（方案甲）**。重用 production `_apply_state_update_inner`（thin apply + state.db sync）+ dungeon reconcile，但跳過 `_run_state_gate`/`_sanitize`/`_normalize_state_async`；NPC 用顯式 lifecycle（GM 的 active/offstage/terminal → production `lifecycle_status`/`archive_kind`），無關鍵字 reactivation，並有 append-only `memory[]`。
+- `prompt.py`：grounded prompt（system prompt + 當前 state + active NPC 含 memory + 契約）。
+- `critic.py`：**async critic**（可注入 LLM）。離開關鍵路徑審 flagged：撤銷被誤升的暫時狀態、決定 lore 入庫。
+- `pipeline.py`：`run_turn()` 串接 PRE → 生成 → parse → gate → apply → commit(訊息+snapshot) → 預擲下一骰 → async critic。
+
+### 一回合流程
+
+1. **PRE**（server，無 LLM）：載 state / NPC（含 memory）/ recap、RAG lore、預擲骰 → 組 grounded prompt。
+2. **GENERATE**（一次 LLM 呼叫）：敘事 + DELTA block。
+3. **PARSE → GATE(B) → APPLY（方案甲落盤）→ commit** 訊息 + snapshot。
+4. **async CRITIC(C)**：審 flagged，撤銷/修正、lore 入庫。
+
+### 與舊路徑的取代關係
+
+- 取代 `_extract_tags_async`（GM 自己出 delta，不再二次逆向）。
+- 取代 `_sanitize_async_state_update` / `_run_state_gate` / `_review_state_update_llm`（thin apply + critic）。
+- 取代 `_save_npc` 關鍵字 reactivation（顯式 lifecycle）。
+- 新增 per-NPC `memory[]`。
+
+### 現況
+
+- 已建並以 stub LLM 端到端驗證（parse/gate/apply/commit/critic；三個結構性 bug 在真實落盤路徑上消失；grounding 成立）。
+- 尚未串流（route 非串流）、尚未接前端、真 Gemini 品質待 live 驗證。
+- 測試：`tests/test_gm_v2.py`（需 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，因 langsmith plugin 破壞整套 pytest）。

@@ -281,6 +281,77 @@ def call_gemini_gm(
 
 
 # ---------------------------------------------------------------------------
+# GM call — function-calling loop (Phase 2 transport)
+# ---------------------------------------------------------------------------
+
+def _extract_parts(response_data: dict) -> tuple[str, list, str]:
+    """(text, function_calls, finish_reason). function_calls = [{name, args}]."""
+    candidates = response_data.get("candidates", [])
+    if not candidates:
+        br = response_data.get("promptFeedback", {}).get("blockReason", "")
+        return (f"【系統提示】Gemini 安全過濾（{br}）" if br else "", [], "NO_CANDIDATES")
+    cand = candidates[0]
+    parts = cand.get("content", {}).get("parts", []) or []
+    text = "".join(p.get("text", "") for p in parts if "text" in p)
+    fcalls = [p["functionCall"] for p in parts if isinstance(p, dict) and "functionCall" in p]
+    return text, fcalls, cand.get("finishReason", "")
+
+
+def call_gemini_gm_tools(
+    user_message: str,
+    system_prompt: str,
+    recent_messages: list[dict],
+    gemini_cfg: dict,
+    model: str = "gemini-2.0-flash",
+    on_tool=None,
+    tool_decls: list | None = None,
+    max_rounds: int = 6,
+) -> tuple[str, list, str]:
+    """Function-calling GM turn. Loops: model emits functionCall(s) → `on_tool(name,
+    args)` executes (validate+apply) → functionResponse fed back (Gemini role 'user';
+    it has no 'function' role) → repeat until the model returns text-only. Returns
+    (narration, executed_calls, source). `on_tool`: (name, args) -> dict (the result
+    becomes the functionResponse, so rejects bounce back for self-correction)."""
+    contents = _build_contents(recent_messages, user_message)
+    tools = [{"functionDeclarations": tool_decls}] if tool_decls else None
+    executed: list = []
+    narration_parts: list = []
+    _tls.last_usage = None
+
+    for _round in range(max_rounds):
+        body = _make_request_body(system_prompt, contents, tools=tools)
+        payload = json.dumps(body).encode("utf-8")
+
+        def _do(api_key):
+            url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+                   f":generateContent?key={api_key}")
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT, context=_ssl_ctx) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        result, err = _with_key_fallback(gemini_cfg, _do)
+        if err:
+            return f"【系統錯誤】{err}", executed, "error"
+        text, fcalls, _fr = _extract_parts(result)
+        if text:
+            narration_parts.append(text)
+        if not fcalls:
+            break  # model finished → accumulated text is the narration
+        # echo the model's tool-call turn, then feed each functionResponse back (role user)
+        contents.append(result["candidates"][0]["content"])
+        resp_parts = []
+        for fc in fcalls:
+            name = fc.get("name")
+            args = fc.get("args", {}) or {}
+            res = on_tool(name, args) if on_tool else {"ok": False, "error": "no_executor"}
+            executed.append({"name": name, "args": args, "result": res})
+            resp_parts.append({"functionResponse": {"name": name, "response": res}})
+        contents.append({"role": "user", "parts": resp_parts})
+
+    return "\n".join(p for p in narration_parts if p).strip(), executed, "ok"
+
+
+# ---------------------------------------------------------------------------
 # GM call — streaming (SSE)
 # ---------------------------------------------------------------------------
 

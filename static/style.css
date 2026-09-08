@@ -511,6 +511,30 @@ body {
   padding-left: 2px;
 }
 
+/* 物品欄行內「✕ 丟棄」按鈕（角色狀態面板；與戰力面板的 .inv-del 同義，無確認框、可撤銷） */
+#char-panel li.has-del {
+  position: relative;
+  padding-right: 22px;
+}
+#char-panel li.has-del .inv-del-li {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0.45;
+  transition: color 0.12s, opacity 0.12s;
+}
+#char-panel li.has-del .inv-del-li:hover {
+  color: #e98d8d;
+  opacity: 1;
+}
+
 /* -- Extra fields collapsible section -- */
 .extra-fields-section {
   margin-top: 8px;
@@ -914,6 +938,38 @@ body {
   margin: 0 8px;
 }
 
+/* ---------- Timeline UI ops + rewind ---------- */
+.turn-ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+  padding: 5px 10px;
+  border-left: 2px solid var(--accent);
+  background: rgba(196, 112, 75, 0.08);
+  border-radius: 4px;
+  font-size: 0.76rem;
+}
+.turn-ops-label {
+  color: var(--text-dim);
+}
+.turn-ops-rewind {
+  margin-left: auto;
+  padding: 3px 9px;
+  font-size: 0.74rem;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.turn-ops-rewind:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* ---------- Loading indicator ---------- */
 #loading-indicator {
   display: flex;
@@ -960,11 +1016,35 @@ body {
 #input-area {
   display: flex;
   align-items: flex-end;
+  flex-wrap: wrap;
   gap: 0;
   padding: 12px 18%;
   background: var(--bg-main);
   border-top: none;
   position: relative;
+}
+
+#length-select {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  margin: 0 0 8px;
+}
+#length-select button {
+  background: var(--bg-sidebar);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 3px 13px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+#length-select button:hover { border-color: var(--text-dim); }
+#length-select button.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 #input-area-inner {
@@ -2675,12 +2755,8 @@ body {
   }
 
   .header-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 1rem;
+    display: none;        /* mobile: drop the decorative title to keep header at 2 rows
+                             (state chip + 第N天 + buttons carry the function) */
   }
 
   .header-title-full {
@@ -3609,4 +3685,45 @@ body {
     width: 28px;
     height: 24px;
   }
+}
+
+/* B3: 副本進入未登記的「確認進入」內聯提示（narration 下方） */
+.dungeon-entry-confirm {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--gold);
+  border-left: 3px solid var(--gold);
+  border-radius: 6px;
+  background: rgba(212, 168, 83, 0.10);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9em;
+}
+.dungeon-entry-confirm .dec-text {
+  color: var(--gold);
+  flex: 1 1 240px;
+  line-height: 1.5;
+}
+.dungeon-entry-confirm .dec-text.dec-ok {
+  color: #8db580;
+}
+.dungeon-entry-confirm .dec-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 14px;
+  font-size: 0.95em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.dungeon-entry-confirm .dec-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+.dungeon-entry-confirm .dec-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
