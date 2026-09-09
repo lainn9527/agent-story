@@ -1,8 +1,10 @@
 # 角色卡模式（Card Mode）實作規格
 
-**狀態**：提案，待實作
+**狀態**：**已實作**（`feature/card-mode`：abd788b 實作 → 9267f17 曾誤併入世界模擬器 → c14e411 + a7a9620 完成回退）
 **寫給**：實作這個功能的 agent
-**Review**：完成後由本規格的作者逐項對照驗收（見 §11）
+**Review**：已依 §11 逐項驗收。未驗證項：regenerate 冪等（§11-5）、30 回合壓縮（§11-6）。
+已知落差：`set_inventory` 會放行英文 slug 鍵（實例：`m_pocky`），共用的 junk-key 清洗只擋單字母／方法名／`$` 開頭，
+不擋「ASCII slug + 字串值」——要修就在 `card_mode/ops.py` 的 inventory gate 補一條。
 
 ---
 
