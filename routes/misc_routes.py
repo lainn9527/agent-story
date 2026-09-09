@@ -94,32 +94,8 @@ def api_status():
     state["dice_always_success"] = app_module.get_dice_always_success(
         app_module._story_dir(story_id), branch_id
     )
+    state["pistol_mode"] = app_module.get_pistol_mode(app_module._story_dir(story_id), branch_id)
     _enrich_owned_techniques(story_id, state)  # surface tree 功法 (live in technique_mastery) in the 功法/戰力面板
-
-    registry = app_module._load_stories_registry()
-    if registry.get("stories", {}).get(story_id, {}).get("mode") == "card":
-        from story_core.card_mode.card import load_card
-        from story_core.card_mode import clock
-        from story_core.gm_v2 import relationship as _rel
-        card = load_card(story_id)
-        npcs = app_module._load_npcs(story_id, branch_id)
-        card_npc = npcs[0] if npcs else {}
-        clock_info = clock.load_clock(story_id, branch_id)
-        clock_dt = clock.now(story_id, branch_id)
-        state["is_card_mode"] = True
-        state["card_meta"] = {
-            "display_name": card.get("display_name", story_id),
-            "identity": card.get("persona", {}).get("identity", ""),
-            "personality": card.get("persona", {}).get("personality", ""),
-            "relationship": card_npc.get("relationship", {}),
-            "relationship_display": _rel.display(card_npc.get("relationship")),
-            "relationship_tier": (card_npc.get("relationship") or {}).get("tier", "陌生"),
-            "memory": card_npc.get("memory", []),
-            "clock_time": clock_dt.strftime("%Y/%m/%d %H:%M"),
-            "clock_weather": clock_info.get("last_weather", "陰"),
-            "inventory": state.get("inventory", {}),
-        }
-
     return jsonify(state)
 
 

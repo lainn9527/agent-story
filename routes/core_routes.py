@@ -224,15 +224,6 @@ def _v2_engine_on(app_module, story_id: str, branch_id: str) -> bool:
         return False
 
 
-def _is_card_mode(app_module, story_id: str) -> bool:
-    """True when this story is registered with mode == 'card'."""
-    try:
-        reg = app_module._load_stories_registry()
-        return reg.get("stories", {}).get(story_id, {}).get("mode") == "card"
-    except Exception:
-        return False
-
-
 def _v2_transport(app_module, story_id: str, branch_id: str) -> str:
     """Per-branch transport: 'delta' (default) | 'tools' (2-pass cheap) | 'tools-inline'
     (single capable-model FC). branch_config `gm_transport`."""
@@ -284,27 +275,6 @@ def api_send():
         app_module._save_tree(story_id, tree)
         log.info("/api/send (v2 engine) DONE branch=%s", branch_id)
         return jsonify({"ok": True, "player": player_msg, "gm": gm_msg, "pruned_branches": [], "v2": True})
-
-    # Card Mode — dispatch before legacy player-msg write; run_card_turn persists both.
-    if _is_card_mode(app_module, story_id):
-        from story_core.card_mode.pipeline import run_card_turn
-
-        result = run_card_turn(
-            story_id,
-            branch_id,
-            user_text,
-            async_recorder=False,
-        )
-        if not result.get("ok"):
-            log.warning("/api/send (card) GM error: %s", result.get("error"))
-            return jsonify({"ok": False, "error": result.get("error", "GM error")}), 503
-        cur_msgs = app_module._load_branch_messages(story_id, branch_id)
-        player_msg = next((m for m in cur_msgs if m.get("index") == result.get("user_index")), None)
-        gm_msg = next((m for m in cur_msgs if m.get("index") == result.get("gm_index")), None)
-        tree["last_played_branch_id"] = branch_id
-        app_module._save_tree(story_id, tree)
-        log.info("/api/send (card mode) DONE branch=%s", branch_id)
-        return jsonify({"ok": True, "player": player_msg, "gm": gm_msg, "pruned_branches": [], "card": True})
 
     log.info("/api/send START  msg=%s branch=%s", user_text[:30], branch_id)
 
@@ -527,75 +497,6 @@ def api_send_stream():
             })
 
         return Response(stream_with_context(v2_generate()), mimetype="text/event-stream")
-
-    # Card Mode — stream PASS 1, background recorder PASS 2
-    if _is_card_mode(app_module, story_id):
-        def card_stream_generate():
-            import queue as _queue
-            import threading as _threading
-            from story_core.card_mode.pipeline import run_card_turn
-
-            q: "_queue.Queue" = _queue.Queue()
-            box: dict = {}
-
-            def _emit(delta):
-                q.put(("text", delta))
-
-            def _worker():
-                try:
-                    box["result"] = run_card_turn(
-                        story_id,
-                        branch_id,
-                        user_text,
-                        emit_chunk=_emit,
-                        async_recorder=True,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception("/api/send/stream (card stream) EXCEPTION %s\n%s", exc, traceback.format_exc())
-                    box["error"] = str(exc)
-                finally:
-                    q.put(("__end__", None))
-
-            th = _threading.Thread(target=_worker, daemon=True)
-            th.start()
-
-            streamed_any = False
-            while True:
-                kind, payload = q.get()
-                if kind == "__end__":
-                    break
-                if kind == "text":
-                    streamed_any = True
-                    yield _sse_event({"type": "text", "chunk": payload})
-            th.join(timeout=2)
-
-            result = box.get("result")
-            if box.get("error") or not result or not result.get("ok"):
-                yield _sse_event({"type": "error", "message": box.get("error") or (result or {}).get("error") or "GM 生成失敗"})
-                return
-
-            if not streamed_any and result.get("narration"):
-                yield _sse_event({"type": "text", "chunk": result["narration"]})
-
-            cur_msgs = app_module._load_branch_messages(story_id, branch_id)
-            player_msg = next((m for m in cur_msgs if m.get("index") == result.get("user_index")), None)
-            gm_msg = next((m for m in cur_msgs if m.get("index") == result.get("gm_index")), None)
-
-            tree_now = app_module._load_tree(story_id)
-            tree_now["last_played_branch_id"] = branch_id
-            app_module._save_tree(story_id, tree_now)
-
-            yield _sse_event({
-                "type": "done",
-                "user_msg": player_msg,
-                "gm_msg": gm_msg,
-                "branch": tree_now.get("branches", {}).get(branch_id),
-                "pruned_branches": [],
-                "card": True,
-            })
-
-        return Response(stream_with_context(card_stream_generate()), mimetype="text/event-stream")
 
     log.info("/api/send/stream START  msg=%s branch=%s", user_text[:30], branch_id)
 

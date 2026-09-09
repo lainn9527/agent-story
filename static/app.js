@@ -803,12 +803,8 @@ async function init() {
     updateInitStatus("載入角色與事件…");
     await Promise.all([loadNpcs(), loadEvents(), loadSummaries(), loadSaves()]);
 
-    // Handle URL params: ?story=STORY_ID or ?branch=BRANCH_ID&msg=MSG_INDEX (from lore console / card links)
+    // Handle URL params: ?branch=BRANCH_ID&msg=MSG_INDEX (from lore console)
     const urlParams = new URLSearchParams(window.location.search);
-    const paramStory = urlParams.get("story");
-    if (paramStory && paramStory !== currentStoryId) {
-      await switchToStory(paramStory);
-    }
     const paramBranch = urlParams.get("branch");
     const paramMsgRaw = urlParams.get("msg");
     const paramMsg = paramMsgRaw != null ? parseInt(paramMsgRaw, 10) : NaN;
@@ -868,11 +864,7 @@ function renderStoryList() {
 
     const label = document.createElement("span");
     label.className = "drawer-item-label";
-    if (story.mode === "card") {
-      label.innerHTML = '<span class="card-story-badge" title="角色卡模式">📇</span> ' + escapeHtml(story.name);
-    } else {
-      label.textContent = story.name;
-    }
+    label.textContent = story.name;
     if (story.description) label.title = story.description;
     item.appendChild(label);
 
@@ -2745,20 +2737,6 @@ window.refreshWorldDay = refreshWorldDay;  // so the ⚡ action menu can refresh
 function renderStateHud(state) {
   const hud = document.getElementById("state-hud");
   if (!hud || !state) return;
-
-  if (state.is_card_mode && state.card_meta) {
-    const meta = state.card_meta;
-    const sep = '<span class="hud-sep">·</span>';
-    const parts = [
-      '<span class="hud-name">📇 ' + escapeHtml(meta.display_name || "角色") + '</span>',
-      '<span class="hud-realm">🤝 ' + escapeHtml(meta.relationship_tier || "陌生") + '</span>',
-      '<span class="hud-row">⏰ <b>' + escapeHtml(meta.clock_time || "") + '</b> ' + escapeHtml(meta.clock_weather || "") + '</span>',
-    ];
-    hud.innerHTML = parts.join(sep);
-    hud.classList.add("show");
-    return;
-  }
-
   refreshWorldDay();
   const name = state.name || "—";
   // 小境界單位是 per-story 的（demon_tide「層」、urban_daily「段」）——讀 schema 的 suffix，
@@ -2789,104 +2767,11 @@ function _prettyMarkers(s) {
   return out.length ? out.join(" · ") : s;
 }
 
-function renderCardModePanel(panel, state) {
-  const meta = state.card_meta || {};
-  const relTiers = ["敵對", "戒備", "陌生", "相識", "友好", "信任", "摯友"];
-  const curTier = meta.relationship_tier || "陌生";
-  const curIdx = Math.max(0, relTiers.indexOf(curTier));
-
-  // 1. Header Profile Box
-  const profile = document.createElement("div");
-  profile.className = "card-panel-section card-profile-box";
-  profile.innerHTML = `
-    <div class="card-name-title">${escapeHtml(meta.display_name || "角色")}</div>
-    <div class="card-identity-tag">${escapeHtml(meta.identity || "")}</div>
-    ${meta.personality ? `<div class="card-desc-text"><b>性格特徵：</b>${escapeHtml(meta.personality)}</div>` : ""}
-    <div class="card-clock-bar">
-      <span>⏰ ${escapeHtml(meta.clock_time || "—")}</span>
-      <span>🌤️ 天氣：${escapeHtml(meta.clock_weather || "—")}</span>
-    </div>
-  `;
-  panel.appendChild(profile);
-
-  // 2. Relationship Ladder
-  const ladderSec = document.createElement("div");
-  ladderSec.className = "card-panel-section";
-  ladderSec.innerHTML = `<div class="card-section-title">🤝 關係階梯 · <span class="card-highlight">${escapeHtml(curTier)}</span></div>`;
-
-  const ladderBar = document.createElement("div");
-  ladderBar.className = "card-ladder-bar";
-  relTiers.forEach((tier, i) => {
-    const step = document.createElement("div");
-    step.className = "card-ladder-step" + (i <= curIdx ? " active" : "") + (i === curIdx ? " current" : "");
-    step.innerHTML = `<span class="step-num">${i + 1}</span><span class="step-label">${tier}</span>`;
-    ladderBar.appendChild(step);
-  });
-  ladderSec.appendChild(ladderBar);
-
-  const relNote = (meta.relationship && meta.relationship.note) ? meta.relationship.note : "";
-  if (relNote) {
-    const noteEl = document.createElement("div");
-    noteEl.className = "card-rel-note";
-    noteEl.textContent = `當前關係備註：${relNote}`;
-    ladderSec.appendChild(noteEl);
-  }
-  panel.appendChild(ladderSec);
-
-  // 3. Long-term Memories
-  const memSec = document.createElement("div");
-  memSec.className = "card-panel-section";
-  memSec.innerHTML = `<div class="card-section-title">🧠 長期記憶 (${(meta.memory || []).length})</div>`;
-  const memList = document.createElement("ul");
-  memList.className = "card-memory-list";
-  if (!meta.memory || meta.memory.length === 0) {
-    memList.innerHTML = `<li class="card-empty-item">尚無沉澱記憶</li>`;
-  } else {
-    meta.memory.forEach(m => {
-      const li = document.createElement("li");
-      li.className = "card-memory-item";
-      li.textContent = m;
-      memList.appendChild(li);
-    });
-  }
-  memSec.appendChild(memList);
-  panel.appendChild(memSec);
-
-  // 4. Inventory
-  const invSec = document.createElement("div");
-  invSec.className = "card-panel-section";
-  invSec.innerHTML = `<div class="card-section-title">🎒 隨身物品</div>`;
-  const inv = meta.inventory || {};
-  const invEntries = Object.entries(inv);
-  if (invEntries.length === 0) {
-    invSec.innerHTML += `<div class="card-empty-item">隨身包囊空空如也</div>`;
-  } else {
-    const tagWrap = document.createElement("div");
-    tagWrap.className = "card-inventory-tags";
-    invEntries.forEach(([k, v]) => {
-      const tag = document.createElement("span");
-      tag.className = "card-item-tag";
-      tag.textContent = typeof v === "number" || typeof v === "string" ? `${k} ×${v}` : k;
-      tagWrap.appendChild(tag);
-    });
-    invSec.appendChild(tagWrap);
-  }
-  panel.appendChild(invSec);
-}
-
 function renderCharacterStatus(state) {
   renderStateHud(state);
-  const isCard = Boolean(state && state.is_card_mode);
-  document.body.classList.toggle("card-mode-active", isCard);
-
   const panel = document.getElementById("char-panel");
   if (!panel) return;
   panel.innerHTML = "";
-
-  if (isCard && state.card_meta) {
-    renderCardModePanel(panel, state);
-    return;
-  }
 
   const schema = characterSchema;
   if (!schema || !schema.fields) {
@@ -4842,7 +4727,8 @@ async function sendMessage() {
         });
         actionsContainer.appendChild(actionBtn);
 
-        // Add fork / rewind button
+        // Add fork / rewind button — streamed replies got no ↩ until reload (the
+        // non-streaming render path at renderMessages() already has one).
         const forkBtn = document.createElement("button");
         forkBtn.className = "msg-action-btn";
         forkBtn.textContent = "↩";
@@ -4916,12 +4802,6 @@ async function sendMessage() {
 
         const status = await API.status(currentBranchId);
         renderCharacterStatus(status);
-        if (status && status.is_card_mode) {
-          setTimeout(async () => {
-            const freshStatus = await API.status(currentBranchId);
-            renderCharacterStatus(freshStatus);
-          }, 2500);
-        }
         updateWorldDayDisplay(status.world_day);
         refreshPendingOps();  // GM turn committed → engine cleared the undo stack; clear the chip
         loadNpcs();
