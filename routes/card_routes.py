@@ -53,7 +53,7 @@ def card_index_page():
 
 @card_bp.route("/card/<slug>")
 def card_chat_page(slug: str):
-    """Card chat conversation page: redirect to unified app with active card story."""
+    """Card chat conversation page."""
     # Auto-initialize if card.json exists in story_design
     design_card_path = card_path(slug)
     if os.path.exists(design_card_path):
@@ -67,14 +67,7 @@ def card_chat_page(slug: str):
     elif slug not in _load_stories_registry().get("stories", {}):
         return f"Card {slug} not found", 404
 
-    try:
-        reg = _load_stories_registry()
-        reg["active_story_id"] = slug
-        _save_stories_registry(reg)
-    except Exception:
-        pass
-
-    return redirect(f"/?story={slug}")
+    return render_template("card_chat.html", slug=slug)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +258,7 @@ def api_card_regenerate(slug: str):
     # Pop the last GM message
     msgs.pop()
     _save_json(_story_messages_path(slug, "main"), msgs)
+    last_user_msg = msgs[-1].get("content", "") if msgs and msgs[-1].get("role") == "user" else ""
 
     if want_stream:
         def generate():
@@ -278,7 +272,7 @@ def api_card_regenerate(slug: str):
                     res = run_card_turn(
                         story_id=slug,
                         branch_id="main",
-                        user_message="",
+                        user_message=last_user_msg,
                         skip_user_message=True,
                         emit_chunk=emit_chunk,
                     )
@@ -320,7 +314,7 @@ def api_card_regenerate(slug: str):
         return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
     # Non-stream
-    res = run_card_turn(story_id=slug, branch_id="main", user_message="", skip_user_message=True)
+    res = run_card_turn(story_id=slug, branch_id="main", user_message=last_user_msg, skip_user_message=True)
     return jsonify(res)
 
 

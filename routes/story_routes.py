@@ -20,7 +20,11 @@ def _app():
 def api_stories():
     app_module = _app()
     registry = app_module._load_stories_registry()
-    stories = dict(registry.get("stories", {}))
+    stories = {
+        sid: meta
+        for sid, meta in registry.get("stories", {}).items()
+        if meta.get("mode") != "card"
+    }
     return jsonify(
         {
             "active_story_id": registry.get("active_story_id", "story_original"),
