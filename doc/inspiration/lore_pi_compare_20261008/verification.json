@@ -1,0 +1,63 @@
+{
+  "source_window": [
+    433,
+    540
+  ],
+  "messages": 108,
+  "gm_turns": 54,
+  "manual_entries": 24,
+  "pi_entries": 17,
+  "manual_text_chars": 3545,
+  "pi_text_chars": 2077,
+  "batches": [
+    {
+      "batch": 1,
+      "status": "verified",
+      "items": 4
+    },
+    {
+      "batch": "2a",
+      "status": "verified",
+      "items": 3
+    },
+    {
+      "batch": "2b",
+      "status": "verified",
+      "items": 3
+    },
+    {
+      "batch": 3,
+      "status": "verified",
+      "items": 5
+    },
+    {
+      "batch": 4,
+      "status": "verified",
+      "items": 5
+    }
+  ],
+  "merge_verified": true,
+  "live_sources_verified": true,
+  "formal_version": "manual",
+  "raw_experiment_logs": "/tmp/xianmen_lore_compare_20261008",
+  "frozen_cutoff": 540,
+  "files": {
+    "retry_pi_generation.py": "0d9ce6d4bc5c65c9b1cc0f831b3daf550108abec7eeff6bd2d5e6bfa44da6806",
+    "comparison.txt": "b11b8c0d29d51f2ac802402cc01300e7c92bc6f7ced2dc357f760ccea900ee5d",
+    "retry_pi_merge.py": "b656cbbe4130a3470e49ea654281caaf6dbc03ac0a3b89c8ffb39958e94fe951",
+    "pi_lore_candidate.json": "0b8c161cea5a4ac590db5607eeea7d6dec836d592fea7ddd76f4ebc98c5f5cac",
+    "run_pi_merge.py": "25ee055b33aa3b0908412cf86a80d8379b2fd952dd2b6de0f2e8896e45ef654d",
+    "manual_lore.txt": "5e5cea1d86588578100106adb44545126b6a40552e6268376db96248f8dc685f",
+    "manual_changes.json": "524893d226ce5d82d370389bec79c2aa928fc55f01819a19f5c4875640edb236",
+    "comparison_input.json": "8fbae28de2fda0f3208fb5de6a755ab398582030692d49e22b68714fec335701",
+    "baseline_lore.json": "e70a5fb9b9d147aca5242f9c5bd47e35e3b80ad8d8dd1c3a175eef6c352d6ae9",
+    "pi_changes.json": "2d617f4fd02e58e7481b86ef63b12be9daca507b76d75c3299056160e8ea1e3f",
+    "run_pi_generation.py": "3029b3fdab7d05f13e04b5077d215af4d4ad198554e25a98ce430af0acfe0071",
+    "pi_generation_guard.mjs": "572616d88f0c1143457062c4808c93b3a1382213e98a81402baf600cf5811ed4",
+    "pi_generation_extension.mjs": "555b4b10f30bcb36710db4be281ea693f9c816ae9d491318e5dbe7516a5edd92",
+    "pi_generation_replay.mjs": "a86539ffb39b2a09e4c2a05d443918714842a8f4ef4a45d1f5968d8dbf35193d",
+    "new_dialogue.txt": "5f42e89638d63b36ffc59d339f468d1528b9811243b8a994891d2809c5618638",
+    "pi_lore_candidate.txt": "37031f860408f30873a827cb7e6b9be9c736fa1b05dea3cd1772a04ba97844ad",
+    "manual_lore.json": "f74cfa8797689c3a4d9386cfb62018fea27d2c5ae89c1aa8967157817d79ba41"
+  }
+}

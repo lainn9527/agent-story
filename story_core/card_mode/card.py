@@ -9,6 +9,7 @@ import os
 import re
 
 from story_core.gm_v2 import relationship as _rel
+from story_core.card_mode.fields import persona_text
 from story_core.story_io import (
     BASE_DIR,
     DATA_DIR,
@@ -42,6 +43,12 @@ def validate_card(card: dict) -> list[str]:
     if card.get("schema_version") != 1:
         errors.append("`schema_version` must be 1.")
 
+    if 'exploration_material_bank' in card:
+        from story_core.card_mode.hooks import BANKS
+        bank = card['exploration_material_bank']
+        if bank is not None and (not isinstance(bank, str) or bank not in BANKS):
+            errors.append('`exploration_material_bank` must be a known bank or null.')
+
     card_id = str(card.get("id") or "").strip()
     if not card_id:
         errors.append("`id` is required.")
@@ -61,14 +68,21 @@ def validate_card(card: dict) -> list[str]:
     if not isinstance(persona, dict):
         errors.append("`persona` must be an object.")
     else:
-        if not str(persona.get("personality") or "").strip():
-            errors.append("`persona.personality` must be a non-empty string.")
+        for field in ("identity", "appearance", "personality"):
+            value = persona.get(field, "")
+            valid = isinstance(value, str) or (
+                isinstance(value, list)
+                and all(isinstance(item, str) and item.strip() for item in value)
+            )
+            if not valid or (field == "personality" and not persona_text(value).strip()):
+                errors.append(f"`persona.{field}` must be text or a list of non-empty strings"
+                              + (" and must not be empty." if field == "personality" else "."))
         if not str(persona.get("speech_style") or "").strip():
             errors.append("`persona.speech_style` must be a non-empty string.")
 
-        verbal_tics = persona.get("verbal_tics")
-        if not isinstance(verbal_tics, list) or not [t for t in verbal_tics if str(t).strip()]:
-            errors.append("`persona.verbal_tics` must contain at least 1 non-empty string.")
+        verbal_tics = persona.get("verbal_tics", [])
+        if not isinstance(verbal_tics, list) or not all(isinstance(t, str) and t.strip() for t in verbal_tics):
+            errors.append("`persona.verbal_tics` must be a list of non-empty strings when provided.")
 
         body_details = persona.get("body_details")
         if not isinstance(body_details, list) or not [b for b in body_details if str(b).strip()]:
@@ -94,6 +108,8 @@ def validate_card(card: dict) -> list[str]:
             if not _rel.is_valid_tier(tier):
                 errors.append(f"`start.relationship.tier` must be one of: {', '.join(_rel.TIERS)} (got: {tier!r}).")
 
+    from story_core.card_mode import galgame
+    errors.extend(galgame.validate(card))
     return errors
 
 
@@ -183,6 +199,7 @@ def init_card_story(
         "start_iso": start_dt_str,
         "elapsed_minutes": 0,
         "last_weather": initial_weather,
+        "last_location": card.get("setting", {}).get("place", ""),
     }
     _save_json(clock_path, clock_data)
 
@@ -192,13 +209,16 @@ def init_card_story(
         "inventory": dict(start_inv),
         "relationship_note": str(start_rel.get("note", "")),
     }
+    from story_core.card_mode import galgame
+    if galgame.enabled(card):
+        char_state["galgame"] = galgame.initial()
     _save_json(char_state_path, char_state)
 
     # 6. npcs.json (only the dynamic fields: memory, status, relationship)
     npcs_path = _story_npcs_path(story_id, "main") if not stories_dir else os.path.join(b_dir, "npcs.json")
     card_npc = {
         "name": display_name,
-        "role": card.get("persona", {}).get("identity", ""),
+        "role": persona_text(card.get("persona", {}).get("identity", "")),
         "lifecycle_status": "active",
         "memory": [],
         "current_status": "",

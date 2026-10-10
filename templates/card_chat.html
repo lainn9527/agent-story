@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>角色卡對話</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/card.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ v }}">
+  <link rel="stylesheet" href="/static/card.css?v={{ v }}">
 </head>
 <body>
   <!-- Header (比照主神空間風格) -->
@@ -16,13 +16,12 @@
       <span class="header-title-full"><span id="navCharName">載入中…</span></span>
       <span class="header-title-short" id="navCharShort">角色卡</span>
     </div>
-    <div class="header-sub" id="navCharRole">專屬人設 · 深度互動</div>
 
     <!-- 關係階梯常駐 HUD -->
     <button id="state-hud" class="show" title="與你的關係（點擊展開角色檔案）">
       <span class="hud-label">關係</span>
       <span class="hud-sep">·</span>
-      <b id="hudTier">陌生</b>
+      <span class="hud-row"><b id="hudTier">陌生</b></span>
     </button>
 
     <!-- 卡內時鐘 HUD -->
@@ -30,17 +29,19 @@
       <span id="hudClock">--:--</span>
     </div>
 
-    <!-- 右側功能區：模型選擇、重置、返回大廳 -->
+    <!-- 右側功能區：重置、返回大廳 -->
     <div class="header-right-actions">
-      <div class="card-model-select-wrapper" title="切換 GM 語言模型">
-        <select id="modelSelect" class="card-model-select">
-          <option>載入模型中…</option>
-        </select>
-      </div>
+      <button id="cardFavoritesOpen" type="button" class="header-lore-link" title="本路線收藏的回覆">收藏</button>
+      <button id="cardMemoryOpen" type="button" class="header-lore-link">記憶</button>
       <button id="reset-btn" class="header-power-btn" title="回到開場白（清空歷史與記憶）">&#x21BA;</button>
       <a href="/card" class="header-lore-link" title="返回卡片列表">&#x1F4D6;</a>
     </div>
   </header>
+
+  <div id="ensembleRecording" class="ensemble-recording" role="status" hidden>
+    <span id="ensembleRecordingText"></span>
+    <button id="ensembleRetryRecording" type="button" hidden>重試整理</button>
+  </div>
 
   <!-- Drawer overlay -->
   <div id="drawer-overlay" class="hidden"></div>
@@ -52,12 +53,60 @@
       <button id="drawer-close-btn" title="關閉">&times;</button>
     </div>
 
+    <div class="drawer-section card-branches">
+      <div class="drawer-section-title">劇情分支 · <span id="cardBranchName">主線</span></div>
+      <label>目前路線 <select id="cardBranchSelect" aria-label="劇情分支"></select></label>
+      <button id="cardBranchRename" type="button">重新命名</button>
+      <button id="cardBranchDelete" type="button" disabled>刪除分支</button>
+      <p>點角色回應旁的 ⑂，從那裡展開另一條路線。可隨時切回，對話和角色記憶各自保存。</p>
+    </div>
+    <dialog id="cardBranchDialog">
+      <form id="cardBranchForm">
+        <h3 id="cardBranchTitle">建立分支</h3>
+        <label>分支名稱 <input id="cardBranchInput" required maxlength="80"></label>
+        <p id="cardBranchError" role="alert"></p>
+        <button type="button" id="cardBranchCancel">取消</button>
+        <button type="submit">儲存</button>
+      </form>
+    </dialog>
+
+    <div class="drawer-section">
+      <div class="drawer-section-title">角色與視角</div>
+      <button id="ensembleCreateBtn" type="button">建立多角色副本</button>
+      <div id="ensembleControls" hidden>
+        <label>互動焦點 <select id="ensembleFocus"></select></label>
+        <label>出場狀態 <select id="ensemblePresence"><option value="present">在場</option><option value="remote">通訊中</option><option value="offstage">離場</option></select></label>
+        <button id="ensembleAddBtn" type="button">新增固定角色</button>
+        <div id="ensembleCast"></div>
+        <small>劇情中的實際進出場會自動同步，也可在此校正。切換焦點不會移動角色。重置會回到建立副本的時間點。</small>
+      </div>
+    </div>
+    <dialog id="ensembleDialog">
+      <form id="ensembleForm">
+        <h3 id="ensembleFormTitle">建立多角色副本</h3>
+        <p>原卡不變。新角色只帶入你填寫的已知經歷，不會繼承其他人的秘密。</p>
+        <label id="ensembleIdLabel">副本代號（小寫英文、數字、底線）<input name="target_slug" maxlength="40"></label>
+        <label>角色姓名<input name="name" required maxlength="100"></label>
+        <label>身分與背景<textarea name="identity" maxlength="8000"></textarea></label>
+        <label>個性與界線<textarea name="personality" required maxlength="8000"></textarea></label>
+        <label>說話方式<textarea name="speech_style" maxlength="8000"></textarea></label>
+        <label>與你的關係<select name="tier"><option>相識</option><option>友好</option><option>信任</option><option>摯友</option><option>陌生</option><option>戒備</option><option>敵對</option></select></label>
+        <label>關係備註<input name="note" maxlength="1000"></label>
+        <label>她已經知道／親歷的事（每行一件）<textarea name="memories" maxlength="20000"></textarea></label>
+        <label>目前狀態<input name="status" maxlength="1000"></label>
+        <label>出場狀態<select name="presence"><option value="offstage">離場</option><option value="present">在場</option><option value="remote">通訊中</option></select></label>
+        <p id="ensembleFormError" role="alert"></p>
+        <button type="button" id="ensembleCancel">取消</button><button type="submit">建立</button>
+      </form>
+    </dialog>
+
     <!-- 角色資訊 -->
     <div class="drawer-section">
       <div class="drawer-section-title"><span>👤 角色資訊</span></div>
       <div class="card-drawer-info">
         <div id="sidebarRole" class="card-drawer-role"></div>
         <div id="sidebarPitch" class="card-drawer-pitch"></div>
+        <div id="playerProfileSection" hidden><h3>玩家檔案</h3><div id="playerProfile" class="card-drawer-pitch" style="white-space: pre-wrap"></div></div>
         <div id="sidebarTraits" class="card-drawer-traits"></div>
       </div>
     </div>
@@ -96,11 +145,7 @@
       </div>
     </div>
 
-    <!-- 長期記憶 -->
-    <div class="drawer-section">
-      <div class="drawer-section-title"><span>🧠 長期記憶</span></div>
-      <div id="memoryList" class="card-drawer-content memory-list-box"></div>
-    </div>
+
 
     <!-- 隨身物 -->
     <div class="drawer-section">
@@ -131,14 +176,160 @@
       </div>
 
       <div id="input-area">
-        <div id="input-area-inner">
-          <textarea id="user-input" placeholder="對她說些什麼……（Enter 送出，Shift+Enter 換行）" rows="1"></textarea>
-          <button id="send-btn" title="送出">&#10148;</button>
+        <div class="card-compose-shortcuts">
+          <button id="cardContinueBtn" type="button" title="直接送出「（請繼續發展）」，有草稿時一併送出" disabled>繼續 →</button>
+          <div id="cardExploreControl" hidden>
+            <button id="cardExploreBtn" type="button" title="將探索引子帶入文字框；可先補充方向" disabled>探索 ✦</button>
+            <select id="cardExploreSize" aria-label="探索事件大小" title="探索事件大小" disabled>
+              <option value="any">不限</option>
+              <option value="small">小事件</option>
+              <option value="large">大事件</option>
+            </select>
+          </div>
+          <button id="cardInstructionOpen" type="button" disabled>指示</button>
+          <div id="cardResponseLength" role="group" aria-label="回覆長度">
+            <button type="button" data-length="short" aria-label="短回覆" aria-pressed="false" title="短（約 200–500 字）">短</button>
+            <button type="button" data-length="medium" aria-label="中回覆" aria-pressed="true" title="中（約 500–1000 字）">中</button>
+            <button type="button" data-length="long" aria-label="長回覆" aria-pressed="false" title="長（約 3000 字）">長</button>
+            <button type="button" data-length="unlimited" aria-label="不限長度" aria-pressed="false" title="不限長度">∞</button>
+          </div>
+          <button type="button" id="addon-panel-btn" title="附加功能" aria-haspopup="true" aria-expanded="false">&#x2699;</button>
+          <button id="cardClearDraft" type="button" title="清空草稿" aria-label="清空草稿" disabled>清空</button>
+        </div>
+        {% set chat_placeholder = '對她說些什麼…' %}
+        {% include 'shared/composer.html' %}
+        <div id="addon-panel" class="addon-panel hidden">
+          <div class="addon-section">
+            <label class="addon-section-title" for="responseLengthSelect">回覆長度</label>
+            <div class="addon-field"><select id="responseLengthSelect" aria-label="回覆長度">
+              <option value="short">短（約 200–500 字）</option>
+              <option value="medium" selected>中（約 500–1000 字）</option>
+              <option value="long">長（約 3000 字）</option>
+              <option value="unlimited">不限長度</option>
+            </select></div>
+            <label class="addon-section-title" for="narrativeStyleSelect">文風</label>
+            <div class="addon-field"><select id="narrativeStyleSelect" aria-label="敘事風格" aria-describedby="narrativeStyleHint">
+              <option value="original" selected>原有</option>
+              <option value="natural">自然互動（試用）</option>
+            </select></div>
+            <p id="narrativeStyleHint" class="recall-mode-hint">自然互動著重接話、動作與細微變化。用於下次送出、重生或編輯；已保存的對話不變。</p>
+            <label class="addon-section-title" for="plotModeSelect">劇情主動性</label>
+            <div class="addon-field"><select id="plotModeSelect" aria-label="劇情主動性" aria-describedby="plotModeHint">
+              <option value="follow" selected>跟隨</option>
+              <option value="explore">探索</option>
+              <option value="coauthor">探索・共同創作</option>
+              <option value="legacy_20260908">舊版 prompt（9/8 初版）</option>
+            </select></div>
+            <p id="plotModeHint" class="recall-mode-hint">探索可帶來新事件與互動；共同創作更著重人物反應、願望與可接續的變化。舊版替換角色扮演契約；搭配原有文風、一般場景可避免額外風格指引。</p>
+            <label class="addon-section-title" for="sceneModeSelect">場景模式</label>
+            <div class="addon-field"><select id="sceneModeSelect" aria-label="場景模式" aria-describedby="sceneModeHint">
+              <option value="default" selected>一般</option>
+              <option value="intimate">親密互動</option>
+            </select></div>
+            <p id="sceneModeHint" class="recall-mode-hint">親密互動聚焦人物的情緒、距離與感官細節，減少外部事件打斷。可與探索搭配。</p>
+            {% if recall_available %}
+            <label class="addon-section-title" for="recallModeSelect">回憶模式</label>
+            <div class="addon-field"><select id="recallModeSelect" aria-label="回憶模式" aria-describedby="recallModeHint">
+              <option value="off" selected>一般</option>
+              <option value="auto">自動回憶</option>
+              <option value="deep">深度回憶</option>
+            </select></div>
+            <p id="recallModeHint" class="recall-mode-hint">自動依話題翻閱往事；深度可多次查閱，回覆較慢、用量較高。查不到的細節保持未知。</p>
+            {% endif %}
+            <div class="addon-section-title">模型選擇</div>
+            <div class="addon-field"><select id="modelSelect" aria-label="語言模型"></select></div>
+          </div>
         </div>
       </div>
     </main>
   </div>
 
-  <script src="/static/card.js" data-slug="{{ slug }}"></script>
+  <dialog id="cardEditDialog" aria-labelledby="cardEditTitle">
+    <form id="cardEditForm">
+      <h3 id="cardEditTitle">編輯回合</h3>
+      <div class="card-edit-label-row">
+        <label for="cardEditMessage">玩家輸入</label>
+        <button type="button" id="cardEditClearMessage" aria-label="清空玩家輸入">清空</button>
+      </div>
+      <textarea id="cardEditMessage" rows="10" maxlength="20000" required></textarea>
+      <div class="card-edit-options">
+        <fieldset><legend>生成方式</legend>
+          <label><input type="radio" name="editMode" value="revise" checked> 依現有回覆修改</label>
+          <label><input type="radio" name="editMode" value="regenerate"> 完全重新產生</label>
+        </fieldset>
+        <fieldset><legend>儲存方式</legend>
+          <label><input type="radio" name="editDestination" value="fork" checked> 開新分支</label>
+          <label><input type="radio" name="editDestination" value="overwrite"> 直接覆蓋</label>
+        </fieldset>
+      </div>
+      <label for="cardEditInstruction">修改要求（選填）</label>
+      <textarea id="cardEditInstruction" rows="3" maxlength="20000" placeholder="例如：保留前半段，最後一句改成微酸的玩笑，不要質問。"></textarea>
+      <p id="cardEditNotice">新版本會從此回合重新演出；原路線保留。</p>
+      <p id="cardEditError" role="alert"></p>
+      <div class="card-edit-actions"><button type="button" id="cardEditCancel">取消</button><button type="submit">產生新回覆</button></div>
+    </form>
+  </dialog>
+  <dialog id="cardMemoryDialog" aria-labelledby="cardMemoryTitle">
+    <div class="memory-editor-heading"><h3 id="cardMemoryTitle">記憶</h3><button id="cardMemoryClose" type="button" aria-label="關閉記憶">×</button></div>
+    <p>由新到舊排列。保存會同步目前分支的記憶快照，不改對話正文或摘要。相同文字的記憶會一起修改。</p>
+    <label>角色 <select id="cardMemoryCharacter"></select></label>
+    <div id="cardMemoryRows"></div>
+    <p id="cardMemoryError" role="alert"></p>
+    <footer><button id="cardMemoryReload" type="button">重新載入</button><button id="cardMemorySave" type="button" disabled>保存變更</button></footer>
+  </dialog>
+  <dialog id="cardMemoryDiscard"><form method="dialog"><p id="cardMemoryDiscardText"></p><button value="cancel">保留草稿</button><button value="discard">放棄修改</button></form></dialog>
+  <dialog id="cardReplyEditDialog" aria-labelledby="cardReplyEditTitle">
+    <form id="cardReplyEditForm">
+      <header class="candidate-heading"><h3 id="cardReplyEditTitle">編輯正文</h3><button id="cardReplyEditClose" type="button" aria-label="關閉正文編輯">×</button></header>
+      <p>保存為新版本，原版保留。</p>
+      <label for="cardReplyEditText">GM 回覆</label>
+      <textarea id="cardReplyEditText" rows="18" maxlength="200000" required></textarea>
+      <p id="cardReplyEditError" role="alert"></p>
+      <footer><button id="cardReplyEditCancel" type="button">取消</button><button id="cardReplyEditSave" type="submit" disabled>保存新版本</button></footer>
+    </form>
+  </dialog>
+  <dialog id="cardCandidateDialog" aria-labelledby="cardCandidateTitle">
+    <header class="candidate-heading"><h3 id="cardCandidateTitle">回覆版本</h3><button id="cardCandidateClose" type="button" aria-label="關閉回覆版本">×</button></header>
+    <select id="cardFavoriteList" aria-label="收藏的回覆" hidden></select>
+    <nav class="candidate-navigation" aria-label="回覆版本切換">
+      <button id="cardCandidatePrev" type="button" aria-label="上一版">←</button>
+      <span id="cardCandidateNumber" aria-live="polite"></span>
+      <button id="cardCandidateNext" type="button" aria-label="下一版">→</button>
+    </nav>
+    <p id="cardCandidateStats"></p>
+    <details><summary>這回合的玩家輸入</summary><div id="cardCandidateInput"></div></details>
+    <p id="cardCandidateMeta"></p>
+    <details id="cardCandidateInstructionDetails" hidden><summary>這版的持續指示</summary><div id="cardCandidateInstruction"></div></details>
+    <div id="cardCandidateContent"></div>
+    <div id="cardCandidateFeedback" class="card-feedback-controls"></div>
+    <p id="cardCandidateError" role="alert"></p>
+    <footer><button id="cardCandidateFavorite" type="button">☆ 收藏</button><button id="cardCandidateApply" type="button">採用這版</button></footer>
+  </dialog>
+  <dialog id="cardFeedbackDialog" aria-labelledby="cardFeedbackTitle">
+    <form id="cardFeedbackForm">
+      <header class="candidate-heading"><h3 id="cardFeedbackTitle">演出註記</h3><button id="cardFeedbackClose" type="button" aria-label="關閉演出註記">×</button></header>
+      <p>記下這一版讓你喜歡的地方，或下次想回頭看的原因。</p>
+      <label for="cardFeedbackComment">註記（選填）</label>
+      <textarea id="cardFeedbackComment" rows="6" maxlength="4000" placeholder="例如：她沒有順著艾迪的說法，而是提出自己的判斷。"></textarea>
+      <p id="cardFeedbackError" role="alert"></p>
+      <footer><button id="cardFeedbackCancel" type="button">取消</button><button id="cardFeedbackSave" type="submit" disabled>保存註記</button></footer>
+    </form>
+  </dialog>
+  <dialog id="cardFeedbackDiscard"><form method="dialog"><p>註記尚未保存，要放棄修改嗎？</p><button value="cancel">保留草稿</button><button value="discard">放棄修改</button></form></dialog>
+  <dialog id="cardInstructionDialog" aria-labelledby="cardInstructionTitle">
+    <form id="cardInstructionForm">
+      <header class="candidate-heading"><h3 id="cardInstructionTitle">本線持續指示</h3><button id="cardInstructionClose" type="button" aria-label="關閉持續指示">×</button></header>
+      <p>保存後，每次送出、重生或編輯都會沿用；本輪明確要求優先。回退或重置仍保留，可隨時關閉。</p>
+      <label class="instruction-toggle"><input id="cardInstructionEnabled" type="checkbox"> 啟用持續指示</label>
+      <label for="cardInstructionText">演出要求</label>
+      <textarea id="cardInstructionText" rows="6" maxlength="4000" placeholder="例如：潤飾艾迪的言行時，採用風趣、自然、有分寸的語氣；依情境調整，不必每句都開玩笑。"></textarea>
+      <p id="cardInstructionError" role="alert"></p>
+      <footer><button id="cardInstructionClear" type="button">清空</button><button id="cardInstructionReload" type="button">重新載入</button><button id="cardInstructionSave" type="submit" disabled>保存</button></footer>
+    </form>
+  </dialog>
+  <dialog id="cardInstructionDiscard"><form method="dialog"><p id="cardInstructionDiscardText"></p><button value="cancel">保留草稿</button><button value="discard">放棄修改</button></form></dialog>
+  {% include 'shared/dialogs.html' %}
+  <script src="/static/chat_ui.js?v={{ v }}"></script>
+  <script src="/static/card.js?v={{ v }}" data-slug="{{ slug }}"></script>
 </body>
 </html>

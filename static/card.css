@@ -34,41 +34,6 @@
   border-color: var(--accent);
 }
 
-/* ---------- 常駐 HUD 按鈕修飾 ---------- */
-#state-hud {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.82rem;
-  line-height: 1.2;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-#state-hud:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: var(--gold);
-}
-
-#state-hud .hud-label {
-  color: var(--text-dim);
-}
-
-#state-hud .hud-sep {
-  color: var(--border);
-}
-
-#state-hud b {
-  color: var(--gold);
-}
-
 /* ---------- 角色卡抽屜面板 (Drawer Sections) ---------- */
 .card-drawer-info,
 .card-drawer-content {
@@ -77,6 +42,7 @@
 }
 
 .card-drawer-role {
+  white-space: pre-line;
   color: var(--gold);
   font-weight: 600;
   margin-bottom: 6px;
@@ -274,7 +240,7 @@
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 20px;
 }
 
@@ -357,12 +323,6 @@
 
 /* ---------- 響應式調整 ---------- */
 @media (max-width: 768px) {
-  #messages {
-    padding: 16px 5%;
-  }
-  #input-area {
-    padding: 10px 5%;
-  }
   .card-model-select {
     max-width: 140px;
   }
@@ -373,3 +333,182 @@
     display: none;
   }
 }
+
+/* Optional ensemble controls. */
+#ensembleDialog { max-width: min(520px, 90vw); max-height: 85vh; overflow: auto; border-radius: 12px; }
+#ensembleForm label { display: grid; gap: 4px; margin: 10px 0; }
+#ensembleForm textarea { min-height: 70px; }
+#ensembleControls label { display: block; margin: 8px 0; }
+#ensembleCast { white-space: pre-wrap; margin: 10px 0; }
+#ensembleFormError { color: #bd3434; }
+
+.recall-mode-hint {
+  margin: 6px 0 12px;
+  color: var(--text-muted, #aaa);
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 1.5;
+}
+
+/* Non-blocking recording status, separate from the narration spinner. */
+.ensemble-recording { padding: 6px 14px; text-align: center; font-size: 12px; color: var(--text-secondary, #aaa); flex-shrink: 0; }
+.ensemble-recording[hidden] { display: none; }
+.ensemble-recording button { margin-left: 8px; cursor: pointer; }
+
+/* Card branch controls stay usable in the narrow drawer and on mobile. */
+.card-branches select { max-width: 100%; }
+.card-branches p { font-size: .85rem; opacity: .75; line-height: 1.6; }
+#cardBranchDialog { max-width: min(420px, calc(100vw - 32px)); border-radius: 12px; padding: 20px; }
+#cardBranchInput { box-sizing: border-box; width: 100%; margin: 10px 0; }
+#cardBranchError { color: #d65c5c; }
+
+#cardEditDialog { width: min(640px, calc(100vw - 32px)); max-height: 88dvh; overflow-y: auto; box-sizing: border-box; padding: 20px; border-radius: 12px; color: var(--text-primary, #ddd); background: var(--bg-secondary, #20232b); }
+#cardEditDialog::backdrop { background: #0009; }
+#cardEditForm { display: grid; gap: 12px; }
+#cardEditForm h3, #cardEditForm p { margin: 0; }
+#cardEditForm textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 10px; font: inherit; color: inherit; background: #0002; border: 1px solid #8886; border-radius: 6px; }
+#cardEditForm fieldset { display: flex; flex-wrap: wrap; gap: 12px; border: 1px solid #8886; border-radius: 6px; }
+#cardEditNotice { font-size: .9em; opacity: .85; }
+#cardEditError { color: #ef8383; }
+.card-edit-actions { display: flex; justify-content: flex-end; gap: 12px; }
+.card-edit-actions button { padding: 8px 16px; cursor: pointer; }
+#cardEditDialog { margin: auto; border: 1px solid var(--border); color: var(--text); background: var(--bg-sidebar); }
+#cardEditForm fieldset { padding: 10px 12px; }
+#cardEditForm fieldset label { display: inline-flex; gap: 6px; align-items: center; }
+#cardEditForm .card-edit-options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 16px; border: 1px solid #8886; border-radius: 6px; padding: 10px 12px; }
+#cardEditForm .card-edit-options fieldset { min-width: 0; margin: 0; padding: 0; border: 0; gap: 8px 16px; }
+#cardEditForm .card-edit-options legend { padding: 0; margin-bottom: 4px; font-size: .9em; opacity: .85; }
+#cardEditForm input[type=radio] { accent-color: var(--accent); }
+.card-edit-actions button { font: inherit; border: 1px solid var(--border); border-radius: var(--radius); background: var(--input-bg); color: var(--text); }
+.card-edit-actions button[type=submit] { background: var(--accent); border-color: var(--accent); color: white; }
+.card-edit-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#cardEditClearMessage { padding: 4px 10px; font: inherit; color: var(--text); background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+
+#cardMemoryDialog { margin: auto; width: min(900px, calc(100vw - 24px)); max-height: 90dvh; overflow: auto; box-sizing: border-box; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-sidebar); color: var(--text); }
+#cardMemoryDialog::backdrop { background: #0009; }
+.memory-editor-heading, #cardMemoryDialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#cardMemoryDialog h3 { margin: 0; }
+#cardMemoryDialog p { font-size: .9em; }
+#cardMemoryDialog button, #cardMemoryDialog select { font: inherit; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); cursor: pointer; }
+#cardMemoryDialog button:disabled { opacity: .5; cursor: default; }
+#cardMemoryRows { display: grid; gap: 12px; margin: 16px 0; }
+.memory-editor-row { position: relative; padding: 12px 44px 12px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.memory-editor-row textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.6; color: var(--text); background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px; }
+#cardMemoryDialog .memory-editor-row button { position: absolute; right: 5px; top: 5px; padding: 2px 9px; font-size: 22px; }
+#cardMemoryDialog footer { position: sticky; bottom: -20px; background: var(--bg-sidebar); padding: 12px 0; }
+#cardMemoryDialog #cardMemorySave { background: var(--accent); color: white; }
+#cardMemoryError { color: var(--text); white-space: pre-wrap; }
+#cardMemoryDiscard { margin: auto; max-width: calc(100vw - 32px); padding: 20px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-sidebar); }
+#cardMemoryDiscard::backdrop { background: #0009; }
+#cardMemoryDiscard button { margin: 8px; padding: 8px 12px; }
+#cardMemoryOpen { font: inherit; color: var(--text); background: var(--input-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+
+/* Keep all narration options reachable on compact screens. */
+#addon-panel { max-height: 60dvh; overflow-y: auto; }
+
+.card-compose-shortcuts { width: 100%; margin-bottom: 6px; }
+.card-compose-shortcuts { display: flex; gap: 8px; flex-wrap: nowrap; align-items: center; overflow-x: auto; }
+.card-compose-shortcuts > * { flex: 0 0 auto; white-space: nowrap; }
+#cardResponseLength { display: inline-flex; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--bg-sidebar); }
+#cardResponseLength button { font: inherit; font-size: .8rem; padding: 4px 10px; border: 0; color: var(--text-dim); background: transparent; cursor: pointer; }
+#cardResponseLength button[aria-pressed="true"] { color: white; background: var(--accent); }
+#cardResponseLength button:focus-visible { outline: 2px solid var(--text); outline-offset: -3px; }
+#cardResponseLength button:disabled { opacity: .5; cursor: default; }
+#cardInstructionOpen { font: inherit; font-size: .8rem; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; color: var(--text-dim); background: var(--bg-sidebar); cursor: pointer; }
+#cardInstructionOpen.active { color: var(--accent); border-color: var(--accent); }
+#cardInstructionOpen:disabled { opacity: .5; cursor: default; }
+#cardCandidateInstruction { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 0; font-size: .9rem; }
+#cardInstructionDialog, #cardInstructionDiscard { margin: auto; box-sizing: border-box; width: min(640px, calc(100vw - 24px)); max-height: 90dvh; overflow-y: auto; padding: 20px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--bg-sidebar); }
+#cardInstructionDialog::backdrop, #cardInstructionDiscard::backdrop { background: #0009; }
+#cardInstructionForm { display: grid; gap: 12px; }
+#cardInstructionForm h3, #cardInstructionForm p { margin: 0; }
+#cardInstructionForm p { font-size: .9rem; line-height: 1.6; }
+.instruction-toggle { display: flex; gap: 8px; align-items: center; }
+.instruction-toggle input { accent-color: var(--accent); }
+#cardInstructionForm textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.6; padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); }
+#cardInstructionForm footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+#cardInstructionForm button, #cardInstructionDiscard button { font: inherit; cursor: pointer; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); }
+#cardInstructionForm button:disabled { opacity: .5; cursor: default; }
+#cardInstructionSave { background: var(--accent) !important; color: white !important; }
+#cardInstructionError { white-space: pre-wrap; color: #ef8383; }
+#cardInstructionDiscard button { margin: 8px 8px 0 0; }
+#cardContinueBtn, #cardExploreBtn { font: inherit; font-size: .8rem; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; color: var(--text-dim); background: var(--bg-sidebar); cursor: pointer; }
+#cardContinueBtn:disabled, #cardExploreBtn:disabled { opacity: .5; cursor: default; }
+#cardFavoritesOpen { font: inherit; padding: 6px 10px; color: var(--text); background: var(--input-bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+#cardCandidateDialog { margin: auto; width: min(800px, calc(100vw - 24px)); max-height: 90dvh; box-sizing: border-box; overflow-y: auto; padding: 20px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--bg-sidebar); }
+#cardCandidateDialog::backdrop { background: #0009; }
+.candidate-heading, .candidate-navigation, #cardCandidateDialog footer { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+#cardCandidateDialog h3 { margin: 0; }
+#cardCandidateDialog button, #cardFavoriteList { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); cursor: pointer; }
+#cardCandidateDialog button:disabled { opacity: .45; cursor: default; }
+.candidate-navigation { margin-top: 16px; }
+#cardCandidateStats, #cardCandidateMeta { font-size: .8rem; color: var(--text-dim); }
+#cardCandidateInput { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 0; font-size: .9rem; }
+#cardCandidateContent { line-height: 1.8; overflow-wrap: anywhere; padding: 10px 0; }
+#cardCandidateDialog footer { position: sticky; bottom: -20px; padding: 12px 0; background: var(--bg-sidebar); }
+#cardCandidateApply { background: var(--accent) !important; color: white !important; }
+#cardCandidateError { color: #ef8383; }
+#cardFavoriteList { max-width: 100%; width: 100%; margin-top: 12px; }
+
+/* Reply actions wrap with the message on narrow screens. */
+.message .msg-actions { position: static; display: flex; flex-wrap: wrap; margin-top: 12px; }
+.card-feedback-controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.card-feedback-like[aria-pressed=true] { color: var(--accent); border-color: var(--accent); background: var(--bg-sidebar); }
+.card-feedback-note, #cardCandidateDialog .card-feedback-note { background: transparent; border-color: transparent; color: var(--text-dim); font-size: .85rem; padding: 4px 0; }
+.card-feedback-note:hover { color: var(--text); text-decoration: underline; }
+#cardFeedbackDialog, #cardFeedbackDiscard { margin: auto; box-sizing: border-box; width: min(600px, calc(100vw - 24px)); max-height: 90dvh; overflow-y: auto; padding: 20px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--bg-sidebar); }
+#cardFeedbackDialog::backdrop, #cardFeedbackDiscard::backdrop { background: #0009; }
+#cardFeedbackForm { display: grid; gap: 12px; }
+#cardFeedbackForm h3, #cardFeedbackForm p { margin: 0; }
+#cardFeedbackForm p { font-size: .9rem; }
+#cardFeedbackForm textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.6; padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); }
+#cardFeedbackForm footer { display: flex; justify-content: flex-end; gap: 12px; }
+#cardFeedbackForm button, #cardFeedbackDiscard button { font: inherit; cursor: pointer; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); }
+#cardFeedbackForm button:disabled { opacity: .5; cursor: default; }
+#cardFeedbackSave { background: var(--accent) !important; color: white !important; }
+#cardFeedbackError { white-space: pre-wrap; color: #ef8383; }
+#cardFeedbackDiscard button { margin: 8px 8px 0 0; }
+
+#cardReplyEditDialog { margin: auto; box-sizing: border-box; width: min(850px, calc(100vw - 24px)); max-height: 90dvh; overflow-y: auto; padding: 20px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--bg-sidebar); }
+#cardReplyEditDialog::backdrop { background: #0009; }
+#cardReplyEditForm { display: grid; gap: 12px; }
+#cardReplyEditForm h3, #cardReplyEditForm p { margin: 0; }
+#cardReplyEditForm p { font-size: .9rem; }
+#cardReplyEditText { width: 100%; box-sizing: border-box; min-height: 35dvh; resize: vertical; font: inherit; line-height: 1.7; padding: 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); }
+#cardReplyEditForm footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+#cardReplyEditForm button { font: inherit; cursor: pointer; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--input-bg); }
+#cardReplyEditForm button:disabled { opacity: .5; cursor: default; }
+#cardReplyEditSave { background: var(--accent) !important; color: white !important; }
+#cardReplyEditError { white-space: pre-wrap; color: #ef8383; }
+
+#cardExploreControl { display: inline-flex; align-items: stretch; flex-shrink: 0; }
+#cardExploreControl[hidden] { display: none; }
+#cardExploreControl #cardExploreBtn { border-radius: 14px 0 0 14px; border-right: 0; }
+#cardExploreSize { width: 25px; padding: 0; border: 1px solid var(--border); border-radius: 0 14px 14px 0; color: transparent; background: var(--bg-sidebar); cursor: pointer; }
+#cardExploreSize option { color: var(--text); background: var(--bg-sidebar); }
+#cardExploreSize:disabled { opacity: .5; cursor: default; }
+#cardExploreSize { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4 3 3 3-3' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: center; }
+
+#cardClearDraft { flex-shrink: 0; min-height: 28px; margin: 0; padding: 2px 5px; border: none; border-radius: 6px; background: transparent; color: var(--text-dim); font: inherit; font-size: .72rem; cursor: pointer; }
+#cardClearDraft:hover { color: var(--text); background: var(--input-bg); }
+#cardClearDraft:disabled { opacity: .35; cursor: default; }
+#input-area-inner #user-input { min-width: 0; }
+
+.card-compose-shortcuts #addon-panel-btn { width: 28px; height: 28px; margin: 0; padding: 0; font-size: 1rem; }
+@media (max-width: 480px) {
+  .card-compose-shortcuts { gap: 4px; }
+  #cardContinueBtn, #cardExploreBtn, #cardInstructionOpen, #cardResponseLength button { padding-left: 5px; padding-right: 5px; }
+}
+
+/* User edit action shares the text row instead of adding a footer. */
+.message.user { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 14px; }
+.message.user > .content { flex: 1; min-width: 0; }
+.message.user > .msg-actions { flex: 0 0 auto; flex-wrap: nowrap; margin-top: 4px; }
+
+/* Opt-in galgame relationship panel */
+.galgame-panel { margin-top: 12px; font-size: 13px; line-height: 1.7; }
+.galgame-panel label { display: block; margin: 8px 0; }
+.galgame-panel label span { float: right; }
+.galgame-panel progress { display: block; width: 100%; height: 7px; accent-color: #bd7899; }
+.galgame-panel p { color: var(--text-secondary, #aaa); overflow-wrap: anywhere; }
+.galgame-panel summary { cursor: pointer; }

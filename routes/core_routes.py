@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import time
 
 from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
+
+from story_core.web_assets import chat_asset_version
 
 
 log = logging.getLogger("rpg")
@@ -61,16 +62,7 @@ def _merged_turn_ops(app_module, story_id: str, branch_id: str) -> dict:
 
 @core_bp.route("/")
 def index():
-    app_module = _app()
-    try:
-        mtimes = ""
-        for filename in ("app.js", "style.css"):
-            path = os.path.join(app_module.app.static_folder, filename)
-            mtimes += str(int(os.path.getmtime(path)))
-        cache_v = hashlib.md5(mtimes.encode()).hexdigest()[:8]
-    except OSError:
-        cache_v = "1"
-    return render_template("index.html", v=cache_v)
+    return render_template("index.html", v=chat_asset_version())
 
 
 @core_bp.route("/api/init", methods=["POST"])

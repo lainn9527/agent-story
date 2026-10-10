@@ -1,0 +1,16 @@
+{
+  "source_through_index": 618,
+  "frozen_prefix_still_matches": true,
+  "current_message_count": 619,
+  "frozen_message_count": 619,
+  "card_matches_frozen": true,
+  "branch_files_match_frozen": {
+    "character_state.json": true,
+    "npcs.json": true,
+    "card_clock.json": true,
+    "conversation_recap.json": true,
+    "card_lore.json": true,
+    "card_instruction.json": true
+  },
+  "isolated_data_root": true
+}

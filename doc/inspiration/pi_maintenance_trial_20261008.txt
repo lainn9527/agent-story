@@ -1,0 +1,43 @@
+2026-10-08：彈性原文與 Pi 共用資料維護
+
+已上線
+- Card Mode 原文至少保留最後 10 則，往前補到約 8000 字元；額外回溯受 12000 字元／40 則限制。
+- 10 則保底、完整單則與尚未摘要原文不因上限被截斷。短句同樣保留。
+- 5051 服務已更新，state API HTTP 200；重啟前後故事檔案 bytes 一致。
+
+已實作但尚未自動接到每回合
+- Pi 共用 memory 增量／合併、lore、summary 任務。
+- 查讀原文 → 提案與逐項核對 → 全新上下文獨立查證 → host 重播紀錄 → 版本檢查 → 備份寫回。
+- 可 run --apply 自動提交通過批次，不需逐條人工 approve。
+- 原文與早期快照不修改；只更新當前 NPC 與最新 post snapshot。
+- 不確定、衝突、超時或版本已改變時整批不寫入；undo/recover 也不覆蓋新進度。
+- 第 5 項的遊玩後排程／下一轮 prompt 組裝留下一輪；現有 Recorder、自動摘要仍照常。
+
+實際 Pi / Vertex gemini-3.7-flash 測試
+- 對仙門 main 線 mem:0:485 / 487 / 489 三筆贈草藥記憶提出合併。
+- 初版回傳格式的 undefined/null 差異被重播器擋下，已修正。
+- 有一次模型提前停止未提交，新增最多兩次續做提醒；仍未完成就失敗。
+- 整理者曾自評通過，但省略了「部分償還」的限定；未套用此批。
+- 增加獨立查證後，完整整理重跑一度超時，保持原資料。
+- 再以已保存的提案單獨試跑獨立查證，查到 #578 的「人情也算還了一半」，判定合併遺失限定，整批拒絕。
+- 這驗證了拒絕有問題提案的路徑，不代表已證明長期整理品質成熟，或已清理整份正式 memory。
+
+獨立查證結果
+keep:0:mem:0:485 | supported | 新提案保留了趙靈兒因化解火毒之恩、挑選今晨百草園第一批極品清靈草作為答謝禮之事實。
+keep:0:mem:0:487 | supported | 新提案保留了趙靈兒感謝艾迪化解火毒並贈送極品清靈草之核心事實。
+keep:0:mem:0:489 | conflict | 舊記憶 mem:0:489 明確記錄「以此償還部分化解火毒的人情」（對應原文 m:578「人情也算還了一半」）。新提案將「部分償還」省略限定詞寫為「以償還人情」，升格為一般或全部結清，遺失了舊記錄與原文中「部分／一半」的關鍵限定詞。
+new:0:0 | conflict | 原文 m:578 明確指出「人情也算還了一半」，新陳述「以償還人情」未限定為部分／一半償還，存在語義升格與不符。
+
+測試
+- 相關 Python 回歸：86 passed。
+- Node 查證工具／重播：8 passed。
+- 全套 Python：1256 passed、1 skipped、4 failed（在最後補充的 timeout 小測試之前跑完；timeout 後另通過上述相關測試）。
+- 4 個失敗：副本 edit / regenerate 獎勵重播兩例、缺少 suman 卡片、舊 inventory list→map 載入轉換。均未修改這些實作路徑。
+
+使用方式：doc/development.md「Pi 共用維護任務」。
+獨立查證原始紀錄：/var/folders/cv/nr37t6051dz68d5m8yqk2hlr0000gn/T/pi_maintenance_6em4cyrc
+
+2026-10-08 policy 2 與用量補記
+這次只回算現有紀錄，未追加模型呼叫、未改正式 memory/lore。
+歷史独立查證基準：{"visible_calls": 17, "tokens": {"input_tokens": 54536, "output_tokens": 4105, "cache_read_tokens": 86068, "cache_write_tokens": 0, "reasoning_tokens": 3140, "total_tokens": 144709}, "cost_usd": null}
+此例是舊流程，不能用來宣稱新版已省多少 tokens。新版按資料壽命分配查證，記錄每次用量與結果；詳見 prompt_design.md 與 development.md。

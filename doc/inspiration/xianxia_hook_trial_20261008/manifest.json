@@ -1,0 +1,33 @@
+{
+  "kind": "current_save_isolated_trial_not_historical_replay",
+  "source_through_index": 618,
+  "snapshot_sha256": "cc3352533d476d05646dfc845456b2f4c230bc608609ab58824d88789171ee90",
+  "material": {
+    "id": "ordinary_object",
+    "title": "委託中的舊物",
+    "seed": "一件普通委託裡，混入了一件用途不明、與委託本身不太相稱的舊物。",
+    "tags": [
+      "委託",
+      "訪客",
+      "坊市"
+    ]
+  },
+  "seed_injected_once": true,
+  "live": true,
+  "controls": {
+    "narrative_style": "natural",
+    "plot_mode": "coauthor",
+    "recall_mode": "off",
+    "response_length": "medium",
+    "recorder": "normal synchronous in sandbox",
+    "compaction": "disabled for bounded trial"
+  },
+  "criteria": [
+    "入口可回應且未預定結局",
+    "後續有人物行動或局勢改變",
+    "重要資訊與前輪連續",
+    "玩家改向後不強拉回原案",
+    "未將素材冒充既有往事"
+  ],
+  "implementation_sha256": "c0d1c4b77aa38ebae9bbf207feebbaa0ed12c63085b2011ec7a6899a3f697cda"
+}

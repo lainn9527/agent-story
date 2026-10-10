@@ -119,6 +119,25 @@ class TestLogUsage:
         summary = usage_db.get_usage_summary(story_id, days=1)
         assert summary["total"]["calls"] == 1
 
+    def test_cost_and_reasoning_usage(self, story_id):
+        usage_db.log_usage(
+            story_id=story_id,
+            provider="openrouter",
+            model="deepseek/deepseek-v4.1-flash",
+            call_type="gm_stream",
+            prompt_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+            cached_tokens=80,
+            reasoning_tokens=5,
+            cost_usd=0.00125,
+        )
+        summary = usage_db.get_usage_summary(story_id, days=1)
+        assert summary["total"]["cached_tokens"] == 80
+        assert summary["total"]["reasoning_tokens"] == 5
+        assert summary["total"]["cost_usd"] == pytest.approx(0.00125)
+        assert summary["by_provider"][0]["cost_usd"] == pytest.approx(0.00125)
+
 
 # ===================================================================
 # get_usage_summary
@@ -206,16 +225,21 @@ class TestGetTotalUsage:
 class TestLogFromBridge:
     def test_with_explicit_usage(self, story_id):
         usage = {
-            "provider": "gemini",
-            "model": "flash",
+            "provider": "openrouter",
+            "model": "deepseek/deepseek-v4.1-flash",
             "prompt_tokens": 100,
             "output_tokens": 50,
             "total_tokens": 150,
+            "cached_tokens": 40,
+            "reasoning_tokens": 0,
+            "cost_usd": 0.0008,
         }
         usage_db.log_from_bridge(story_id, "compaction", 1.5, usage=usage)
         summary = usage_db.get_usage_summary(story_id, days=1)
         assert summary["total"]["calls"] == 1
         assert summary["total"]["total_tokens"] == 150
+        assert summary["total"]["cached_tokens"] == 40
+        assert summary["total"]["cost_usd"] == pytest.approx(0.0008)
 
     @mock.patch("story_core.llm_bridge.get_last_usage", return_value=None)
     def test_none_usage_returns_early(self, mock_get, story_id):

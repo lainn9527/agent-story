@@ -14,6 +14,10 @@ Browser (static/app.js, templates/index.html)
       -> Background threads (tag extraction, compaction, NPC evolution, state cleanup, image gen)
 ```
 
+### 共用聊天 UI
+
+世界模擬器 `app.js` 與角色卡 `card.js` 都使用 `static/chat_ui.js`、`static/style.css` 及 `templates/shared/` 的輸入區／對話框。共用層只處理呈現、互動和 SSE，不持有 story/branch 狀態，也不呼叫初始化 API。兩種模式各自負責資料載入和操作；角色卡繼續走 `/api/card/*` 與 `story_core/card_mode/`。頁面資源版本由 `story_core/web_assets.py` 統一計算。
+
 ## 2) 主要模組
 
 - `app.py`
@@ -29,8 +33,9 @@ Browser (static/app.js, templates/index.html)
   - 結構化落盤 LLM request/response trace
   - 依 story/date/branch/message 分區存檔
   - 內建 retention prune（按日期資料夾清理）
-- `story_core/gemini_bridge.py` / `story_core/claude_bridge.py`
-  - Gemini API 或 Claude CLI 的實際呼叫
+- `story_core/gemini_bridge.py` / `story_core/openrouter_bridge.py` / `story_core/claude_bridge.py`
+  - Gemini API、OpenRouter Chat Completions 或 Claude CLI 的實際呼叫
+  - OpenRouter 支援串流、一次性呼叫與 Card Recorder tool calling；失敗時不跨 provider fallback
 - `story_core/codex_bridge.py`
   - Codex CLI 的 read-only provider
   - 以臨時工作區暴露當前 branch timeline / state / lore / recap / plan
@@ -210,3 +215,30 @@ Browser (static/app.js, templates/index.html)
 - 已建並以 stub LLM 端到端驗證（parse/gate/apply/commit/critic；三個結構性 bug 在真實落盤路徑上消失；grounding 成立）。
 - 尚未串流（route 非串流）、尚未接前端、真 Gemini 品質待 live 驗證。
 - 測試：`tests/test_gm_v2.py`（需 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，因 langsmith plugin 破壞整套 pytest）。
+
+### Card Mode 多角色互動與背景整理
+
+`card_mode/ensemble.py` 使用一次統一敘事與真實 SSE，完整對話先存入副本 `ensemble.json`；`ensemble_recorder.py` 使用另一把跨程序鎖依序處理持久待辦，模型呼叫期間不佔遊戲鎖。完成時驗證 turn ID 並重建後續角色快照及手動控制，防止回退／重生的遲到結果回寫。詳見 prompt_design 的「選用多角色副本」。
+
+### Card Mode 分支
+
+`card_mode/branches.py` 以既有 timeline_tree.json 管理分支名稱、來源點與目前選擇。角色卡子分支保存完整獨立快照（card_full_snapshot），branch_tree.get_full_timeline 對此標記直接讀本線訊息；原世界模式仍沿用父鏈 delta 合成。單卡沿用 branches/<id>，多角色主線保留根 ensemble.json、子線保存 branches/<id>/ensemble.json。前端與所有背景工作捕獲明確 branch_id，切換只改預設選擇，不搬動或合併存檔。
+
+`card_mode/instructions.py` 的本線持續指示獨立保存為 `card_instruction.json`，放在同線的 messages／ensemble 所在目錄。它是作者設定，不併入角色快照；回退／重置保留，一般／編輯／候選新分支繼承建立當下的設定。敘事追加生效文字並在回覆版本記錄 metadata，Recorder／摘要／回憶不注入設定；API 保存使用同線鎖與 revision 防止覆蓋其他視窗的更新。
+
+### Card Mode 回覆候選
+
+`card_mode/candidates.py` 使用 `card_candidates.json` 的輕量索引與 `card_candidates/<reply_group_id>.json` 的逐回合正文／快照，避免每兩秒 state 輪詢讀取全部候選快照。單卡及多角色子線位於分支目錄；多角色 main 位於 story 根目錄。操作沿用各模式的遊戲鎖，收藏與版本不進入模型上下文。新分支只複製保留回合的候選資料；最新回合採用可原線替換，歷史採用建立新線。單卡 Recorder 抽出 `record_saved_turn`，可重新整理已保存正文而不再呼叫敘事模型。
+
+
+### Pi 資料維護邊界
+
+`card_mode/pi_maintenance.py` 為單卡 memory 增量／合併、lore、summary 的共同任務執行器。Pi 在隔離工作目錄透過受限查讀／提案／核對工具工作；host 重播工具紀錄、檢查 live revision，再持分支短鎖及跨程序 recap commit guard 寫回。正式存檔不直接暴露給模型工具。任務記錄與可撤回備份保留原文證據。可用 CLI 手動啟動，或選用 `pi_schedule` 在 Recorder 完成後每 50 個完整來回背景啟動；下一輪 prompt 預整理仍未串接。
+
+
+Pi 維護的 `policy_version: 2` 將長期 memory/lore 與滾動摘要區分，前者保留獨立複核，後者保留單 agent 原文與一致性核對。`card_mode/pi_usage.py` 消費原始事件用量，主任務 report/usage 包含子查證；story-local `pi_maintenance_usage` 以每任務一檔保存用量與提交嘗試，不混用 GM usage_log 欄位而造成未知值或子任務重複計費。
+
+
+Pi 隨身物與背景維護：`inventory` 與 memory/lore/summary 使用同一查讀、提案、逐項引文、獨立複核及版本檢查流程。隨身物 operation 只可替換現有 target_ids，item_name 是統一名稱，text 空字串表示刪除；合併必須包含所有目的條目，不累加同批重複數量。原始敘事與舊回合快照不改，套用更新 character_state 與最新 GM 的 post-state inventory，保存備份及 token usage。不能因久未提及就刪物。
+
+`pi_schedule` 按已完成且 Recorder 成功的 user/GM 配對計數，預設每 50 個來回（約 100 則訊息）啟動一批四類維護；每批最多十二筆操作，不保證掃完全部歷史。只在啟用卡片的 Recorder 結束後啟動背景執行緒；查讀可搜尋完整凍結歷史，預讀近期 20 則，其餘依需要搜尋。模型工作不持遊玩鎖，不阻塞送出。分支獨立計數；新分支或回退失去計數錨點時重設基準。失敗、超時或遊玩／摘要已更新則不套用，隔下一個 50 回合再試，不反覆耗 API。一般即時摘要仍保留，Pi 是補充維護；不啟用時無模型費用。排程狀態保存在分支 pi_schedule_status.json，設定在卡片 pi_schedule.json。

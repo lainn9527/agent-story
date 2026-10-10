@@ -12,6 +12,8 @@ def get_full_timeline(story_id: str, branch_id: str) -> list[dict]:
     """Reconstruct full message timeline for a branch within a story."""
     tree = _load_tree(story_id)
     branches = tree.get("branches", {})
+    if branches.get(branch_id, {}).get("card_full_snapshot"):
+        return _load_branch_messages(story_id, branch_id)
     parsed_path = _story_parsed_path(story_id)
 
     if branch_id not in branches:

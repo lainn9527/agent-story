@@ -10,7 +10,12 @@ import json
 import logging
 import os
 import threading
+import uuid
 from datetime import datetime, timezone
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import tempfile
 
 from story_core.tag_extraction import _strip_choice_block
 from story_core.story_utils import get_character_name
@@ -103,6 +108,47 @@ def save_recap(story_id: str, branch_id: str, data: dict):
 # Public API
 # ---------------------------------------------------------------------------
 
+# Serialize recap invalidation with background commit, without waiting for the LLM.
+_recap_commit_lock = threading.RLock()
+
+
+@contextmanager
+def recap_commit_guard(story_id, branch_id):
+    """Coordinate CLI maintenance and background commits across processes.
+
+    Never hold this while calling a model. All production recap writers use
+    this guard; branch mutations acquire their branch lock before this guard.
+    """
+    key = hashlib.sha256(os.path.realpath(_recap_path(story_id, branch_id)).encode()).hexdigest()
+    root = os.path.join(tempfile.gettempdir(), 'story-recap-locks')
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    with _recap_commit_lock, open(os.path.join(root, key), 'a') as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def invalidate_recap(story_id: str, branch_id: str, *, retained_message_count: int | None = None) -> None:
+    """Fence old jobs; preserve a recap whose entire covered prefix survives.
+
+    compacted_through_index is a timeline position (not a message's index field).
+    Omitting retained_message_count forces invalidation, e.g. on reset.
+    """
+    with recap_commit_guard(story_id, branch_id):
+        data = load_recap(story_id, branch_id)
+        covered = data.get("compacted_through_index", -1)
+        preserve = (retained_message_count is not None
+                    and 0 <= covered < retained_message_count
+                    and bool(data.get("recap_text")))
+        if not preserve:
+            data = _default_recap()
+        # Even preserved recaps must reject in-flight work containing deleted turns.
+        data["revision"] = uuid.uuid4().hex
+        save_recap(story_id, branch_id, data)
+
+
 def get_recap_text(story_id: str, branch_id: str) -> str:
     """Return recap text for system prompt injection, or fallback."""
     recap = load_recap(story_id, branch_id)
@@ -159,7 +205,7 @@ def _get_lock(story_id: str, branch_id: str) -> threading.Lock:
         return _compact_locks[key]
 
 
-def _format_messages(messages: list[dict]) -> str:
+def _format_messages(messages: list[dict], max_message_chars: int | None = 1000) -> str:
     """Format messages for the compaction prompt."""
     lines = []
     for msg in messages:
@@ -170,21 +216,29 @@ def _format_messages(messages: list[dict]) -> str:
         if msg.get("role") != "user":
             content = _strip_choice_block(content)
         # Truncate very long messages
-        if len(content) > 1000:
-            content = content[:1000] + "…（略）"
+        if max_message_chars is not None and len(content) > max_message_chars:
+            content = content[:max_message_chars] + "…（略）"
         lines.append(f"{prefix}\n{content}")
     return "\n\n".join(lines)
 
 
-def compact_async(story_id: str, branch_id: str, full_timeline: list[dict]):
+def compact_async(story_id: str, branch_id: str, full_timeline: list[dict], *,
+                  prompt_template: str = _COMPACT_PROMPT,
+                  meta_prompt_template: str = _META_COMPACT_PROMPT,
+                  **options):
     """Trigger background compaction. Non-blocking."""
+    expected_revision = load_recap(story_id, branch_id).get("revision")
+
     def _do_compact():
         lock = _get_lock(story_id, branch_id)
         if not lock.acquire(blocking=False):
             log.info("    compaction: already running for %s/%s, skipping", story_id, branch_id)
             return
         try:
-            _run_compaction(story_id, branch_id, full_timeline)
+            _run_compaction(story_id, branch_id, full_timeline,
+                            prompt_template=prompt_template,
+                            meta_prompt_template=meta_prompt_template,
+                            expected_revision=expected_revision, **options)
         except Exception as e:
             log.info("    compaction: EXCEPTION %s", e)
         finally:
@@ -194,13 +248,26 @@ def compact_async(story_id: str, branch_id: str, full_timeline: list[dict]):
     t.start()
 
 
-def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
+def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict], *,
+                    prompt_template: str = _COMPACT_PROMPT,
+                    meta_prompt_template: str = _META_COMPACT_PROMPT,
+                    expected_revision=...,
+                    max_message_chars: int | None = 1000,
+                    batch_chars: int = 0,
+                    recap_version: int | None = None):
     """Actually perform compaction (runs in background thread)."""
     import time as _time
     from story_core.llm_bridge import call_oneshot
     from story_core import usage_db
 
-    recap = load_recap(story_id, branch_id)
+    with recap_commit_guard(story_id, branch_id):
+        recap = load_recap(story_id, branch_id)
+        if expected_revision is ...:
+            expected_revision = recap.get("revision")
+        if recap.get("revision") != expected_revision:
+            return
+    if recap_version is not None and recap.get("recap_version") != recap_version:
+        recap = {**_default_recap(), "revision": expected_revision}
     compacted_through = recap.get("compacted_through_index", -1)
 
     # Messages to compact: from compacted_through+1 to len-RECENT_WINDOW
@@ -218,43 +285,58 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict]):
 
     character_name = get_character_name(story_id, branch_id)
 
-    existing_recap = ""
-    if recap.get("recap_text"):
-        existing_recap = f"以下是先前的敘事回顧（請在此基礎上延續）：\n\n{recap['recap_text']}"
-
-    prompt = _COMPACT_PROMPT.format(
-        character_name=character_name,
-        existing_recap=existing_recap,
-        messages=_format_messages(msgs_to_compact),
-    )
-
-    t0 = _time.time()
-    new_recap_text = call_oneshot(prompt)
-    usage_db.log_from_bridge(story_id, "compaction", _time.time() - t0, branch_id=branch_id)
-    if not new_recap_text:
-        log.info("    compaction: LLM returned empty, aborting")
-        return
-
-    new_recap_text = new_recap_text.strip()
-
-    # Check if meta-compaction needed (recap too long)
-    if len(new_recap_text) > RECAP_CHAR_CAP:
-        log.info("    compaction: recap too long (%d chars), meta-compacting", len(new_recap_text))
-        meta_prompt = _META_COMPACT_PROMPT.format(character_name=character_name, recap=new_recap_text)
+    # Whole messages remain intact; bound each request by batching, not truncation.
+    batches = []
+    batch, size = [], 0
+    for message in msgs_to_compact:
+        length = len(message.get("content", ""))
+        if batch_chars and batch and size + length > batch_chars:
+            batches.append(batch)
+            batch, size = [], 0
+        batch.append(message)
+        size += length
+    if batch:
+        batches.append(batch)
+    new_recap_text = recap.get("recap_text", "")
+    for batch in batches:
+        with recap_commit_guard(story_id, branch_id):
+            if load_recap(story_id, branch_id).get("revision") != expected_revision:
+                return
+        existing_recap = (
+            f"以下是先前的敘事回顧（合併新事實，保留仍有效資訊）：\n\n{new_recap_text}"
+            if new_recap_text else ""
+        )
+        prompt = prompt_template.format(
+            character_name=character_name, existing_recap=existing_recap,
+            messages=_format_messages(batch, max_message_chars=max_message_chars),
+        )
         t0 = _time.time()
-        meta_result = call_oneshot(meta_prompt)
+        result = call_oneshot(prompt)
         usage_db.log_from_bridge(story_id, "compaction", _time.time() - t0, branch_id=branch_id)
-        if meta_result and meta_result.strip():
-            new_recap_text = meta_result.strip()
-            log.info("    compaction: meta-compacted to %d chars", len(new_recap_text))
+        if not result or not result.strip():
+            return  # No partial commit or skipped history on failure.
+        new_recap_text = result.strip()
+        if len(new_recap_text) > RECAP_CHAR_CAP:
+            meta_prompt = meta_prompt_template.format(character_name=character_name, recap=new_recap_text)
+            t0 = _time.time()
+            meta_result = call_oneshot(meta_prompt)
+            usage_db.log_from_bridge(story_id, "compaction", _time.time() - t0, branch_id=branch_id)
+            if meta_result and meta_result.strip():
+                new_recap_text = meta_result.strip()
 
     turn_count = sum(1 for m in msgs_to_compact if m.get("role") == "user")
 
+    if recap_version is not None:
+        recap["recap_version"] = recap_version
     recap["recap_text"] = new_recap_text
     recap["compacted_through_index"] = compact_end - 1
     recap["last_compacted_at"] = datetime.now(timezone.utc).isoformat()
     recap["total_turns_compacted"] = recap.get("total_turns_compacted", 0) + turn_count
 
-    save_recap(story_id, branch_id, recap)
+    with recap_commit_guard(story_id, branch_id):
+        if load_recap(story_id, branch_id).get("revision") != expected_revision:
+            log.info("    compaction: discarded result from invalidated timeline")
+            return
+        save_recap(story_id, branch_id, recap)
     log.info("    compaction: done — recap=%d chars, compacted_through=%d",
              len(new_recap_text), compact_end - 1)

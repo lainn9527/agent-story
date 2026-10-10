@@ -47,6 +47,7 @@ def _make_blank_template(slug: str) -> dict:
             "role": "玩家扮演的身分",
             "premise": "玩家的動機或處境",
             "address": "你",
+            "profile": "",
         },
         "setting": {
             "place": "故事主要發生的地點",
@@ -122,7 +123,7 @@ def _collect_answers(slug: str) -> dict[str, str]:
     ans = {}
     ans["name_and_identity"] = _ask_line(
         "1. 角色名 + 一句話身分定位",
-        "例：花子，三十年前死在小學的女學生，天然呆只想吃零食",
+        "例：花子，三十年前死在大學的女學生，天然呆只想吃零食",
     )
     ans["player_role"] = _ask_line(
         "2. 玩家扮演誰 / 為什麼會遇到她",
@@ -130,7 +131,7 @@ def _collect_answers(slug: str) -> dict[str, str]:
     )
     ans["setting"] = _ask_line(
         "3. 場景與時間（地點、時代、開場時間）",
-        "例：偏遠郊區的舊小學，現代，2026-05-16T02:08",
+        "例：偏遠郊區的舊大學，現代，2026-05-16T02:08",
     )
     ans["appearance_body"] = _ask_line(
         "4. 外觀特徵與具體肉體細節（身形比例／衣著細節／膚觸）",

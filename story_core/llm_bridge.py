@@ -1,7 +1,7 @@
 """LLM Bridge — dispatches GM calls to the configured provider.
 
 Swap provider by editing llm_config.json (auto-reloads on file change).
-Supported providers: "gemini", "vertex", "claude_cli", "codex_agent"
+Supported providers: "gemini", "vertex", "openrouter", "claude_cli", "codex_agent"
 """
 
 import json
@@ -55,6 +55,21 @@ def get_provider() -> str:
     return _get_config().get("provider", "claude_cli")
 
 
+def get_recorder_model() -> str | None:
+    """Per-provider Card Recorder override; missing setting preserves narration model."""
+    cfg = _get_config()
+    provider = get_provider()
+    section = _get_openrouter_cfg(cfg) if provider in ("openrouter", "open_router") else cfg.get(provider, {})
+    value = section.get("recorder_model")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _get_openrouter_cfg(cfg: dict | None = None) -> dict:
+    """Read the canonical config while accepting the original open_router spelling."""
+    cfg = cfg or _get_config()
+    return cfg.get("openrouter") or cfg.get("open_router") or {}
+
+
 def get_last_usage() -> dict | None:
     """Return usage metadata from the most recent LLM call on this thread.
 
@@ -73,6 +88,9 @@ def _capture_usage(provider: str, model: str):
     elif provider == "vertex":
         from story_core.vertex_bridge import get_last_usage as _vertex_usage
         usage = _vertex_usage()
+    elif provider in ("openrouter", "open_router"):
+        from story_core.openrouter_bridge import get_last_usage as _openrouter_usage
+        usage = _openrouter_usage()
     elif provider == "codex_agent":
         usage = None
     else:
@@ -123,6 +141,18 @@ def call_claude_gm(
         _capture_usage(provider, model)
         return result
 
+    if provider in ("openrouter", "open_router"):
+        from story_core.openrouter_bridge import call_openrouter_gm
+        o = _get_openrouter_cfg(cfg)
+        model = o.get("model", "deepseek/deepseek-v4.1-flash")
+        result = call_openrouter_gm(
+            user_message, system_prompt, recent_messages,
+            openrouter_cfg=o, model=model,
+            session_id=session_id,
+        )
+        _capture_usage("openrouter", model)
+        return result
+
     if provider == "codex_agent":
         from story_core.codex_bridge import call_codex_gm
 
@@ -166,6 +196,7 @@ def call_claude_gm_stream(
     The "done" payload includes a "usage" key with provider/model/token info
     (or None if unavailable).
     """
+    _tls.last_usage = None
     cfg = _get_config()
     provider = get_provider()
 
@@ -181,7 +212,9 @@ def call_claude_gm_stream(
             if event_type == "done" and isinstance(payload, dict):
                 usage = payload.get("usage")
                 if usage:
-                    payload["usage"] = {**usage, "provider": provider, "model": model}
+                    normalized = {**usage, "provider": provider, "model": model}
+                    payload["usage"] = normalized
+                    _tls.last_usage = normalized
             yield (event_type, payload)
         return
 
@@ -197,7 +230,27 @@ def call_claude_gm_stream(
             if event_type == "done" and isinstance(payload, dict):
                 usage = payload.get("usage")
                 if usage:
-                    payload["usage"] = {**usage, "provider": provider, "model": model}
+                    normalized = {**usage, "provider": provider, "model": model}
+                    payload["usage"] = normalized
+                    _tls.last_usage = normalized
+            yield (event_type, payload)
+        return
+
+    if provider in ("openrouter", "open_router"):
+        from story_core.openrouter_bridge import call_openrouter_gm_stream
+        o = _get_openrouter_cfg(cfg)
+        model = o.get("model", "deepseek/deepseek-v4.1-flash")
+        for event_type, payload in call_openrouter_gm_stream(
+            user_message, system_prompt, recent_messages,
+            openrouter_cfg=o, model=model,
+            session_id=session_id, tools=tools,
+        ):
+            if event_type == "done" and isinstance(payload, dict):
+                usage = payload.get("usage")
+                if usage:
+                    normalized = {**usage, "provider": "openrouter", "model": model}
+                    payload["usage"] = normalized
+                    _tls.last_usage = normalized
             yield (event_type, payload)
         return
 
@@ -231,11 +284,14 @@ def call_claude_gm_stream(
 # One-shot call (NPC evolution, etc.)
 # ---------------------------------------------------------------------------
 
-def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | None = None) -> str:
+def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | None = None,
+                 *, response_schema: dict | None = None, model_override: str | None = None) -> str:
     """One-shot LLM call. Returns response text or empty string.
 
     Args:
         provider: Override provider for this call only (does not affect global config).
+        response_schema: Enforce JSON output on Gemini/Vertex; other providers
+            retain their text interface and callers must validate the result.
     """
     cfg = _get_config()
     if provider is None:
@@ -244,27 +300,45 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
     if provider == "gemini":
         from story_core.gemini_bridge import call_gemini_oneshot
         g = cfg.get("gemini", {})
-        model = g.get("model", "gemini-2.0-flash")
-        result = call_gemini_oneshot(
-            prompt,
-            gemini_cfg=g, model=model,
-            system_prompt=system_prompt,
-        )
-        _capture_usage(provider, model)
+        model = model_override or g.get("model", "gemini-2.0-flash")
+        try:
+            result = call_gemini_oneshot(
+                prompt, gemini_cfg=g, model=model, system_prompt=system_prompt,
+                **({"response_schema": response_schema} if response_schema is not None else {}),
+            )
+        finally:
+            _capture_usage(provider, model)
         return result
 
     if provider == "vertex":
         from story_core.vertex_bridge import call_vertex_oneshot
         v = cfg.get("vertex", {})
-        model = v.get("model", "gemini-2.5-flash")
-        result = call_vertex_oneshot(prompt, vertex_cfg=v, model=model, system_prompt=system_prompt)
-        _capture_usage(provider, model)
+        model = model_override or v.get("model", "gemini-2.5-flash")
+        try:
+            result = call_vertex_oneshot(
+                prompt, vertex_cfg=v, model=model, system_prompt=system_prompt,
+                **({"response_schema": response_schema} if response_schema is not None else {}),
+            )
+        finally:
+            _capture_usage(provider, model)
+        return result
+
+    if provider in ("openrouter", "open_router"):
+        from story_core.openrouter_bridge import call_openrouter_oneshot
+        o = _get_openrouter_cfg(cfg)
+        model = model_override or o.get("model", "deepseek/deepseek-v4.1-flash")
+        result = call_openrouter_oneshot(
+            prompt,
+            openrouter_cfg=o, model=model,
+            system_prompt=system_prompt,
+        )
+        _capture_usage("openrouter", model)
         return result
 
     if provider == "codex_agent":
         from story_core.codex_bridge import call_codex_oneshot
 
-        model = cfg.get("codex_agent", {}).get("model", "gpt-5.4")
+        model = model_override or cfg.get("codex_agent", {}).get("model", "gpt-5.4")
         result = call_codex_oneshot(prompt, system_prompt=system_prompt, model=model)
         _capture_usage(provider, model)
         return result
@@ -272,7 +346,7 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
     # Claude CLI one-shot
     _tls.last_usage = None
     from story_core.claude_bridge import CLAUDE_BIN, _CLEAN_ENV
-    model = cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
+    model = model_override or cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929")
     cmd = [CLAUDE_BIN, "-p", "--output-format", "json", "--model", model]
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
@@ -284,6 +358,59 @@ def call_oneshot(prompt: str, system_prompt: str | None = None, provider: str | 
     except Exception as e:
         log.info("llm_bridge: claude_cli oneshot EXCEPTION %s", e)
     return ""
+
+
+def call_gm_tools(
+    user_message: str,
+    system_prompt: str,
+    recent_messages: list[dict],
+    *,
+    on_tool=None,
+    tool_decls: list | None = None,
+    max_rounds: int = 6,
+    model_override: str | None = None,
+) -> tuple[str, list, str]:
+    """Provider-aware function-calling loop used by Card Mode Recorder."""
+    cfg = _get_config()
+    provider = get_provider()
+
+    if provider in ("openrouter", "open_router"):
+        from story_core.openrouter_bridge import call_openrouter_gm_tools
+        o = _get_openrouter_cfg(cfg)
+        model = model_override or o.get("model", "deepseek/deepseek-v4.1-flash")
+        result = call_openrouter_gm_tools(
+            user_message, system_prompt, recent_messages,
+            openrouter_cfg=o, model=model, on_tool=on_tool,
+            tool_decls=tool_decls, max_rounds=max_rounds,
+        )
+        _capture_usage("openrouter", model)
+        return result
+
+    if provider == "vertex":
+        from story_core.vertex_bridge import call_vertex_gm_tools
+        v = cfg.get("vertex", {})
+        model = model_override or v.get("model", "gemini-2.5-flash")
+        result = call_vertex_gm_tools(
+            user_message, system_prompt, recent_messages,
+            vertex_cfg=v, model=model, on_tool=on_tool,
+            tool_decls=tool_decls, max_rounds=max_rounds,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    if provider == "gemini":
+        from story_core.gemini_bridge import call_gemini_gm_tools
+        g = cfg.get("gemini", {})
+        model = model_override or g.get("model", "gemini-2.0-flash")
+        result = call_gemini_gm_tools(
+            user_message, system_prompt, recent_messages,
+            gemini_cfg=g, model=model, on_tool=on_tool,
+            tool_decls=tool_decls, max_rounds=max_rounds,
+        )
+        _capture_usage(provider, model)
+        return result
+
+    return "【系統錯誤】目前 provider 不支援工具呼叫", [], "error"
 
 
 # ---------------------------------------------------------------------------

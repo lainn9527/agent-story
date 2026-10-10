@@ -8,8 +8,6 @@
   <link rel="stylesheet" href="/static/style.css?v={{ v }}">
   <style>
     /* 戰力面板 (power panel) — scoped */
-    .header-power-btn{background:none;border:none;cursor:pointer;font-size:18px;color:#e0b25a;padding:4px 6px}
-    .header-power-btn:hover{filter:brightness(1.3)}
     /* 事件追蹤面板：任務 / 期限 chip (deadline = 事件，併入同一個 UI，無專屬 header widget) */
     #events-panel .quest-badge{background:#1d2a3a;color:#8db8e8;border-color:#2f4a5a}
     #events-panel .deadline-badge{background:#2a2410;color:#e0b25a;border-color:#6b5526}
@@ -255,10 +253,7 @@
           <button type="button" data-len="normal" class="active" onclick="setOutputLength('normal', this)">標準</button>
           <button type="button" data-len="long" onclick="setOutputLength('long', this)">精彩</button>
         </div>
-        <div id="input-area-inner">
-          <textarea id="user-input" placeholder="輸入你的行動…" rows="1"></textarea>
-          <button id="send-btn">&#10148;</button>
-        </div>
+        {% include 'shared/composer.html' %}
         <button id="addon-panel-btn" title="附加功能" aria-haspopup="true" aria-expanded="false">&#x2699;</button>
         <div id="addon-panel" class="addon-panel hidden">
           <div class="addon-section">
@@ -348,38 +343,7 @@
     </div>
   </div>
 
-  <!-- Confirm Modal -->
-  <div id="confirm-modal" class="modal-overlay hidden">
-    <div class="modal-content confirm-modal-box">
-      <p id="confirm-modal-msg"></p>
-      <div class="modal-actions">
-        <button id="confirm-modal-cancel" class="modal-cancel-btn">取消</button>
-        <button id="confirm-modal-ok" class="modal-danger-btn">確定刪除</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Alert Modal -->
-  <div id="alert-modal" class="modal-overlay hidden">
-    <div class="modal-content confirm-modal-box">
-      <p id="alert-modal-msg"></p>
-      <div class="modal-actions">
-        <button id="alert-modal-ok" class="modal-create-btn">確定</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Prompt Modal -->
-  <div id="prompt-modal" class="modal-overlay hidden">
-    <div class="modal-content confirm-modal-box">
-      <p id="prompt-modal-msg"></p>
-      <input type="text" id="prompt-modal-input" class="prompt-modal-input" autocomplete="off">
-      <div class="modal-actions">
-        <button id="prompt-modal-cancel" class="modal-cancel-btn">取消</button>
-        <button id="prompt-modal-ok" class="modal-create-btn">確定</button>
-      </div>
-    </div>
-  </div>
+  {% include 'shared/dialogs.html' %}
 
   <!-- Summary Timeline Modal -->
   <div id="summary-modal" class="modal-overlay hidden">
@@ -772,13 +736,6 @@
     #actions-flash.warn{color:#e98d8d}
     @media (max-width:640px){ #actions-modal .ac-content{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0} #actions-modal .ac-grid{grid-template-columns:1fr} }
     /* 角色狀態 inline chip (嵌進 menu bar；點開 #state-modal) */
-    #state-hud{display:none;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid #2a2f3e;border-radius:6px;padding:4px 12px;color:#e6e8ef;font:inherit;font-size:12px;line-height:1.2;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}
-    #state-hud:hover{background:rgba(255,255,255,.09);border-color:#6b5526}
-    #state-hud.show{display:inline-flex}
-    #state-hud .hud-name{font-weight:700}
-    #state-hud .hud-realm{color:#9ed0f0}
-    #state-hud .hud-sep{color:#3a3f4e}
-    #state-hud .hud-row b{color:#e0b25a}
     #config-panel .config-hint{font-size:10px;color:#8b91a3;font-weight:400;margin-left:4px}
     /* 世界時鐘 第N天 — 常駐在 header，chip 旁的小標 */
     #header #world-day-display{display:inline-flex;align-items:center;background:rgba(224,178,90,.10);border:1px solid #6b5526;border-radius:6px;padding:4px 10px;font-size:12px;line-height:1.2;color:#e0b25a;white-space:nowrap;font-weight:600}
@@ -868,6 +825,7 @@
     </div>
   </div>
 
+  <script src="/static/chat_ui.js?v={{ v }}"></script>
   <script src="/static/app.js?v={{ v }}"></script>
   <script src="/static/power_panel.js?v={{ v }}"></script>
   <script src="/static/shop.js?v={{ v }}"></script>

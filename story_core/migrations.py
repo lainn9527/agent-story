@@ -393,11 +393,16 @@ def _cleanup_incomplete_branches():
 
 
 def _init_dungeon_templates():
-    """Ensure dungeon templates exist for all stories on startup."""
+    """Ensure RPG dungeon templates exist; Card Mode does not use dungeons."""
     if not os.path.exists(story_io.STORIES_DIR):
         return
+    stories = story_io._load_stories_registry().get("stories", {})
     for story_dir_name in os.listdir(story_io.STORIES_DIR):
         story_path = os.path.join(story_io.STORIES_DIR, story_dir_name)
+        if (stories.get(story_dir_name, {}).get("mode") == "card"
+                or os.path.isfile(os.path.join(story_io._story_design_dir(story_dir_name), "card.json"))
+                or os.path.isfile(os.path.join(story_path, "ensemble.json"))):
+            continue
         if os.path.isdir(story_path):
             ensure_dungeon_templates(story_dir_name)
 

@@ -20,8 +20,13 @@ MAX_FORWARD_JUMP_MINUTES = 12 * 60  # 12 hours max jump tolerance
 
 _DATE_RE = re.compile(r"📅\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})")
 _TIME_RE = re.compile(r"⏰\s*(\d{1,2}):(\d{2})")
-_LOC_RE = re.compile(r"📌\s*([^　\n\r🌤️|｜]+)")
-_WEATHER_RE = re.compile(r"🌤️\s*([^\n\r]+)")
+_LOC_RE = re.compile(r"📌\s*([^　\n\r🌤️🌆🌙☀☁🌧|｜]+)")
+_WEATHER_RE = re.compile(r"(?:🌤️|🌆|🌙|☀️?|☁️?|🌧️?)\s*([^\n\r]+)")
+_PLAIN_HEADER_RE = re.compile(
+    r"^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})"
+    r"(?:\s*[（(][^）)\n]*[）)]\s*|\s+)(\d{1,2}):(\d{2})"
+    r"\s*[｜|]\s*([^｜|\n]+)\s*[｜|]\s*([^\n]+?)\s*$"
+)
 
 
 def _clock_path(story_id: str, branch_id: str = "main") -> str:
@@ -38,6 +43,15 @@ def load_clock(story_id: str, branch_id: str = "main") -> dict:
             "elapsed_minutes": 0,
             "last_weather": "陰",
         }
+    # Older saves predate location persistence; recover the latest scene header.
+    if not data.get("last_location"):
+        messages = _load_json(os.path.join(_branch_dir(story_id, branch_id), "messages.json"), [])
+        for message in reversed(messages):
+            if message.get("role") == "gm":
+                parsed = parse_header_time(message.get("content", ""))
+                if parsed and parsed.get("location"):
+                    data["last_location"] = parsed["location"]
+                    break
     return data
 
 
@@ -77,7 +91,7 @@ def parse_header_time(text: str) -> dict | None:
     """Parse header details (date, time, location, weather) from narration text.
 
     Expected format (at beginning of narration):
-      📅 2026/5/16　⏰ 02:32　📌 舊小學一樓女廁　🌤️ 陰，水管低沉的咕嚕聲
+      📅 2026/5/16　⏰ 02:32　📌 舊大學一樓女廁　🌤️ 陰，水管低沉的咕嚕聲
     """
     if not text:
         return None
@@ -86,6 +100,17 @@ def parse_header_time(text: str) -> dict | None:
 
     time_match = _TIME_RE.search(first_lines)
     if not time_match:
+        # Grounding-style headers are also used by narrators. Require a full
+        # date and both scene separators so ordinary prose is not a clock.
+        for line in text.strip().splitlines()[:3]:
+            plain = _PLAIN_HEADER_RE.fullmatch(line)
+            if plain:
+                year, month, day, hour, minute, location, weather = plain.groups()
+                return {
+                    "year": int(year), "month": int(month), "day": int(day),
+                    "hour": int(hour), "minute": int(minute),
+                    "location": location.strip(), "weather": weather.strip(),
+                }
         return None
 
     hour = int(time_match.group(1))
@@ -115,19 +140,18 @@ def parse_header_time(text: str) -> dict | None:
     }
 
 
-def sync_from_narration(story_id: str, branch_id: str = "main", narration: str = "") -> None:
+def sync_from_narration(story_id: str, branch_id: str = "main", narration: str = "") -> bool:
     """Synchronize the in-card clock based on the model's output header.
 
     Rules:
-    - Header time > current time: align to header, tolerating jumps up to +12 hours.
-      Jumps > 12h are treated as hallucinations and ignored (with a warning log).
-    - Header time < current time: accepted only if the narration explicitly mentions
-      a day transition (e.g. 跨日, 次日, 隔天).
-    - Updates `last_weather` if a weather description was parsed.
+    - Explicit full dates are authoritative forward timestamps; undated headers
+      retain the 12-hour guard. Returns True when a valid header owns this turn.
+    - Only undated headers infer a day transition; explicit dates never roll over.
+    - Persists location and weather from accepted headers.
     """
     parsed = parse_header_time(narration)
     if not parsed:
-        return
+        return False
 
     clock_data = load_clock(story_id, branch_id)
     cur_dt = now(story_id, branch_id)
@@ -141,10 +165,11 @@ def sync_from_narration(story_id: str, branch_id: str = "main", narration: str =
         target_dt = datetime(target_year, target_month, target_day, parsed["hour"], parsed["minute"])
     except ValueError:
         log.warning("clock: invalid parsed header datetime: %s", parsed)
-        return
+        return False
 
     # Check for day rollover if hour appears to have rolled back
-    if target_dt < cur_dt:
+    explicit_date = all(parsed[k] is not None for k in ("year", "month", "day"))
+    if target_dt < cur_dt and not explicit_date:
         rollover_cues = ("跨日", "次日", "隔天", "第二天", "明天", "破曉", "清晨")
         if any(cue in narration for cue in rollover_cues):
             target_dt += timedelta(days=1)
@@ -155,7 +180,7 @@ def sync_from_narration(story_id: str, branch_id: str = "main", narration: str =
     weather = parsed.get("weather")
     changed = False
 
-    if 0 < diff_minutes <= MAX_FORWARD_JUMP_MINUTES:
+    if diff_minutes > 0 and (explicit_date or diff_minutes <= MAX_FORWARD_JUMP_MINUTES):
         clock_data["elapsed_minutes"] = int(clock_data.get("elapsed_minutes", 0)) + diff_minutes
         changed = True
         log.info(
@@ -173,9 +198,18 @@ def sync_from_narration(story_id: str, branch_id: str = "main", narration: str =
             target_dt.isoformat(), cur_dt.isoformat()
         )
 
+    if diff_minutes < 0 or (not explicit_date and diff_minutes > MAX_FORWARD_JUMP_MINUTES):
+        return True
+
+    location = parsed.get("location")
+    if location and location != clock_data.get("last_location"):
+        clock_data["last_location"] = location
+        changed = True
+
     if weather and weather != clock_data.get("last_weather"):
         clock_data["last_weather"] = weather
         changed = True
 
     if changed:
         save_clock(story_id, branch_id, clock_data)
+    return True

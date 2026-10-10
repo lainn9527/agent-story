@@ -430,6 +430,7 @@ def api_config_get():
     from story_core.gemini_key_manager import load_keys
 
     gemini_cfg = cfg.get("gemini", {})
+    openrouter_cfg = cfg.get("openrouter") or cfg.get("open_router") or {}
     key_count = len(load_keys(gemini_cfg))
 
     return jsonify(
@@ -445,6 +446,10 @@ def api_config_get():
                 "model": cfg.get("vertex", {}).get("model", "gemini-2.5-flash"),
                 "project": cfg.get("vertex", {}).get("project"),
                 "region": cfg.get("vertex", {}).get("region", "us-central1"),
+            },
+            "openrouter": {
+                "model": openrouter_cfg.get("model", "deepseek/deepseek-v4.1-flash"),
+                "key_configured": bool(str(openrouter_cfg.get("api_key", "")).strip()),
             },
             "claude_cli": {
                 "model": cfg.get("claude_cli", {}).get("model", "claude-sonnet-4-5-20250929"),
@@ -482,6 +487,15 @@ def api_config_set():
         for k in ("model", "project", "region"):
             if k in data["vertex"]:
                 cfg["vertex"][k] = data["vertex"][k]
+
+    if "openrouter" in data and isinstance(data["openrouter"], dict):
+        config_key = "openrouter" if "openrouter" in cfg else (
+            "open_router" if "open_router" in cfg else "openrouter"
+        )
+        if config_key not in cfg:
+            cfg[config_key] = {}
+        if "model" in data["openrouter"]:
+            cfg[config_key]["model"] = data["openrouter"]["model"]
 
     if "claude_cli" in data and isinstance(data["claude_cli"], dict):
         if "claude_cli" not in cfg:

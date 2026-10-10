@@ -245,7 +245,9 @@ def call_claude_gm_stream(
             yield ("error", "Claude 回傳空白回應")
             return
 
-        yield ("done", {"response": accumulated, "session_id": None, "usage": None})
+        done = {"response": accumulated, "session_id": None, "usage": None}
+        if proc.returncode != 0: done["incomplete"] = True
+        yield ("done", done)
 
     except Exception as e:
         log.info("    claude_bridge_stream: EXCEPTION %s", e)
@@ -254,7 +256,7 @@ def call_claude_gm_stream(
         except Exception:
             pass
         if accumulated:
-            yield ("done", {"response": accumulated, "session_id": None, "usage": None})
+            yield ("done", {"response": accumulated, "session_id": None, "usage": None, "incomplete": True})
         else:
             yield ("error", str(e))
 

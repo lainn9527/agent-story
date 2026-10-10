@@ -38,7 +38,8 @@ def _get_client(vertex_cfg: dict):
         client = _clients.get(cache_key)
         if client is None:
             from google import genai
-            client = genai.Client(vertexai=True, project=project, location=region)
+            client = genai.Client(vertexai=True, project=project, location=region,
+                                  http_options={"timeout": 90000, "retry_options": {"attempts": 1}})
             _clients[cache_key] = client
             log.info("    vertex_bridge: created client project=%s location=%s", project, region)
         return client
@@ -253,7 +254,7 @@ def call_vertex_gm_stream(
     except Exception as e:
         log.info("    vertex_bridge_stream: EXCEPTION %s", e)
         if accumulated:
-            yield ("done", {"response": accumulated, "session_id": None})
+            yield ("done", {"response": accumulated, "session_id": None, "incomplete": True})
         else:
             yield ("error", f"Vertex API 串流錯誤：{e}")
         return
@@ -283,17 +284,36 @@ def call_vertex_oneshot(
     vertex_cfg: dict,
     model: str = "gemini-2.5-flash",
     system_prompt: str | None = None,
+    *, response_schema: dict | None = None,
 ) -> str:
     """Simple one-shot Vertex call. Returns response text or empty string."""
     _tls.last_usage = None
     try:
         client = _get_client(vertex_cfg)
+        config = _build_config(system_prompt, temperature=0.8)
+        if response_schema is not None:
+            from google.genai import types
+            config.response_mime_type = "application/json"
+            config.response_json_schema = response_schema
+            config.tool_config = types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode="NONE"))
         resp = client.models.generate_content(
             model=model, contents=prompt,
-            config=_build_config(system_prompt, temperature=0.8),
+            config=config,
         )
     except Exception as e:
         log.info("    vertex_oneshot: %s", e)
+        if response_schema is not None:
+            log.warning("vertex_oneshot structured request failed: %s", type(e).__name__)
+            if getattr(e, "code", None) in (429, 500, 502, 503, 504) or isinstance(e, (TimeoutError, ConnectionError)):
+                from story_core.llm_errors import TransientStructuredError
+                raise TransientStructuredError(f"Vertex structured request temporarily unavailable: {getattr(e, 'code', type(e).__name__)}") from e
+            raise ValueError(f"Vertex structured request failed: {type(e).__name__}") from e
         return ""
     _tls.last_usage = _usage_from(resp)
-    return (resp.text or "").strip()
+    text = (resp.text or "").strip()
+    if response_schema is not None and (not text or _finish_reason(resp) != "STOP"):
+        reason = _finish_reason(resp) or "EMPTY_RESPONSE"
+        log.warning("vertex_oneshot structured response failed: finish_reason=%s", reason)
+        raise ValueError(f"Vertex structured response failed: {reason}")
+    return text

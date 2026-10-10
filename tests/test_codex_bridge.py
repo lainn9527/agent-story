@@ -19,6 +19,7 @@ def test_build_gm_workspace_sanitizes_full_timeline(monkeypatch):
                 "role": "gm",
                 "index": 1,
                 "content": "前文敘事\n\n**你打算：**\n1. 繼續前進\n2. 先撤退",
+                "persistent_instruction": "已經關閉的舊語氣，不要沿用",
             },
             {"role": "user", "index": 2, "content": "還記得嗎"},
         ],
@@ -70,12 +71,15 @@ def test_build_gm_workspace_sanitizes_full_timeline(monkeypatch):
         branch_id="branch_x",
         user_message="玩家新行動",
         system_prompt="system prompt",
-        recent_messages=[{"role": "user", "content": "recent"}],
+        recent_messages=[{"role": "gm", "content": "recent", "persistent_instruction":"舊指示"}],
     )
     try:
         payload = json.loads((Path(workspace) / "FULL_TIMELINE.json").read_text(encoding="utf-8"))
         assert payload[0]["content"] == "前文敘事"
         assert "你打算" not in payload[0]["content"]
+        assert 'persistent_instruction' not in payload[0]
+        recent=json.loads((Path(workspace)/'RECENT_MESSAGES.json').read_text())
+        assert recent == [{'role':'gm','content':'recent'}]
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
 

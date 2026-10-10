@@ -36,14 +36,15 @@ except ImportError:
 def _build_contents(recent_messages: list[dict], user_message: str) -> list[dict]:
     """Convert app messages to Gemini conversation format.
 
-    recent_messages typically ends with the current user message (raw).
-    user_message is the augmented version (with lore/events prepended).
-    We use recent[:-1] as history and user_message as the new turn.
+    Legacy callers include the current raw user message at the end; replace
+    that with user_message (which may be augmented). Card Mode passes completed
+    history ending in a GM reply instead, so that reply must be retained.
     """
     contents: list[dict] = []
 
-    # History = everything except the last message (which is the raw user msg)
-    history = recent_messages[:-1] if recent_messages else []
+    history = recent_messages
+    if history and history[-1].get("role") == "user":
+        history = history[:-1]
 
     for msg in history:
         role = "model" if msg.get("role") in ("gm", "assistant") else "user"
@@ -515,7 +516,7 @@ def call_gemini_gm_stream(
         except Exception:
             pass
         if accumulated:
-            yield ("done", {"response": accumulated, "session_id": None})
+            yield ("done", {"response": accumulated, "session_id": None, "incomplete": True})
         else:
             yield ("error", f"Gemini API 串流逾時（{GEMINI_READ_TIMEOUT}s 無回應）")
     except Exception as e:
@@ -525,7 +526,7 @@ def call_gemini_gm_stream(
         except Exception:
             pass
         if accumulated:
-            yield ("done", {"response": accumulated, "session_id": None})
+            yield ("done", {"response": accumulated, "session_id": None, "incomplete": True})
         else:
             yield ("error", f"Gemini API 串流錯誤：{e}")
 
@@ -579,10 +580,15 @@ def call_gemini_oneshot(
     gemini_cfg: dict,
     model: str = "gemini-2.0-flash",
     system_prompt: str | None = None,
+    *, response_schema: dict | None = None,
 ) -> str:
     """Simple one-shot Gemini call. Returns response text or empty string."""
     contents = [{"role": "user", "parts": [{"text": prompt}]}]
     body = _make_request_body(system_prompt or "", contents, temperature=0.8)
+    if response_schema is not None:
+        body["generationConfig"]["responseMimeType"] = "application/json"
+        body["generationConfig"]["responseJsonSchema"] = response_schema
+        body["toolConfig"] = {"functionCallingConfig": {"mode": "NONE"}}
     payload = json.dumps(body).encode("utf-8")
 
     def _do(api_key):
@@ -601,8 +607,17 @@ def call_gemini_oneshot(
     _tls.last_usage = None
     if err:
         log.info("    gemini_oneshot: %s", err)
+        if response_schema is not None:
+            raise ValueError("Gemini structured request failed")
         return ""
 
     _tls.last_usage = _extract_usage(result)
-    return _extract_text(result).strip()
-
+    text = _extract_text(result).strip()
+    if response_schema is not None:
+        candidates = result.get("candidates") or []
+        reason = candidates[0].get("finishReason", "") if candidates else ""
+        if not text or reason != "STOP":
+            reason = reason or "EMPTY_RESPONSE"
+            log.warning("gemini_oneshot structured response failed: finish_reason=%s", reason)
+            raise ValueError(f"Gemini structured response failed: {reason}")
+    return text

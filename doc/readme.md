@@ -8,7 +8,7 @@
 - 角色狀態追蹤（含 inventory/systems/relationships）
 - 世界觀知識庫（lore）與事件追蹤（events）
 - 命運骰、GM cheats、存檔、副本進度系統
-- 多 LLM provider（Gemini / Claude CLI / Codex Agent）與串流回應
+- 多 LLM provider（Gemini / Vertex / OpenRouter / Claude CLI / Codex Agent）與串流回應
 
 目前主要的 Python 內部模組已整理到 `story_core/`；entrypoints 仍維持在 repo root（例如 `app.py`、`auto_play.py`）。
 
@@ -31,6 +31,11 @@ pip install -r requirements.txt
     "api_keys": [{"key": "YOUR_KEY", "tier": "free"}],
     "model": "gemini-3-flash-preview"
   },
+  "openrouter": {
+    "api_key": "YOUR_OPENROUTER_KEY",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "reasoning": false
+  },
   "claude_cli": {
     "model": "claude-opus-4-6"
   },
@@ -41,6 +46,7 @@ pip install -r requirements.txt
 ```
 
 說明：
+- `openrouter` 走 OpenRouter Chat Completions API；預設關閉 reasoning，並記錄 API 回傳的 token 與美元成本。舊的 `open_router` 設定名稱也相容。
 - `codex_agent` 是 read-only GM provider。後端會為每回合建立臨時工作區，只暴露當前 branch 與 lore 相關檔案給 Codex 讀取，不會讓它直接改 runtime data。
 - UI 仍維持同一套 `/api/send*` / parser / state pipeline；Codex 只是新的可選 provider，不會替換既有 Gemini / Claude 路徑。
 
@@ -75,7 +81,8 @@ pytest -m "not slow"
 
 ## 既有文件
 
-- `doc/card_mode_proposal.md`: **角色卡模式（Card Mode）實作規格** — 提案待實作；單角色一對一形態、獨立介面、只留關係/記憶/時間/隨身物
+- 單女角 Galgame：`story_design/linwan_galgame/card.json`（林晚・雨巷書店），入口 `/card/linwan_galgame`；慢速好感與越界扣分規則見 `doc/game_mechanics.md` 的「單女角 Galgame」。
+- `doc/card_mode_proposal.md`: **角色卡模式（Card Mode）實作規格** — 已實作；單角色一對一形態、獨立入口與共用 UI、只留關係/記憶/時間/隨身物
 - `doc/world_authoring.md`: **新增一個世界（story）** — 檔案清單、引擎咬住的欄位（貨幣/身分/階段/`phases`）、catalog、無副本世界的設定；開新世界前先讀這份
 - `doc/testing_plan.md`: 測試策略與覆蓋現況
 - `doc/wsl2_setup.md`: WSL2 部署與 systemd 啟動

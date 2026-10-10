@@ -41,6 +41,17 @@ body {
   flex-direction: column;
 }
 
+/* Shared header controls, formerly inline in the world template. */
+.header-power-btn{background:none;border:none;cursor:pointer;font-size:18px;color:#e0b25a;padding:4px 6px}
+.header-power-btn:hover{filter:brightness(1.3)}
+#state-hud{display:none;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid #2a2f3e;border-radius:6px;padding:4px 12px;color:#e6e8ef;font:inherit;font-size:12px;line-height:1.2;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}
+#state-hud:hover{background:rgba(255,255,255,.09);border-color:#6b5526}
+#state-hud.show{display:inline-flex}
+#state-hud .hud-name{font-weight:700}
+#state-hud .hud-realm{color:#9ed0f0}
+#state-hud .hud-sep{color:#3a3f4e}
+#state-hud .hud-row b{color:#e0b25a}
+
 /* ---------- Header ---------- */
 #header {
   display: flex;
@@ -118,6 +129,7 @@ body {
 }
 
 .header-lore-link {
+  color: var(--text);
   text-decoration: none;
   font-size: 1.2rem;
   padding: 4px 8px;

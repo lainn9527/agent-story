@@ -132,6 +132,9 @@ def _log_llm_usage(story_id: str, call_type: str, elapsed_s: float, branch_id: s
             prompt_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("output_tokens"),
             total_tokens=usage.get("total_tokens"),
+            cached_tokens=usage.get("cached_tokens"),
+            reasoning_tokens=usage.get("reasoning_tokens"),
+            cost_usd=usage.get("cost_usd"),
             branch_id=branch_id,
             elapsed_ms=int(elapsed_s * 1000) if elapsed_s else None,
         )

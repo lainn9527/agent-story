@@ -323,3 +323,91 @@ class TestConstants:
 
     def test_meta_compact_target(self):
         assert compaction.RECAP_META_COMPACT_TARGET == 3000
+
+
+@pytest.mark.parametrize("card_mode", [False, True])
+def test_compaction_templates_apply_to_initial_and_meta_pass(monkeypatch, setup_branch, story_id, card_mode):
+    from story_core.card_mode.recap import COMPACT_PROMPT, META_COMPACT_PROMPT
+    setup_branch()
+    prompts = []
+    def respond(prompt):
+        prompts.append(prompt)
+        return '長' * 9000 if len(prompts) == 1 else '玩家修好窗戶，工具已放在桌上。'
+    monkeypatch.setattr('story_core.llm_bridge.call_oneshot', respond)
+    monkeypatch.setattr('story_core.usage_db.log_from_bridge', lambda *a, **k: None)
+    monkeypatch.setattr(compaction, 'get_character_name', lambda *a: '玩家')
+    kwargs = dict(prompt_template=COMPACT_PROMPT, meta_prompt_template=META_COMPACT_PROMPT) if card_mode else {}
+    compaction._run_compaction(story_id, 'main', _make_timeline(22), **kwargs)
+    assert len(prompts) == 2
+    if card_mode:
+        assert all('事實記錄員' in p for p in prompts)
+    else:
+        assert all('故事摘要助手' in p for p in prompts)
+    result = compaction.load_recap(story_id, 'main')
+    assert result['recap_text'] == '玩家修好窗戶，工具已放在桌上。'
+    assert result['compacted_through_index'] == 11
+
+
+def test_background_compaction_forwards_templates(monkeypatch):
+    captured = {}
+    class ImmediateThread:
+        def __init__(self, target, **kwargs): self.target = target
+        def start(self): self.target()
+    monkeypatch.setattr(compaction.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(compaction, '_run_compaction', lambda *a, **k: captured.update(k))
+    compaction.compact_async('test', 'main', [], prompt_template='facts', meta_prompt_template='short facts')
+    assert captured == dict(prompt_template='facts', meta_prompt_template='short facts', expected_revision=None)
+
+
+def test_invalidation_during_llm_discards_stale_result(monkeypatch):
+    def generate(prompt):
+        compaction.invalidate_recap("test_story", "main")
+        return "Party from discarded future"
+    monkeypatch.setattr("story_core.llm_bridge.call_oneshot", generate)
+    monkeypatch.setattr("story_core.usage_db.log_from_bridge", lambda *a, **k: None)
+    monkeypatch.setattr(compaction, "get_character_name", lambda *a: "Player")
+    compaction._run_compaction("test_story", "main", _make_timeline(22))
+    recap = compaction.load_recap("test_story", "main")
+    assert recap["recap_text"] == ""
+    assert recap["compacted_through_index"] == -1
+    assert recap["revision"]
+
+
+def test_queued_compaction_cannot_start_after_invalidation(monkeypatch):
+    compaction.invalidate_recap("test_story", "main")
+    def unexpected(*a, **k):
+        pytest.fail("Discarded work should not call the LLM")
+    monkeypatch.setattr("story_core.llm_bridge.call_oneshot", unexpected)
+    compaction._run_compaction("test_story", "main", _make_timeline(22), expected_revision=None)
+    assert compaction.load_recap("test_story", "main")["recap_text"] == ""
+
+
+@pytest.mark.parametrize('retained,preserved', [(12, True), (11, True), (10, False), (0, False), (None, False)])
+def test_invalidation_preserves_only_fully_retained_prefix(retained, preserved):
+    before = dict(recap_text='past agreement', compacted_through_index=10,
+                  total_turns_compacted=5, recap_version=2, revision='old')
+    compaction.save_recap('test', 'main', before)
+    compaction.invalidate_recap('test', 'main', retained_message_count=retained)
+    after = compaction.load_recap('test', 'main')
+    assert after['revision'] != 'old'
+    if preserved:
+        assert {k: v for k, v in after.items() if k != 'revision'} == {k: v for k, v in before.items() if k != 'revision'}
+    else:
+        assert after['recap_text'] == ''
+        assert after['compacted_through_index'] == -1
+
+
+def test_preserved_recap_rejects_old_background_commit(monkeypatch):
+    before = dict(recap_text='retained agreement', compacted_through_index=0, revision='old')
+    compaction.save_recap('test', 'main', before)
+    def generate(prompt):
+        compaction.invalidate_recap('test', 'main', retained_message_count=20)
+        return 'Includes removed future'
+    monkeypatch.setattr('story_core.llm_bridge.call_oneshot', generate)
+    monkeypatch.setattr('story_core.usage_db.log_from_bridge', lambda *a, **k: None)
+    monkeypatch.setattr(compaction, 'get_character_name', lambda *a: 'Player')
+    compaction._run_compaction('test', 'main', _make_timeline(32))
+    after = compaction.load_recap('test', 'main')
+    assert after['recap_text'] == 'retained agreement'
+    assert after['compacted_through_index'] == 0
+    assert after['revision'] != 'old'

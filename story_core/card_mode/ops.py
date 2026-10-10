@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 from story_core.card_mode import clock
 from story_core.gm_v2 import relationship as _rel
@@ -24,7 +25,7 @@ MAX_TIME_ADVANCE_MINUTES = 720  # 12 hours
 
 def card_tool_declarations() -> list[dict]:
     """Gemini tool declarations for the 4 card mode tools."""
-    return [
+    declarations = [
         {
             "name": "set_relationship",
             "description": "更新角色對玩家的關係階梯與現況備註。tier 必須在關係階梯中，單回合至多提升 1 階。",
@@ -88,6 +89,11 @@ def card_tool_declarations() -> list[dict]:
             },
         },
     ]
+
+    add = {"name": "add_inventory", "description": "僅新增本輪確實取得、清單中尚無的物品。名稱必須用中文，不得翻譯或改名重建既有物品。",
+           "parameters": declarations[-1]["parameters"]}
+    declarations[-1]["description"] = "僅更新或移除現有隨身物；items 的鍵必須逐字使用當前清單名稱。空字串表示移除。新取得物品請用 add_inventory。"
+    return declarations + [add]
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +192,9 @@ def gate_inventory(raw_items: object) -> tuple[dict[str, str], list[str]]:
             continue
 
         val_str = str(v).strip() if v is not None else ""
+        # Some recorders emit literal quote pairs instead of the requested empty string.
+        if val_str in ("''", '""'):
+            val_str = ""
         clean[item_name] = val_str
 
     return clean, dropped
@@ -195,15 +204,9 @@ def gate_inventory(raw_items: object) -> tuple[dict[str, str], list[str]]:
 # Tool Executor
 # ---------------------------------------------------------------------------
 
-def execute_card_tool(story_id: str, branch_id: str, tool_name: str, args: dict) -> dict:
-    """Execute a single card tool call deterministically with state persistence."""
-    npcs_path = _story_npcs_path(story_id, branch_id)
-    npcs = _load_json(npcs_path, [])
-    card_npc = npcs[0] if npcs else {"name": story_id, "memory": [], "relationship": {}}
-
-    state_path = _story_character_state_path(story_id, branch_id)
-    state = _load_json(state_path, {"inventory": {}})
-
+def apply_card_tool(state: dict, npcs: list, clock_data: dict, tool_name: str, args: dict) -> dict:
+    """Apply to a private candidate; callers decide whether it is still current."""
+    card_npc = npcs[0] if npcs else {"memory": [], "relationship": {}}
     if tool_name == "set_relationship":
         cur_tier = card_npc.get("relationship", {}).get("tier", "陌生")
         clean_rel, err = gate_relationship(args.get("tier"), args.get("note", ""), cur_tier)
@@ -212,17 +215,14 @@ def execute_card_tool(story_id: str, branch_id: str, tool_name: str, args: dict)
 
         card_npc["relationship"] = clean_rel
         state["relationship_note"] = clean_rel["note"]
-        _save_json(npcs_path, npcs)
-        _save_json(state_path, state)
-        log.info("execute_card_tool: set_relationship for %s to %s", story_id, clean_rel)
+        log.info("execute_card_tool: set_relationship for %s to %s", card_npc.get("name"), clean_rel)
         return {"ok": True, "applied": clean_rel}
 
     elif tool_name == "remember":
         clean_facts, dropped = gate_remember(args.get("facts"), card_npc.get("memory", []))
         if clean_facts:
             card_npc.setdefault("memory", []).extend(clean_facts)
-            _save_json(npcs_path, npcs)
-            log.info("execute_card_tool: remembered %d facts for %s", len(clean_facts), story_id)
+            log.info("execute_card_tool: remembered %d facts for %s", len(clean_facts), card_npc.get("name"))
         return {"ok": True, "applied": clean_facts, "dropped": dropped}
 
     elif tool_name == "advance_time":
@@ -230,20 +230,44 @@ def execute_card_tool(story_id: str, branch_id: str, tool_name: str, args: dict)
         if err or minutes is None:
             return {"ok": False, "error": err or "validation failed"}
 
-        clock.advance(story_id, branch_id, minutes)
+        clock_data["elapsed_minutes"] = int(clock_data.get("elapsed_minutes", 0)) + minutes
         return {"ok": True, "applied": {"minutes": minutes}}
 
-    elif tool_name == "set_inventory":
+    elif tool_name in ("set_inventory", "add_inventory"):
         raw_items = args.get("items") if isinstance(args.get("items"), dict) else args
         clean_inv, dropped = gate_inventory(raw_items)
         current_inv = state.setdefault("inventory", {})
+        invalid = [name for name, status in clean_inv.items()
+                   if (tool_name == "set_inventory" and name not in current_inv)
+                   or (tool_name == "add_inventory" and
+                       (name in current_inv or not re.search(r"[\u3400-\u9fff]", name) or not status))]
+        if invalid or dropped:
+            return {"ok": False, "error": "整批未寫入。更新必須用現有物品名稱；新增必須用中文名稱且不可重複。",
+                    "invalid_names": invalid, "dropped": dropped, "existing_names": list(current_inv)}
         for name, status in clean_inv.items():
             if status == "":
                 current_inv.pop(name, None)
             else:
                 current_inv[name] = status
-        _save_json(state_path, state)
-        log.info("execute_card_tool: set_inventory for %s: %s", story_id, clean_inv)
+        log.info("execute_card_tool: set_inventory for %s: %s", card_npc.get("name"), clean_inv)
         return {"ok": True, "applied": clean_inv, "dropped": dropped}
 
     return {"ok": False, "error": f"Unknown tool: {tool_name}"}
+
+
+def execute_card_tool(story_id: str, branch_id: str, tool_name: str, args: dict) -> dict:
+    """Synchronous compatibility executor; model recording uses private candidates."""
+    npcs_path = _story_npcs_path(story_id, branch_id)
+    state_path = _story_character_state_path(story_id, branch_id)
+    npcs = _load_json(npcs_path, [])
+    state = _load_json(state_path, {"inventory": {}})
+    clock_data = clock.load_clock(story_id, branch_id)
+    result = apply_card_tool(state, npcs, clock_data, tool_name, args)
+    if result.get('ok'):
+        if tool_name in ('remember', 'set_relationship'):
+            _save_json(npcs_path, npcs)
+        if tool_name in ('set_inventory', 'add_inventory', 'set_relationship'):
+            _save_json(state_path, state)
+        if tool_name == 'advance_time':
+            clock.save_clock(story_id, branch_id, clock_data)
+    return result

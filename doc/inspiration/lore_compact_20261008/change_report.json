@@ -1,0 +1,25 @@
+{
+  "slug": "xianmen_last_night",
+  "branch": "main",
+  "curated_through_index": 540,
+  "before_entries": 24,
+  "after_entries": 14,
+  "before_body_chars": 3545,
+  "after_body_chars": 1102,
+  "reduction_percent": 68.9,
+  "removed_ids": [
+    "baicaoyuan",
+    "cluster",
+    "events",
+    "magic_case",
+    "mounts",
+    "spirit_transfer",
+    "sword_array",
+    "tasks",
+    "zhao_training",
+    "zhao_wuji"
+  ],
+  "sources_verified": true,
+  "applied": true,
+  "backup": "/Users/eddylai/self/story/doc/inspiration/lore_compact_20261008/before_lore.json"
+}

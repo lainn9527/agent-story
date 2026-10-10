@@ -2,118 +2,6 @@
    主神空間 RPG — Frontend Logic (multi-story + drawer UI)
    ============================================================ */
 
-/** Light haptic tap — silent no-op on unsupported browsers. */
-function haptic(ms = 10) {
-  if (navigator.vibrate) navigator.vibrate(ms);
-}
-
-function showToast(msg, duration = 2000) {
-  const el = document.createElement("div");
-  el.className = "toast-msg";
-  el.textContent = msg;
-  document.body.appendChild(el);
-  requestAnimationFrame(() => el.classList.add("show"));
-  setTimeout(() => {
-    el.classList.remove("show");
-    setTimeout(() => el.remove(), 300);
-  }, duration);
-}
-
-function showConfirm(msg) {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById("confirm-modal");
-    const msgEl = document.getElementById("confirm-modal-msg");
-    const okBtn = document.getElementById("confirm-modal-ok");
-    const cancelBtn = document.getElementById("confirm-modal-cancel");
-    msgEl.textContent = msg;
-    overlay.classList.remove("hidden");
-
-    function cleanup(result) {
-      overlay.classList.add("hidden");
-      okBtn.removeEventListener("click", onOk);
-      cancelBtn.removeEventListener("click", onCancel);
-      overlay.removeEventListener("click", onOverlay);
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    }
-    function onOk() { haptic(); cleanup(true); }
-    function onCancel() { haptic(); cleanup(false); }
-    function onOverlay(e) { if (e.target === overlay) cleanup(false); }
-    function onKey(e) {
-      if (e.key === "Enter") { e.preventDefault(); cleanup(true); }
-      if (e.key === "Escape") { e.preventDefault(); cleanup(false); }
-    }
-
-    okBtn.addEventListener("click", onOk);
-    cancelBtn.addEventListener("click", onCancel);
-    overlay.addEventListener("click", onOverlay);
-    document.addEventListener("keydown", onKey);
-  });
-}
-
-function showAlert(msg) {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById("alert-modal");
-    const msgEl = document.getElementById("alert-modal-msg");
-    const okBtn = document.getElementById("alert-modal-ok");
-    msgEl.textContent = msg;
-    overlay.classList.remove("hidden");
-
-    function cleanup() {
-      overlay.classList.add("hidden");
-      okBtn.removeEventListener("click", onOk);
-      overlay.removeEventListener("click", onOverlay);
-      document.removeEventListener("keydown", onKey);
-      resolve();
-    }
-    function onOk() { haptic(); cleanup(); }
-    function onOverlay(e) { if (e.target === overlay) cleanup(); }
-    function onKey(e) {
-      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); cleanup(); }
-    }
-
-    okBtn.addEventListener("click", onOk);
-    overlay.addEventListener("click", onOverlay);
-    document.addEventListener("keydown", onKey);
-  });
-}
-
-function showPrompt(msg, defaultValue = "") {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById("prompt-modal");
-    const msgEl = document.getElementById("prompt-modal-msg");
-    const input = document.getElementById("prompt-modal-input");
-    const okBtn = document.getElementById("prompt-modal-ok");
-    const cancelBtn = document.getElementById("prompt-modal-cancel");
-    msgEl.textContent = msg;
-    input.value = defaultValue;
-    overlay.classList.remove("hidden");
-    input.focus();
-    input.select();
-
-    function cleanup(result) {
-      overlay.classList.add("hidden");
-      okBtn.removeEventListener("click", onOk);
-      cancelBtn.removeEventListener("click", onCancel);
-      overlay.removeEventListener("click", onOverlay);
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    }
-    function onOk() { haptic(); cleanup(input.value); }
-    function onCancel() { haptic(); cleanup(null); }
-    function onOverlay(e) { if (e.target === overlay) cleanup(null); }
-    function onKey(e) {
-      if (e.key === "Enter") { e.preventDefault(); cleanup(input.value); }
-      if (e.key === "Escape") { e.preventDefault(); cleanup(null); }
-    }
-
-    okBtn.addEventListener("click", onOk);
-    cancelBtn.addEventListener("click", onCancel);
-    overlay.addEventListener("click", onOverlay);
-    document.addEventListener("keydown", onKey);
-  });
-}
-
 const API = {
   init: () => fetch("/api/init", { method: "POST" }).then(r => r.json()),
 
@@ -349,55 +237,6 @@ const API = {
 // ---------------------------------------------------------------------------
 // SSE Streaming helper
 // ---------------------------------------------------------------------------
-async function streamFromSSE(url, body, onChunk, onDone, onError, signal) {
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: signal,
-  });
-  if (!resp.ok) {
-    onError("HTTP " + resp.status);
-    return;
-  }
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finished = false;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop();  // keep incomplete line in buffer
-
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const data = JSON.parse(line.slice(6));
-        if (data.type === "text") {
-          onChunk(data.chunk);
-        } else if (data.type === "done") {
-          finished = true;
-          onDone(data);
-        } else if (data.type === "error") {
-          finished = true;
-          onError(data.message);
-        }
-      } catch (e) {
-        // skip malformed lines
-      }
-    }
-  }
-
-  // Guard: stream ended without "done" or "error" event
-  if (!finished) {
-    onError("連線中斷");
-  }
-}
-
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -733,8 +572,7 @@ const $storyModal = document.getElementById("new-story-modal");
 // Drawer open/close
 // ---------------------------------------------------------------------------
 function openDrawer() {
-  $drawer.classList.remove("closed");
-  $drawerOverlay.classList.remove("hidden");
+  setChatDrawerOpen(true);
   renderStoryList();
   renderBranchList();
   loadNpcs();           // keeps knownNpcNames fresh (NPC view itself is now ⚔ 戰力面板)
@@ -745,8 +583,7 @@ function openDrawer() {
 }
 
 function closeDrawer() {
-  $drawer.classList.add("closed");
-  $drawerOverlay.classList.add("hidden");
+  setChatDrawerOpen(false);
 }
 
 $drawerToggleBtn.addEventListener("click", openDrawer);
@@ -2277,32 +2114,11 @@ function renderMessages(messages) {
       continue;
     }
 
-    const el = document.createElement("div");
-    el.className = `message ${msg.role}`;
+    const { el, roleTag, indexLabel, content } = createChatMessage(msg);
     if (msg.inherited) el.classList.add("inherited");
-    el.dataset.index = msg.index;
-    // Mobile tap-to-reveal index/report button
-    el.addEventListener("touchstart", () => {
-      document.querySelectorAll(".message.touched").forEach(m => m.classList.remove("touched"));
-      el.classList.add("touched");
-    }, { passive: true });
-
     const sibKey = String(msg.index);
     const hasSwitcher = siblingGroups[sibKey] && siblingGroups[sibKey].total >= 2;
     if (hasSwitcher) el.classList.add("has-switcher");
-
-    const roleTag = document.createElement("div");
-    roleTag.className = "role-tag";
-    roleTag.textContent = msg.role === "user" ? "玩家" : "GM";
-
-    // Message index label for bug reporting (#5)
-    const indexLabel = document.createElement("span");
-    indexLabel.className = "msg-index";
-    indexLabel.textContent = `#${msg.index}`;
-
-    const content = document.createElement("div");
-    content.className = "content";
-    content.innerHTML = markdownToHtml(msg.content);
 
     // Make GM numbered options clickable (#8)
     if (msg.role === "gm") {
@@ -2520,23 +2336,7 @@ function renderMessages(messages) {
 // ---------------------------------------------------------------------------
 // Strip hidden GM tags (client-side, mirrors backend _process_gm_response)
 // ---------------------------------------------------------------------------
-function stripHiddenTags(text) {
-  text = text.replace(/<!--STATE\s*[\s\S]*?STATE-->/g, "");
-  text = text.replace(/<!--LORE\s*[\s\S]*?LORE-->/g, "");
-  text = text.replace(/<!--NPC\s*[\s\S]*?NPC-->/g, "");
-  text = text.replace(/<!--EVENT\s*[\s\S]*?EVENT-->/g, "");
-  text = text.replace(/<!--IMG\s*[\s\S]*?IMG-->/g, "");
-  text = text.replace(/<!--ACTIONS\s*-->/g, "");
-  // Truncate any unclosed tag at the end (partial tag still streaming)
-  const partialTagIdx = text.lastIndexOf("<!--");
-  if (partialTagIdx !== -1) {
-    const afterTag = text.slice(partialTagIdx);
-    if (!afterTag.includes("-->")) {
-      text = text.slice(0, partialTagIdx);
-    }
-  }
-  return text.trim();
-}
+
 
 // ---------------------------------------------------------------------------
 // Markdown → HTML (basic)
@@ -2679,44 +2479,6 @@ function showReportModal(msg) {
       submitBtn.textContent = "送出";
     }
   });
-}
-
-function markdownToHtml(text) {
-  if (!text) return "";
-  text = stripHiddenTags(text);
-  let html = escapeHtml(text);
-
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  html = html.replace(/^#### (.+)$/gm, "<h4>$1</h4>");
-  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-  html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-  html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-  html = html.replace(/【(.+?)】/g, '<span class="god-hint">【$1】</span>');
-  html = html.replace(/^---$/gm, '<hr class="scene-break">');
-  html = html.replace(/（(.+?)）/g, '<span class="aside">（$1）</span>');
-  html = html.replace(/^[•·\-]\s+(.+)$/gm, "<li>$1</li>");
-  html = html.replace(/<\/li>\n+<li>/g, "</li>\n<li>");
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
-  html = html.replace(/^\d+[.、]\s*(.+)$/gm, "<li>$1</li>");
-  html = html.replace(/<\/li>\n+<li>/g, "</li>\n<li>");
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ol>$1</ol>");
-  html = html.replace(/\n{2,}/g, "</p><p>");
-  html = html.replace(/\n/g, "<br>");
-  html = "<p>" + html + "</p>";
-  html = html.replace(/<p>\s*<\/p>/g, "");
-  html = html.replace(/(<\/h[1234]>)(<br>|<\/p><p>)/g, "$1");
-  html = html.replace(/(<\/[uo]l>)(<br>|<\/p><p>)/g, "$1");
-  html = html.replace(/(<[uo]l>)(<br>|<\/p><p>)/g, "$1");
-  html = html.replace(/(<hr class="scene-break">)(<br>|<\/p><p>)/g, "$1");
-
-  return html;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 // ---------------------------------------------------------------------------
@@ -3478,23 +3240,12 @@ document.getElementById("dungeon-exit-btn").addEventListener("click", async () =
 // Config Panel (provider / model switcher)
 // ---------------------------------------------------------------------------
 
-const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
-const VERTEX_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"];
-const CLAUDE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
-const CODEX_MODELS = ["gpt-5.4", "gpt-5.4-mini"];
 const GEMINI_IMAGE_MODELS = [
   "imagen-4.0-ultra-generate-001",
   "gemini-3.1-flash-image-preview",
   "gemini-2.5-flash-image",
 ];
 let serverDefaultImageModel = "";
-const PROVIDER_LABELS = { gemini: "Gemini", vertex: "Vertex", claude_cli: "Claude", codex_agent: "Codex" };
-const PROVIDER_MODELS = {
-  gemini: GEMINI_MODELS,
-  vertex: VERTEX_MODELS,
-  claude_cli: CLAUDE_MODELS,
-  codex_agent: CODEX_MODELS,
-};
 
 function getModelsForProvider(provider) {
   return PROVIDER_MODELS[provider] || CLAUDE_MODELS;
@@ -3503,6 +3254,7 @@ function getModelsForProvider(provider) {
 function getCurrentProviderModel(cfg, provider) {
   if (provider === "gemini") return cfg.gemini?.model;
   if (provider === "vertex") return cfg.vertex?.model;
+  if (provider === "openrouter") return cfg.openrouter?.model;
   if (provider === "codex_agent") return cfg.codex_agent?.model;
   return cfg.claude_cli?.model;
 }
@@ -3574,6 +3326,7 @@ async function loadConfigPanel() {
       const update = { provider: newProv };
       if (newProv === "gemini") update.gemini = { model: models[0] };
       else if (newProv === "vertex") update.vertex = { model: models[0] };
+      else if (newProv === "openrouter") update.openrouter = { model: models[0] };
       else if (newProv === "codex_agent") update.codex_agent = { model: models[0] };
       else update.claude_cli = { model: models[0] };
       await API.setConfig(update);
@@ -3585,6 +3338,7 @@ async function loadConfigPanel() {
       const update = {};
       if (prov === "gemini") update.gemini = { model: modelSel.value };
       else if (prov === "vertex") update.vertex = { model: modelSel.value };
+      else if (prov === "openrouter") update.openrouter = { model: modelSel.value };
       else if (prov === "codex_agent") update.codex_agent = { model: modelSel.value };
       else update.claude_cli = { model: modelSel.value };
       await API.setConfig(update);
@@ -3957,26 +3711,14 @@ async function loadAddonPanelState() {
     if (cfg.ok) {
       const sel = document.getElementById("addon-model-combined");
       if (sel) {
-        sel.innerHTML = "";
-        const currentModel = getCurrentProviderModel(cfg, cfg.provider);
-        for (const [prov, models] of Object.entries(PROVIDER_MODELS)) {
-          const group = document.createElement("optgroup");
-          group.label = PROVIDER_LABELS[prov] || prov;
-          for (const m of models) {
-            const opt = document.createElement("option");
-            opt.value = prov + "|" + m;
-            opt.textContent = m;
-            if (prov === cfg.provider && m === currentModel) opt.selected = true;
-            group.appendChild(opt);
-          }
-          sel.appendChild(group);
-        }
+        populateChatModels(sel, cfg);
 
         sel.onchange = async () => {
           const [newProv, newModel] = sel.value.split("|");
           const update = { provider: newProv };
           if (newProv === "gemini") update.gemini = { model: newModel };
           else if (newProv === "vertex") update.vertex = { model: newModel };
+          else if (newProv === "openrouter") update.openrouter = { model: newModel };
           else if (newProv === "codex_agent") update.codex_agent = { model: newModel };
           else update.claude_cli = { model: newModel };
           await API.setConfig(update);
@@ -5079,21 +4821,6 @@ async function createNewStory() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function scrollToBottom() {
-  const container = document.getElementById("messages");
-  requestAnimationFrame(() => {
-    container.scrollTop = container.scrollHeight;
-  });
-}
-
-function smartScrollToBottom() {
-  const container = document.getElementById("messages");
-  // If user is within 100px of bottom, auto-scroll. Otherwise, stay where they are.
-  const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-  if (isNearBottom) {
-    scrollToBottom();
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Init overlay
@@ -5118,19 +4845,7 @@ function removeInitOverlay() {
 // ---------------------------------------------------------------------------
 // Event listeners
 // ---------------------------------------------------------------------------
-$sendBtn.addEventListener("click", sendMessage);
-
-$input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
-
-$input.addEventListener("input", () => {
-  $input.style.height = "auto";
-  $input.style.height = Math.min($input.scrollHeight, 120) + "px";
-});
+bindChatComposer($input, $sendBtn, sendMessage);
 
 // Branch tree modal
 $branchTreeBtn.addEventListener("click", () => openBranchTreeModal());

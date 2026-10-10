@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>角色卡大廳</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/card.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ v }}">
+  <link rel="stylesheet" href="/static/card.css?v={{ v }}">
 </head>
 <body>
   <!-- Header (一致的主神空間導覽列) -->
@@ -31,7 +31,7 @@
   <main class="card-index-container">
     <div class="card-index-header">
       <h1>選擇對話角色卡</h1>
-      <p>窄而深的一對一互動管線 · 專屬人設與記憶 · 拒絕抽象形容詞</p>
+      <p>選擇一位角色，繼續你們的故事。</p>
     </div>
 
     <div class="card-grid" id="cardGrid">
@@ -102,14 +102,10 @@
       document.getElementById('createModal').classList.add('hidden');
     }
 
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.innerText = text;
-      return div.innerHTML;
-    }
-
     document.addEventListener('DOMContentLoaded', loadCards);
   </script>
-  <script src="/static/card.js"></script>
+  {% include 'shared/dialogs.html' %}
+  <script src="/static/chat_ui.js?v={{ v }}"></script>
+  <script src="/static/card.js?v={{ v }}"></script>
 </body>
 </html>

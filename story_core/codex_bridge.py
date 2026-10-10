@@ -109,7 +109,8 @@ def _build_gm_workspace(
 
     _write_text(root / "SYSTEM_PROMPT.txt", system_prompt)
     _write_text(root / "PLAYER_MESSAGE.txt", user_message)
-    _write_json(root / "RECENT_MESSAGES.json", recent_messages)
+    from story_core.card_mode.instructions import narrative_messages
+    _write_json(root / "RECENT_MESSAGES.json", narrative_messages(recent_messages))
     _write_text(root / "RECENT_MESSAGES.txt", _recent_messages_text(recent_messages))
 
     available_files = [
@@ -128,6 +129,7 @@ def _build_gm_workspace(
             get_full_timeline(story_id, branch_id),
             strip_fate=strip_fate,
         )
+        timeline = narrative_messages(timeline)
         recap = load_recap(story_id, branch_id)
         gm_plan = _load_gm_plan(story_id, branch_id)
         branch_lore = _load_branch_lore(story_id, branch_id)
@@ -399,7 +401,9 @@ def call_codex_gm_stream(
             yield ("error", "Codex 回傳空白回應")
             return
 
-        yield ("done", {"response": response_text, "session_id": None, "usage": usage})
+        done = {"response": response_text, "session_id": None, "usage": usage}
+        if proc.returncode != 0: done["incomplete"] = True
+        yield ("done", done)
     except subprocess.TimeoutExpired:
         try:
             proc.kill()
@@ -412,7 +416,7 @@ def call_codex_gm_stream(
         except Exception:
             pass
         if response_text:
-            yield ("done", {"response": response_text, "session_id": None, "usage": usage})
+            yield ("done", {"response": response_text, "session_id": None, "usage": usage, "incomplete": True})
         else:
             yield ("error", str(exc))
     finally:

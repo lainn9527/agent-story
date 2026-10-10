@@ -48,6 +48,9 @@ def _ensure_tables(conn: sqlite3.Connection, story_id: str = ""):
             prompt_tokens   INTEGER,
             output_tokens   INTEGER,
             total_tokens    INTEGER,
+            cached_tokens   INTEGER,
+            reasoning_tokens INTEGER,
+            cost_usd        REAL,
             story_id        TEXT NOT NULL,
             branch_id       TEXT NOT NULL DEFAULT '',
             elapsed_ms      INTEGER
@@ -55,6 +58,17 @@ def _ensure_tables(conn: sqlite3.Connection, story_id: str = ""):
         -- ISO-8601 timestamps sort lexicographically, so string comparison works
         CREATE INDEX IF NOT EXISTS idx_usage_log_timestamp ON usage_log(timestamp);
     """)
+    existing_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(usage_log)").fetchall()
+    }
+    for column, definition in (
+        ("cached_tokens", "INTEGER"),
+        ("reasoning_tokens", "INTEGER"),
+        ("cost_usd", "REAL"),
+    ):
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE usage_log ADD COLUMN {column} {definition}")
+    conn.commit()
     if story_id:
         _initialized.add(story_id)
 
@@ -71,6 +85,9 @@ def log_usage(
     prompt_tokens: int | None = None,
     output_tokens: int | None = None,
     total_tokens: int | None = None,
+    cached_tokens: int | None = None,
+    reasoning_tokens: int | None = None,
+    cost_usd: float | None = None,
     branch_id: str = "",
     elapsed_ms: int | None = None,
 ):
@@ -83,10 +100,12 @@ def log_usage(
             """INSERT INTO usage_log
                (timestamp, provider, model, call_type,
                 prompt_tokens, output_tokens, total_tokens,
+                cached_tokens, reasoning_tokens, cost_usd,
                 story_id, branch_id, elapsed_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (now, provider, model, call_type,
              prompt_tokens, output_tokens, total_tokens,
+             cached_tokens, reasoning_tokens, cost_usd,
              story_id, branch_id, elapsed_ms),
         )
         conn.commit()
@@ -120,6 +139,9 @@ def log_from_bridge(
             prompt_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("output_tokens"),
             total_tokens=usage.get("total_tokens"),
+            cached_tokens=usage.get("cached_tokens"),
+            reasoning_tokens=usage.get("reasoning_tokens"),
+            cost_usd=usage.get("cost_usd"),
             branch_id=branch_id,
             elapsed_ms=int(elapsed_s * 1000) if elapsed_s else None,
         )
@@ -147,6 +169,9 @@ def get_usage_summary(story_id: str, days: int = 7) -> dict:
             """SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                      COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
                       COUNT(*) AS calls
                FROM usage_log WHERE timestamp >= ?""",
             (since,),
@@ -159,6 +184,9 @@ def get_usage_summary(story_id: str, days: int = 7) -> dict:
                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                      COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
                       COUNT(*) AS calls
                FROM usage_log WHERE timestamp >= ?
                GROUP BY DATE(timestamp)
@@ -170,7 +198,12 @@ def get_usage_summary(story_id: str, days: int = 7) -> dict:
         # By provider/model
         rows = conn.execute(
             """SELECT provider, model,
+                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                      COALESCE(SUM(output_tokens), 0) AS output_tokens,
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                      COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
                       COUNT(*) AS calls
                FROM usage_log WHERE timestamp >= ?
                GROUP BY provider, model
@@ -182,7 +215,12 @@ def get_usage_summary(story_id: str, days: int = 7) -> dict:
         # By call_type
         rows = conn.execute(
             """SELECT call_type,
+                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                      COALESCE(SUM(output_tokens), 0) AS output_tokens,
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                      COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
                       COUNT(*) AS calls
                FROM usage_log WHERE timestamp >= ?
                GROUP BY call_type
@@ -207,7 +245,11 @@ def get_total_usage() -> dict:
     Returns {total: {prompt_tokens, output_tokens, total_tokens, calls},
              by_story: [{story_id, total_tokens, calls}]}.
     """
-    grand = {"prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
+    grand = {
+        "prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+        "cached_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.0,
+        "calls": 0,
+    }
     by_story = []
 
     if not os.path.isdir(STORIES_DIR):
@@ -226,6 +268,9 @@ def get_total_usage() -> dict:
                     """SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                               COALESCE(SUM(output_tokens), 0) AS output_tokens,
                               COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                              COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                              COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                              COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
                               COUNT(*) AS calls
                        FROM usage_log"""
                 ).fetchone()
@@ -233,6 +278,9 @@ def get_total_usage() -> dict:
                 grand["prompt_tokens"] += d["prompt_tokens"]
                 grand["output_tokens"] += d["output_tokens"]
                 grand["total_tokens"] += d["total_tokens"]
+                grand["cached_tokens"] += d["cached_tokens"]
+                grand["reasoning_tokens"] += d["reasoning_tokens"]
+                grand["cost_usd"] += d["cost_usd"]
                 grand["calls"] += d["calls"]
                 by_story.append({"story_id": story_id, **d})
             finally:
