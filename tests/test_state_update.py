@@ -384,6 +384,10 @@ class TestMigrateListToMap:
         """Loading a branch with list-format inventory auto-converts to map."""
         legacy_state = {**INITIAL_STATE, "inventory": ["封印之鏡", "鎮魂符×5"]}
         setup_state("main", legacy_state)
+        # The built-in default schema is empty now; the map type comes from the story's own schema.
+        design = tmp_path / "story_design" / story_id
+        design.mkdir(parents=True, exist_ok=True)
+        (design / "character_schema.json").write_text(json.dumps(SCHEMA, ensure_ascii=False), encoding="utf-8")
         state = app_module._load_character_state(story_id, "main")
         assert isinstance(state["inventory"], dict)
         assert "封印之鏡" in state["inventory"]

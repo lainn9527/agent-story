@@ -80,6 +80,18 @@ def story_id():
     return "test_story"
 
 
+def _snapshot_base_timeline(story_dir):
+    """Real branches carry per-message state snapshots. Without any, a fork falls back to the
+    live state (harness fix), which already contains an applied debug patch."""
+    design = story_dir.parents[2] / "story_design" / story_dir.name
+    conv_path = design / "parsed_conversation.json"
+    state = json.loads((story_dir / "branches" / "main" / "character_state.json").read_text(encoding="utf-8"))
+    conv = json.loads(conv_path.read_text(encoding="utf-8"))
+    for message in conv:
+        message["state_snapshot"] = dict(state)
+    conv_path.write_text(json.dumps(conv, ensure_ascii=False), encoding="utf-8")
+
+
 @pytest.fixture
 def setup_story(tmp_path, story_id):
     """Create a minimal story with all required files."""
@@ -992,6 +1004,7 @@ class TestDungeonAPI:
 
     def test_edit_replays_pending_debug_overrides_and_consumes_source_pending(self, client, setup_story, monkeypatch):
         import app as app_module
+        _snapshot_base_timeline(setup_story)
 
         apply_resp = client.post("/api/debug/apply", json={
             "branch_id": "main",
@@ -1118,6 +1131,7 @@ class TestDungeonAPI:
 
     def test_regenerate_stream_replays_pending_debug_overrides_and_consumes_source_pending(self, client, setup_story, monkeypatch):
         import app as app_module
+        _snapshot_base_timeline(setup_story)
 
         apply_resp = client.post("/api/debug/apply", json={
             "branch_id": "main",

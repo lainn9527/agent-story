@@ -35,7 +35,7 @@ def test_four_kinds_after_real_rewind(world, monkeypatch, target):
     frozen=tasks.freeze(slug,kinds=('memory','inventory','lore','summary'))
     ops=[MERGE, SUMMARY,
          {'kind':'inventory','target_ids':['inv:0','inv:1'],'item_name':'草藥','text':'一包'},
-         {'kind':'lore','target_ids':['lore:port'],'title':'渡口','keywords':['渡口'],'text':'七峰共同管理渡口。'}]
+         {'kind':'lore','target_ids':['lore:port'],'title':'渡口','keywords':['渡口'],'category':'place','text':'七峰共同管理渡口。'}]
     tasks.apply(receipt(root,frozen,ops))
     response=client.post('/api/card/original/rewind',json={'to_index':target,'branch_id':'main'})
     assert response.status_code==200,response.json

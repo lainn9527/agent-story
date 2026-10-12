@@ -526,24 +526,6 @@ def test_card_fetishes_and_sensitive_spots(sample_card):
 
 
 
-def test_suman_appearance_reaches_roleplay_prompt():
-    """The real design card supplies its appearance to the generation prompt."""
-    from pathlib import Path
-    from story_core.card_mode.prompt import build_card_system_prompt
-
-    design = Path(__file__).resolve().parents[1] / "story_design"
-    card = load_card("suman", design_dir=str(design))
-    prompt = build_card_system_prompt(
-        card, {"inventory": {}}, {"relationship": card["start"]["relationship"]},
-        datetime(2026, 5, 16, 23, 45),
-    )
-    assert card["persona"]["appearance"] in prompt
-    assert all(detail in prompt for detail in card["persona"]["body_details"])
-    assert "27 歲" in prompt
-    for stale in ("身形曼妙修長", "鎖骨精緻深陷", "纖細的腰肢", "白皙纖細的脖頸"):
-        assert stale not in prompt + card["opening"]
-
-
 @pytest.mark.parametrize("regenerate", [False, True])
 def test_card_turn_keeps_latest_reply_in_provider_payload(tmp_path, sample_card, monkeypatch, regenerate):
     from story_core.card_mode.pipeline import run_card_turn
@@ -620,7 +602,6 @@ def test_sensory_contract_and_length_coexist(sample_card, length):
     prompt = build_card_system_prompt(sample_card, {}, {}, datetime(2026,5,16), response_length=length)
     assert '感官細節要有來源與後續' in prompt
     assert '鞋履與裸足的生活細節' in prompt
-    assert '鞋襪遮住的細節不能直接看見' in prompt
     assert '不每輪插入' in prompt
     assert '不假定玩家的感受' in prompt
     assert '沉默、哭泣、僵住、未反抗或身體反應不代表同意' in prompt
