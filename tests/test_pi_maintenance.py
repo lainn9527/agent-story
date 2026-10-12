@@ -180,7 +180,7 @@ def test_independent_review_is_mandatory_and_bound_to_same_proposal(story):
 def test_model_timeout_is_fail_closed_and_report_is_bounded(story,monkeypatch):
     def timeout(*args,**kwargs):
         raise subprocess.TimeoutExpired('private huge prompt',1)
-    monkeypatch.setattr(tasks.subprocess,'run',timeout)
+    monkeypatch.setattr(tasks,'_run_pi',timeout)
     result=tasks.run(tasks.freeze('s'),cli='/unused/pi',vertex={'project':'test','model':'test'},root=story,timeout=1)
     assert result['status']=='rejected'
     assert '超時' in result['error'] and 'private huge prompt' not in result['error']
@@ -248,3 +248,51 @@ def test_inventory_requires_independent_review(story):
     root=receipt(story,frozen,[op],audit=False)
     with pytest.raises(ValueError,match='獨立查證'):
         tasks.apply(root)
+
+
+def test_apply_rebase_preserves_new_appended_turn_and_recorder_memory(story):
+    frozen = tasks.freeze('s', kinds=('memory',))
+    root = receipt(story, frozen, [MERGE])
+
+    # Player plays another turn while Pi was running, and Recorder appends a new memory
+    messages = io._load_branch_messages('s', 'main')
+    npcs = io._load_json(io._story_npcs_path('s', 'main'), [])
+    npcs[0]['memory'].append('玩家新獲得的記憶。')
+    new_gm = deepcopy(messages[-1])
+    new_gm.update(index=len(messages), content='玩家繼續遊玩後的回合。',
+                  npcs_snapshot=deepcopy(npcs), pre_npcs_snapshot=deepcopy(messages[-1]['npcs_snapshot']))
+    messages.append(new_gm)
+    io._save_json(io._story_messages_path('s', 'main'), messages)
+    io._save_json(io._story_npcs_path('s', 'main'), npcs)
+
+    # Rebase apply succeeds and does not discard the appended memory or turn!
+    result = tasks.apply(root, rebase=True)
+    assert result['status'] == 'applied'
+    after_npcs = io._load_json(io._story_npcs_path('s', 'main'), [])
+    assert '玩家新獲得的記憶。' in after_npcs[0]['memory']
+    assert '收到艾迪送的草藥。' in after_npcs[0]['memory']
+    assert '收到草藥。' not in after_npcs[0]['memory']  # Replaced by MERGE
+
+
+def test_apply_waits_for_busy_branch_lock(story):
+    import threading, time
+    from story_core.card_mode import branches
+    frozen = tasks.freeze('s', kinds=('memory',))
+    root = receipt(story, frozen, [MERGE])
+
+    # Simulate another thread holding the branch lock temporarily
+    lock_released = threading.Event()
+    def hold_lock():
+        with branches.lock('s', 'main'):
+            time.sleep(0.15)
+        lock_released.set()
+
+    t = threading.Thread(target=hold_lock)
+    t.start()
+    time.sleep(0.02)
+
+    # apply with wait=1 waits for the lock and succeeds
+    result = tasks.apply(root, wait=1, poll=0.02)
+    assert result['status'] == 'applied'
+    t.join()
+    assert lock_released.is_set()

@@ -276,7 +276,7 @@ def visible_history(doc):
 
 
 def prompt(slug, doc, user, length=None):
-    from story_core.card_mode.memory import select_memories
+    from story_core.card_mode.memory import memory_kwargs, select_memories
     s = doc['state']
     card = deepcopy(load_card(slug))
     card['display_name'] = '多角色共同場景'
@@ -290,7 +290,7 @@ def prompt(slug, doc, user, length=None):
     roster = deepcopy(s['characters'])
     for ch in roster.values():
         ch.get('persona', {}).pop('verbal_tics', None)
-        ch['memory'] = select_memories(ch['memory'], user)
+        ch['memory'] = select_memories(ch['memory'], user, **memory_kwargs(card))
     base += ('\n一次寫完整場景，讓實際被接觸的人自然回應；不必輪流點名每個角色。'
              '角色資料是最近完成記錄時的狀態；若與最近原文衝突，以原文已發生的事件為準。'
              '背景記錄尚未完成不代表剛剛的對話、移動或約定沒有發生。')

@@ -57,6 +57,8 @@ def still_current(frozen, entries, messages):
 
 def run_trial(frozen, *, cli, vertex, node='node', timeout=180, root=None):
     """Run Pi on an immutable snapshot, then independently replay every receipt."""
+    from story_core.card_mode.pi_maintenance import resolve_node
+    node = resolve_node(node)
     run_dir = Path(tempfile.mkdtemp(prefix='pi_lore_review_', dir=root))
     snapshot_path = run_dir / 'snapshot.json'
     snapshot_path.write_text(json.dumps(frozen, ensure_ascii=False), encoding='utf-8')

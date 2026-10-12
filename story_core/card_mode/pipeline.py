@@ -17,7 +17,7 @@ from story_core.card_mode.fields import persona_text
 from story_core.card_mode.contract import RECORDER_INSTRUCTION
 from story_core.card_mode.ops import card_tool_declarations, execute_card_tool, apply_card_tool
 from story_core.card_mode.prompt import build_card_system_prompt, relationship_display
-from story_core.card_mode.memory import select_memories, memories_before_context
+from story_core.card_mode.memory import memory_kwargs, select_memories, memories_before_context
 from story_core.card_mode.recap import COMPACT_PROMPT, META_COMPACT_PROMPT, RECAP_VERSION, context_window
 from story_core import compaction
 from story_core import usage_db
@@ -392,14 +392,14 @@ def record_saved_turn(story_id, branch_id, message, user_message, *, recorder_fn
                     f"{recorder_instruction}\n\n"
                     f"【當前卡片角色】{card.get('display_name', '')}\n" +
                     (f"【當前關係】{relationship_display(card, card_npc.get('relationship'))}\n" if relationship_enabled else "") +
-                    f"【已知長期記憶】{select_memories(card_npc.get('memory', []), user_message + narration)}\n"
+                    f"【已知長期記憶】{select_memories(card_npc.get('memory', []), user_message + narration, **memory_kwargs(card))}\n"
                     f"【當前隨身物】{state.get('inventory', {})}\n"
                     f"【當前時間】{clock.now(story_id, branch_id).strftime('%Y/%m/%d %H:%M')}\n"
                     f"【時間來源】{'標頭已提供，本輪不得再呼叫 advance_time' if header_owns_time else '未提供標頭，只記明確經過的時間'}\n"
                 )
 
                 g = _get_config().get("gemini", {})
-                model = "gemini-3.1-flash-lite"
+                model = get_recorder_model() or g.get("model", "gemini-3.7-flash")
 
                 def on_tool(name, args):
                     if name == "set_relationship" and not relationship_enabled:

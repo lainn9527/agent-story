@@ -20,8 +20,12 @@ MAX_FORWARD_JUMP_MINUTES = 12 * 60  # 12 hours max jump tolerance
 
 _DATE_RE = re.compile(r"📅\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})")
 _TIME_RE = re.compile(r"⏰\s*(\d{1,2}):(\d{2})")
-_LOC_RE = re.compile(r"📌\s*([^　\n\r🌤️🌆🌙☀☁🌧|｜]+)")
-_WEATHER_RE = re.compile(r"(?:🌤️|🌆|🌙|☀️?|☁️?|🌧️?)\s*([^\n\r]+)")
+_EMOJI_CHARS = r"\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff"
+_LOC_RE = re.compile(rf"📌\s*([^　\n\r{_EMOJI_CHARS}|｜]+)")
+_WEATHER_RE = re.compile(
+    r"(?:🌤️|🌤|☀️|☀|⛅|☁️|☁|🌧️|🌧|🌨️|🌨|🌪️|🌪|🌫️|🌫|💨|❄️|❄|🔥|🕯️|🕯|🛠️|🛠|🛡️|🛡|"
+    r"🌌|✨|🍃|🌿|🌲|🌅|🌆|🌇|🌙|⚡|🌀|🏮|🍵|🏕️|🏕)\s*([^\n\r]+)"
+)
 _PLAIN_HEADER_RE = re.compile(
     r"^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})"
     r"(?:\s*[（(][^）)\n]*[）)]\s*|\s+)(\d{1,2}):(\d{2})"
@@ -128,6 +132,10 @@ def parse_header_time(text: str) -> dict | None:
 
     weather_match = _WEATHER_RE.search(first_lines)
     weather = weather_match.group(1).strip() if weather_match else ""
+    if not weather and loc_match:
+        rem_lines = first_lines[loc_match.end():].splitlines()
+        rem = rem_lines[0] if rem_lines else ""
+        weather = re.sub(rf"^[\s　{_EMOJI_CHARS}\ufe0f|｜·・,，、]+", "", rem).strip()
 
     return {
         "year": year,

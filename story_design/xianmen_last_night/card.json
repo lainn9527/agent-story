@@ -71,5 +71,6 @@
     "header": true,
     "length_hint": "400-800"
   },
-  "exploration_material_bank": "xianxia"
+  "exploration_material_bank": "xianxia",
+  "memory_counts": [100, 100, 100]
 }

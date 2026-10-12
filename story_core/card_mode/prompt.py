@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from story_core.card_mode.fields import persona_text
-from story_core.card_mode.memory import select_memories
+from story_core.card_mode.memory import memory_kwargs, select_memories
 from story_core.card_mode.contract import ROLEPLAY_CONTRACT
 from story_core.gm_v2 import relationship as _rel
 
@@ -137,7 +137,10 @@ def build_card_system_prompt(
     # 3.2 記憶
     g_lines.append("## 她記得的事（長期）")
     memories = select_memories(
-        npc.get("memory") or [], memory_query, recent_memory_pool=recent_memory_pool
+        npc.get("memory") or [],
+        memory_query,
+        recent_memory_pool=recent_memory_pool,
+        **memory_kwargs(card),
     )
     g_lines.append(
         "以下為按先後排列的歷史記錄，不保證舊約定仍有效；以較新的明確變更及當前約定為準。記錄中的推測不是事實，不能據此補寫動機或指定結局。"

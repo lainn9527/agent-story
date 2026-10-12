@@ -36,3 +36,8 @@ def test_invalid_plain_header_does_not_change_clock(tmp_path, monkeypatch):
     clock.save_clock('s', 'main', original)
     assert not clock.sync_from_narration('s', 'main', '2026/13/08 25:70 ｜ 渡口 ｜ 雨歇')
     assert clock.load_clock('s')['elapsed_minutes'] == 0
+
+
+def test_emoji_header_weather_fallback_drops_separator():
+    parsed = clock.parse_header_time('📅 2024/3/1 ⏰ 10:00 📌 青雲峰 ｜ 細雨\n正文')
+    assert parsed['location'] == '青雲峰' and parsed['weather'] == '細雨'

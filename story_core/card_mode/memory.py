@@ -27,6 +27,14 @@ def memories_before_context(recent, npc_name):
     return matches[0]["memory"]
 
 
+def memory_kwargs(card):
+    """Card-level select_memories quotas: memory_counts = [recent, relevant, random]."""
+    counts = (card or {}).get("memory_counts")
+    if isinstance(counts, (list, tuple)) and len(counts) == 3:
+        return dict(zip(("recent_count", "relevant_count", "random_count"), counts))
+    return {}
+
+
 def select_memories(memories, query="", recent_count=36, relevant_count=36,
                     random_count=36, *, recent_memory_pool=None):
     """Recent, relevant and randomly recalled facts, ordered by recording order.

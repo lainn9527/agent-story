@@ -30,10 +30,10 @@ def _public(revision, chars):
         for key, ch in chars.items()]}
 
 
-def operate(slug, bid, body=None):
+def operate(slug, bid, body=None, blocking=False):
     load_card(slug)
     cast = ensemble.enabled(slug)
-    guard = ensemble.lock(slug, branch_id=bid) if cast else branches.lock(slug, bid)
+    guard = ensemble.lock(slug, branch_id=bid) if cast else branches.lock(slug, bid, blocking=blocking)
     with guard:
         branches.resolve(slug, bid)
         cast, paths, raw, revision, docs, chars = _read(slug, bid)

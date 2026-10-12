@@ -235,6 +235,10 @@ def compact_async(story_id: str, branch_id: str, full_timeline: list[dict], *,
             log.info("    compaction: already running for %s/%s, skipping", story_id, branch_id)
             return
         try:
+            from story_core.card_mode import pi_schedule
+            if pi_schedule.is_running(story_id, branch_id, kind='summary'):
+                log.info("    compaction: skipped because Pi maintenance is actively summarizing for %s/%s", story_id, branch_id)
+                return
             _run_compaction(story_id, branch_id, full_timeline,
                             prompt_template=prompt_template,
                             meta_prompt_template=meta_prompt_template,

@@ -9,3 +9,6 @@ server_stderr.log
 
 # Runtime data (source of truth for design files is story_design/, not data/stories/)
 data/
+
+# One-off data surgery scripts (contain private save content)
+scripts/lore/apply_memory_batch*.py
