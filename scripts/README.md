@@ -4,7 +4,7 @@
 
 - `scripts/backfill/`: one-off historical data backfills
 - `scripts/deploy/`: deployment helpers for Mac production and WSL2
-- `scripts/dev/`: local developer utilities such as prod-data sync and E2E server startup
+- `scripts/dev/`: local developer utilities such as prod-data sync, E2E server startup, and `cloud_setup.sh` (Claude Code cloud environment setup)
 - `scripts/lore/`: lore cleanup and merge tooling
 - `scripts/migrations/`: one-time data migrations
 - `scripts/state/`: state cleanup and repair helpers
