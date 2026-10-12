@@ -535,6 +535,11 @@ def record_saved_turn(story_id, branch_id, message, user_message, *, recorder_fn
         if not recorder_fn:
             from story_core.card_mode.pi_schedule import maybe_schedule
             maybe_schedule(story_id, branch_id)
+            try:
+                from story_core.card_mode import claude_maintenance
+                claude_maintenance.maybe_run(story_id, branch_id, gm_idx)
+            except Exception:
+                log.exception("card_pipeline: claude maintenance trigger failed")
 
     if async_recorder:
         key = (story_id, branch_id)
