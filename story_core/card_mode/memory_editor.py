@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from copy import deepcopy
-from story_core import story_io as io
+from story_core import story_io as io, messages_codec
 from story_core.card_mode import branches, ensemble, candidates
 from story_core.card_mode.card import load_card
 
@@ -18,7 +18,7 @@ def _read(slug, bid):
     paths.extend(sorted(candidates.path(slug,bid).with_suffix('').glob('*.json')))
     raw = {str(p): p.read_bytes() for p in paths}
     revision = hashlib.sha256(b''.join(raw.values())).hexdigest()
-    docs = [json.loads(raw[str(p)]) for p in paths]
+    docs = [messages_codec.decode(json.loads(raw[str(p)])) for p in paths]
     chars = docs[0]['state']['characters'] if cast else {str(i): ch for i, ch in enumerate(docs[0])}
     return cast, paths, raw, revision, docs, chars
 

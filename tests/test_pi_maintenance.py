@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import pytest
-from story_core import story_io as io, compaction
+from story_core import story_io as io, compaction, messages_codec
 from story_core.card_mode import pi_maintenance as tasks, ensemble, lore
 
 
@@ -64,7 +64,7 @@ def test_apply_all_kinds_preserves_history_and_undo_restores_bytes(story):
     assert messages[-1]['pre_npcs_snapshot'][0]['memory'] == ['收到草藥。']
     assert messages[-1]['npcs_snapshot'][0]['memory'] == ['收到艾迪送的草藥。','她拒絕同行。']
     assert messages[-1]['npcs_snapshot'][1]['memory'] == ['收到草藥。']
-    assert [m['content'] for m in messages] == [m['content'] for m in json.loads(before['messages'])]
+    assert [m['content'] for m in messages] == [m['content'] for m in messages_codec.decode(json.loads(before['messages']))]
     entries = lore.available('s','main',messages)
     assert entries[0]['text'] == '作者設定'
     assert entries[1]['sources'] == [{'index':0,'hash':lore.content_hash(messages[0]['content'])}]

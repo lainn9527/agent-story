@@ -110,6 +110,7 @@ Browser (static/app.js, templates/index.html)
 
 - `main` 分支的基底對話來自 `story_design/<story_id>/parsed_conversation.json`。
 - 每個分支只存自己的增量訊息（delta）在 `branches/<branch_id>/messages.json`。
+- 卡片模式（`story_design/<slug>/card.json` 存在）的 `messages.json` 以池化格式落盤（`story_core/messages_codec.py`）：每句角色記憶只存一次於 `memory_pool`，各回合 `npcs_snapshot`/`pre_npcs_snapshot` 的 `memory` 改存 `{"$pool": [[起點, 長度], ...]}`。`story_io._load_json` 自動解碼、`_save_json` 自動編碼，呼叫端看到的仍是普通訊息 list；直接讀原始 bytes 的程式（Pi 維護、記憶編輯器、副本建立、dev 驗證腳本）須經 `messages_codec.decode`。
 - `get_full_timeline()` 會把父鏈訊息與當前分支 delta 合成完整時間線。
 - `branch_point_index` 表示從父分支哪個訊息 index 分叉。
 - `branch_point_index = -1` 表示空白分支（不繼承任何訊息）。

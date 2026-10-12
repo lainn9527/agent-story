@@ -16,6 +16,8 @@ SHARED_DESIGN_DIR = os.path.join(STORY_DESIGN_DIR, "_shared")
 STORY_TEMPLATE_DIR = os.path.join(SHARED_DESIGN_DIR, "_template")
 STORIES_REGISTRY_PATH = os.path.join(DATA_DIR, "stories.json")
 import re as _re
+
+from story_core import messages_codec
 _STORY_ID_RE = _re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _LLM_CONFIG_PATH = os.path.join(BASE_DIR, "llm_config.json")
 
@@ -39,16 +41,34 @@ def _ensure_data_dir():
 def _load_json(path, default=None):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return messages_codec.decode(json.load(f))
     return default if default is not None else []
+
+
+def _is_card_messages_path(path) -> bool:
+    """branches/<bid>/messages.json of a story that has a card."""
+    parts = os.path.normpath(str(path)).split(os.sep)
+    return (len(parts) >= 4 and parts[-1] == "messages.json" and parts[-3] == "branches"
+            and os.path.exists(os.path.join(STORY_DESIGN_DIR, parts[-4], "card.json")))
+
+
+def _dumps_json(path, data) -> str:
+    """Serialize as _save_json writes it; card messages use the pooled form."""
+    if _is_card_messages_path(path) and messages_codec.has_poolable_memory(data):
+        data = messages_codec.encode(data)
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def _save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(_dumps_json(path, data))
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def _story_dir(story_id: str) -> str:

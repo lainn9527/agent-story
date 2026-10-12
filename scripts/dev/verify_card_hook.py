@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from story_core import story_io as io, compaction, llm_bridge, usage_db
+from story_core import story_io as io, compaction, llm_bridge, messages_codec, usage_db
 from story_core.branch_tree import get_full_timeline
 from story_core.card_mode import branches, pipeline
 from story_core.card_mode.card import load_card
@@ -73,7 +73,7 @@ def stage(snapshot, root):
 
 
 def checkpoint(snapshot, folder):
-    return {**snapshot, 'messages': json.loads((folder/'messages.json').read_text()),
+    return {**snapshot, 'messages': messages_codec.decode(json.loads((folder/'messages.json').read_text())),
             'files': {name: json.loads((folder/name).read_text()) for name in snapshot['files']}}
 
 
@@ -137,7 +137,7 @@ def run_path(snapshot, output, inputs, seed=None, *, generate=None, recorder=Non
                         narrative_style='natural', plot_mode='coauthor', scene_mode='default')
                 if not result.get('ok'):
                     raise ValueError('Narration failed; no accepted output for this turn')
-                rows = json.loads((folder/'messages.json').read_text())
+                rows = messages_codec.decode(json.loads((folder/'messages.json').read_text()))
                 gm = rows[-1]
                 row.update(text=gm['content'], gm_index=gm['index'],
                            record_status=gm.get('card_record_status'), status='completed')

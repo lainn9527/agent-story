@@ -14,7 +14,7 @@ import shutil
 import time
 import uuid
 
-from story_core import story_io as io
+from story_core import story_io as io, messages_codec
 from story_core.card_mode.card import load_card, validate_card, card_path
 from story_core.card_mode.clock import parse_header_time
 from story_core.card_mode.prompt import build_card_system_prompt, RESPONSE_LENGTHS
@@ -109,7 +109,7 @@ def clone(source, target, spec, label='', branch_id='main'):
     src = Path(io.STORIES_DIR) / source / 'branches' / branch_id
     names = ['messages.json', 'npcs.json', 'character_state.json', 'card_clock.json', 'conversation_recap.json']
     blobs = {n: (src/n).read_bytes() if (src/n).exists() else b'{}' for n in names}
-    vals = {n: json.loads(v) for n,v in blobs.items()}
+    vals = {n: messages_codec.decode(json.loads(v)) for n,v in blobs.items()}
     messages = vals['messages.json']; npcs = vals['npcs.json']
     if not isinstance(messages, list) or not messages or messages[-1].get('role') != 'gm':
         raise ValueError('請等來源回合完成後再建立副本')

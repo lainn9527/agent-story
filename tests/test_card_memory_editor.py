@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import pytest
 from tests.test_card_ensemble import world, make
-from story_core import story_io as io
+from story_core import story_io as io, messages_codec
 from story_core.card_mode import ensemble as e
 from story_core.card_mode import branches
 
@@ -27,7 +27,7 @@ def test_edit_delete_snapshots_backup_and_isolation(world):
     result=client.post('/api/card/original/memories',json={'revision':data['revision'],'changes':[
         {'character_id':'0','index':0,'text':None},{'character_id':'0','index':1,'text':'修正後期'}]})
     assert result.status_code==200,result.json
-    msgs=json.loads(mp.read_text())
+    msgs=messages_codec.decode(json.loads(mp.read_text()))
     assert msgs[0]['npcs_snapshot'][0]['memory']==[]
     assert msgs[1]['pre_npcs_snapshot'][0]['memory']==[]
     assert msgs[1]['npcs_snapshot'][0]['memory']==['修正後期']

@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from story_core import story_io as io, compaction, llm_bridge
+from story_core import story_io as io, compaction, llm_bridge, messages_codec
 from story_core.card_mode import pipeline
 
 
@@ -57,7 +57,7 @@ def capture(messages, target, recap, slug):
                     narrative_style='natural', plot_mode='follow', scene_mode='default',
                     recall_mode='off', response_length='medium')
             assert not result['ok'] and captured
-            assert json.loads((branch/'messages.json').read_text()) == prefix
+            assert messages_codec.decode(json.loads((branch/'messages.json').read_text())) == prefix
     # Never send state metadata from history to a provider or expose future snapshots.
     captured['recent'] = [{k:m[k] for k in ('role','content','index') if k in m} for m in captured['recent']]
     assert all(m['index'] < target-1 for m in captured['recent'])
@@ -83,7 +83,7 @@ def main():
     source = Path(io.STORIES_DIR)/slug/'branches'/branch
     frozen = {p:p.read_bytes() for p in [source/'messages.json', source/'conversation_recap.json',
                                        ROOT/'story_design'/slug/'card.json']}
-    messages = json.loads(frozen[source/'messages.json'])
+    messages = messages_codec.decode(json.loads(frozen[source/'messages.json']))
     recap = json.loads(frozen[source/'conversation_recap.json'])
     old_rules = runpy.run_path(str(args.old_styles))['EXPLORATION']
     new_rules = args.new_rules.read_text()

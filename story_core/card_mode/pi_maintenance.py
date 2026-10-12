@@ -14,7 +14,7 @@ import tempfile
 import time
 import uuid
 
-from story_core import story_io as io, compaction
+from story_core import story_io as io, compaction, messages_codec
 from story_core.card_mode import branches, ensemble, lore, pi_usage
 from story_core.card_mode.card import load_card
 from story_core.card_mode.recap import RECAP_VERSION
@@ -95,7 +95,7 @@ def _raw(paths):
 
 
 def _doc(raw, default):
-    return json.loads(raw) if raw is not None else deepcopy(default)
+    return messages_codec.decode(json.loads(raw)) if raw is not None else deepcopy(default)
 
 
 def freeze(slug, bid='main', *, kinds=('memory', 'lore'), recent=20, focus=()):
@@ -532,7 +532,7 @@ def _apply(run_dir, result, *, rebase=False):
                 raise ValueError('缺少本回合狀態快照')
             messages[-1]['state_snapshot']['inventory'] = deepcopy(state.get('inventory', {}))
         docs = {'messages': messages, 'npcs': npcs, 'lore': lore_doc, 'summary': recap, 'state': state}
-        after = {k: json.dumps(docs[k], ensure_ascii=False, indent=2).encode() for k in modified}
+        after = {k: io._dumps_json(str(paths[k]), docs[k]).encode() for k in modified}
         if not after:
             return {'status': 'no_changes', 'operations': 0, 'skipped': skipped}
         backup = Path(io._story_dir(slug))/'pi_maintenance_backups'/bid/uuid.uuid4().hex
