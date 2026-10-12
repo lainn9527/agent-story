@@ -12,7 +12,7 @@ import shutil
 import threading
 import uuid
 
-from story_core import story_io as io
+from story_core import story_io as io, compaction
 
 
 class BranchError(ValueError):
@@ -241,8 +241,7 @@ def change(slug, action, body):
                         io._save_json(str(dest / filename), value)
                     io._save_json(str(dest / 'messages.json'), kept)
                     recap = io._load_json(str(Path(io._branch_dir(slug, source)) / 'conversation_recap.json'), {})
-                    if recap.get('compacted_through_index', -1) >= len(kept):
-                        recap = {}
+                    recap = compaction.rollback_recap(recap, len(kept))
                     recap['revision'] = uuid.uuid4().hex
                     io._save_json(str(dest / 'conversation_recap.json'), recap)
                 from story_core.card_mode import candidates, instructions, lore

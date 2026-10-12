@@ -510,6 +510,7 @@ def _apply(run_dir, result, *, rebase=False):
                                  total_turns_compacted=sum(m['role'] == 'user' for m in messages[:through+1]),
                                  recap_version=RECAP_VERSION, revision=uuid.uuid4().hex,
                                  last_compacted_at=datetime.now(timezone.utc).isoformat())
+                    compaction.add_checkpoint(recap)
                     modified.add('summary')
                 applied.append(oi)
             except _Conflict as conflict:

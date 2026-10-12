@@ -411,3 +411,51 @@ def test_preserved_recap_rejects_old_background_commit(monkeypatch):
     assert after['recap_text'] == 'retained agreement'
     assert after['compacted_through_index'] == 0
     assert after['revision'] != 'old'
+
+
+def test_invalidation_inside_summary_rolls_back_to_checkpoint():
+    recap = dict(recap_text='through 40', compacted_through_index=40, recap_version=2, revision='old')
+    for through in (10, 25, 40):
+        recap.update(recap_text=f'through {through}', compacted_through_index=through)
+        compaction.add_checkpoint(recap)
+    compaction.save_recap('test', 'main', recap)
+    # An edit at position 30 removes turns the newest recap already absorbed.
+    compaction.invalidate_recap('test', 'main', retained_message_count=30)
+    after = compaction.load_recap('test', 'main')
+    assert after['recap_text'] == 'through 25'
+    assert after['compacted_through_index'] == 25
+    assert [c['compacted_through_index'] for c in after['checkpoints']] == [10, 25]
+    assert after['revision'] != 'old'
+    # A forced reset still discards everything, checkpoints included.
+    compaction.invalidate_recap('test', 'main')
+    assert compaction.load_recap('test', 'main')['recap_text'] == ''
+    assert 'checkpoints' not in compaction.load_recap('test', 'main')
+
+
+def test_checkpoints_are_bounded():
+    recap = {}
+    for through in range(compaction.RECAP_CHECKPOINT_LIMIT + 5):
+        recap.update(recap_text=f't{through}', compacted_through_index=through)
+        compaction.add_checkpoint(recap)
+    assert len(recap['checkpoints']) == compaction.RECAP_CHECKPOINT_LIMIT
+    assert recap['checkpoints'][-1]['recap_text'] == f't{compaction.RECAP_CHECKPOINT_LIMIT + 4}'
+
+
+def test_interrupted_rebuild_keeps_completed_batches(monkeypatch):
+    compaction.save_recap('test', 'main', compaction._default_recap() | {'revision': 'r'})
+    calls = []
+    def generate(prompt):
+        calls.append(prompt)
+        return '' if len(calls) == 3 else f'摘要{len(calls)}'
+    monkeypatch.setattr('story_core.llm_bridge.call_oneshot', generate)
+    monkeypatch.setattr('story_core.usage_db.log_from_bridge', lambda *a, **k: None)
+    monkeypatch.setattr(compaction, 'get_character_name', lambda *a: '玩家')
+    history = [{'role': 'user', 'content': '123456'}] * 14
+    compaction._run_compaction('test', 'main', history, max_message_chars=None,
+                               batch_chars=6, recap_version=2)
+    after = compaction.load_recap('test', 'main')
+    # Two batches committed before the third failed; the next run resumes at position 2.
+    assert after['recap_text'] == '摘要2'
+    assert after['compacted_through_index'] == 1
+    assert after['total_turns_compacted'] == 2
+    assert after['revision'] == 'r'

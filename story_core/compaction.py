@@ -87,6 +87,44 @@ def _default_recap() -> dict:
     }
 
 
+RECAP_CHECKPOINT_LIMIT = 12      # Older recaps kept so a rewind rolls back instead of wiping
+
+
+def add_checkpoint(recap: dict) -> dict:
+    """Record the recap's current text as a rollback point (in place)."""
+    through = recap.get("compacted_through_index", -1)
+    if not recap.get("recap_text") or through < 0:
+        return recap
+    kept = [c for c in recap.get("checkpoints", []) if c.get("compacted_through_index", -1) != through]
+    kept.append({k: recap.get(k) for k in
+                 ("compacted_through_index", "recap_text", "recap_version",
+                  "total_turns_compacted", "last_compacted_at")})
+    kept.sort(key=lambda c: c["compacted_through_index"])
+    recap["checkpoints"] = kept[-RECAP_CHECKPOINT_LIMIT:]
+    return recap
+
+
+def rollback_recap(recap: dict, retained_message_count: int | None) -> dict:
+    """Return the newest recap covering only the retained prefix, else the default.
+
+    A rewind or edit inside the summarized range used to discard the whole
+    recap, forcing a from-scratch rebuild of every message.
+    """
+    covered = recap.get("compacted_through_index", -1)
+    if (retained_message_count is not None and 0 <= covered < retained_message_count
+            and recap.get("recap_text")):
+        return dict(recap)
+    if retained_message_count is None:
+        return _default_recap()
+    valid = [c for c in recap.get("checkpoints", [])
+             if c.get("recap_text") and 0 <= c.get("compacted_through_index", -1) < retained_message_count]
+    if not valid:
+        return _default_recap()
+    restored = {k: v for k, v in valid[-1].items() if v is not None}
+    restored["checkpoints"] = valid
+    return {**_default_recap(), **restored}
+
+
 def load_recap(story_id: str, branch_id: str) -> dict:
     path = _recap_path(story_id, branch_id)
     if os.path.exists(path):
@@ -131,19 +169,13 @@ def recap_commit_guard(story_id, branch_id):
 
 
 def invalidate_recap(story_id: str, branch_id: str, *, retained_message_count: int | None = None) -> None:
-    """Fence old jobs; preserve a recap whose entire covered prefix survives.
+    """Fence old jobs; keep the newest recap whose entire covered prefix survives.
 
     compacted_through_index is a timeline position (not a message's index field).
     Omitting retained_message_count forces invalidation, e.g. on reset.
     """
     with recap_commit_guard(story_id, branch_id):
-        data = load_recap(story_id, branch_id)
-        covered = data.get("compacted_through_index", -1)
-        preserve = (retained_message_count is not None
-                    and 0 <= covered < retained_message_count
-                    and bool(data.get("recap_text")))
-        if not preserve:
-            data = _default_recap()
+        data = rollback_recap(load_recap(story_id, branch_id), retained_message_count)
         # Even preserved recaps must reject in-flight work containing deleted turns.
         data["revision"] = uuid.uuid4().hex
         save_recap(story_id, branch_id, data)
@@ -270,7 +302,11 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict], *,
             expected_revision = recap.get("revision")
         if recap.get("revision") != expected_revision:
             return
+    # Replacing a legacy-format recap is all-or-nothing so a failed migration keeps
+    # the old text; otherwise each batch commits, so an interrupted rebuild resumes.
+    atomic = False
     if recap_version is not None and recap.get("recap_version") != recap_version:
+        atomic = bool(recap.get("recap_text"))
         recap = {**_default_recap(), "revision": expected_revision}
     compacted_through = recap.get("compacted_through_index", -1)
 
@@ -302,7 +338,8 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict], *,
     if batch:
         batches.append(batch)
     new_recap_text = recap.get("recap_text", "")
-    for batch in batches:
+    batch_end = compacted_through
+    for bi, batch in enumerate(batches):
         with recap_commit_guard(story_id, branch_id):
             if load_recap(story_id, branch_id).get("revision") != expected_revision:
                 return
@@ -328,19 +365,23 @@ def _run_compaction(story_id: str, branch_id: str, full_timeline: list[dict], *,
             if meta_result and meta_result.strip():
                 new_recap_text = meta_result.strip()
 
-    turn_count = sum(1 for m in msgs_to_compact if m.get("role") == "user")
+        batch_end += len(batch)
+        if atomic and bi < len(batches) - 1:
+            continue
+        if recap_version is not None:
+            recap["recap_version"] = recap_version
+        recap["recap_text"] = new_recap_text
+        recap["total_turns_compacted"] = (recap.get("total_turns_compacted", 0)
+            + sum(1 for m in full_timeline[recap["compacted_through_index"] + 1:batch_end + 1]
+                  if m.get("role") == "user"))
+        recap["compacted_through_index"] = batch_end
+        recap["last_compacted_at"] = datetime.now(timezone.utc).isoformat()
+        add_checkpoint(recap)
 
-    if recap_version is not None:
-        recap["recap_version"] = recap_version
-    recap["recap_text"] = new_recap_text
-    recap["compacted_through_index"] = compact_end - 1
-    recap["last_compacted_at"] = datetime.now(timezone.utc).isoformat()
-    recap["total_turns_compacted"] = recap.get("total_turns_compacted", 0) + turn_count
-
-    with recap_commit_guard(story_id, branch_id):
-        if load_recap(story_id, branch_id).get("revision") != expected_revision:
-            log.info("    compaction: discarded result from invalidated timeline")
-            return
-        save_recap(story_id, branch_id, recap)
-    log.info("    compaction: done — recap=%d chars, compacted_through=%d",
-             len(new_recap_text), compact_end - 1)
+        with recap_commit_guard(story_id, branch_id):
+            if load_recap(story_id, branch_id).get("revision") != expected_revision:
+                log.info("    compaction: discarded result from invalidated timeline")
+                return
+            save_recap(story_id, branch_id, recap)
+        log.info("    compaction: committed batch %d/%d — recap=%d chars, compacted_through=%d",
+                 bi + 1, len(batches), len(new_recap_text), batch_end)
