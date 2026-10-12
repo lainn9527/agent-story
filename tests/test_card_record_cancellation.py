@@ -109,3 +109,57 @@ def test_record_provider_failure_does_not_commit_partial_tool_results(world,monk
     run_card_turn('original','main','你好',llm_fn=lambda *a:'回覆',async_recorder=False)
     assert io._load_branch_messages('original','main')[-1]['card_record_status']=='error'
     assert io._load_json(io._story_npcs_path('original','main'),[])[0]['memory']==[]
+
+
+def test_next_turn_waits_for_running_recorder_instead_of_busy(world, recording):
+    """A reply sent while the previous turn is still recording waits for it, then runs."""
+    entered, release, late, jobs = recording
+    run_card_turn('original', 'main', '原始問題', llm_fn=lambda *a: '舊回覆')
+    assert entered.wait(2)
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(run_card_turn(
+        'original', 'main', '下一句', llm_fn=lambda *a: '下一回覆', async_recorder=False)))
+    worker.start()
+    worker.join(0.3)
+    assert worker.is_alive()  # waiting on the first recorder, not failing with Busy
+    release.set()
+    worker.join(5)
+    assert result.get('ok'), result
+    memory = io._load_json(io._story_npcs_path('original', 'main'), [])[0]['memory']
+    assert '被撤銷的秘密' in memory and '新版記憶' in memory
+
+
+def test_cancelled_generation_recorder_is_not_waited_for(monkeypatch):
+    from story_core.card_mode import pipeline
+    token = {'id': 'g1'}
+    monkeypatch.setattr(pipeline.branches, 'generation', lambda slug, bid: token['id'])
+    stop = threading.Event()
+    thread = threading.Thread(target=lambda: stop.wait(5))
+    monkeypatch.setitem(pipeline._recorders, ('s', 'b'), {thread: 'g1'})
+    thread.start()
+    token['id'] = 'g2'  # regenerate/rewind/reset invalidated the generation
+    pipeline._wait_for_recorders('s', 'b', timeout=5)
+    assert thread.is_alive()
+    stop.set(); thread.join(1)
+
+
+def test_player_stop_aborts_turn_without_writing(world):
+    from story_core.card_mode import generation_control
+    _, client, _ = world
+    before = copy.deepcopy(io._load_branch_messages('original', 'main'))
+    started, out = threading.Event(), {}
+    def slow_provider(*a):
+        started.set(); threading.Event().wait(2); return '不該寫入'
+    def turn():
+        try: run_card_turn('original', 'main', '想取消的句子', llm_fn=slow_provider, async_recorder=False)
+        except Exception as exc: out['error'] = exc
+    worker = threading.Thread(target=turn); worker.start()
+    assert started.wait(2)
+    response = client.post('/api/card/original/cancel', json={'branch_id': 'main'})
+    assert response.json == {'ok': True, 'cancelled': True}
+    worker.join(2)
+    assert not worker.is_alive()
+    assert isinstance(out.get('error'), generation_control.Cancelled)
+    assert '停止' in str(out['error'])
+    assert io._load_branch_messages('original', 'main') == before
+    assert client.post('/api/card/original/cancel', json={'branch_id': 'main'}).json['cancelled'] is False

@@ -400,6 +400,13 @@ def api_card_send_stream(slug: str):
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
+@card_bp.route("/api/card/<slug>/cancel", methods=["POST"])
+def api_card_cancel(slug: str):
+    """Stop the running generation; nothing from it is written."""
+    from story_core.card_mode import generation_control
+    return jsonify(ok=True, cancelled=generation_control.cancel(slug, g.card_branch))
+
+
 @card_bp.route("/api/card/<slug>/regenerate", methods=["POST"])
 @single_mutation
 def api_card_regenerate(slug: str):

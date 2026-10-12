@@ -19,11 +19,23 @@ class Cancelled(branches.BranchError):
 def check():
     event = getattr(_local, 'event', None)
     if event is not None and event.is_set():
-        raise Cancelled('舊生成已取消，未寫入回覆。')
+        raise Cancelled(getattr(event, 'reason', '舊生成已取消，未寫入回覆。'))
+
+
+def cancel(slug, bid):
+    """Player pressed stop: the running turn aborts before writing anything."""
+    with _guard:
+        event = _active.get((slug, bid))
+        if event is None or event.is_set():
+            return False
+        event.reason = '已停止生成，未寫入回覆。'
+        event.set()
+        return True
 
 
 @contextmanager
-def turn(slug, bid):
+def turn(slug, bid, before_lock=None):
+    """before_lock runs once the turn is cancellable but before the branch lock is taken."""
     key = (slug, bid)
     event = threading.Event()
     with _guard:
@@ -33,6 +45,8 @@ def turn(slug, bid):
         _active[key] = event
     _local.event = event
     try:
+        if before_lock:
+            before_lock()
         deadline = time.monotonic() + 3
         while True:
             check()

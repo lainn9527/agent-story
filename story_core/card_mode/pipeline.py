@@ -137,10 +137,37 @@ def _generate_pass1(
     return None, "failed"
 
 
+# In-process recorder threads per branch (thread -> generation token at start), so a
+# new turn can wait for them instead of failing.
+_recorders: dict[tuple[str, str], dict[threading.Thread, str | None]] = {}
+_recorders_guard = threading.Lock()
+RECORDER_WAIT_SECONDS = 60
+
+
+def _wait_for_recorders(story_id, branch_id, timeout=RECORDER_WAIT_SECONDS):
+    """Join this branch's running recorders; the branch lock must not be held here.
+
+    Regenerate/rewind/reset/edit invalidate the generation and cancel the pending
+    record, so a recorder from an older generation is never waited for.
+    """
+    with _recorders_guard:
+        pending = list(_recorders.get((story_id, branch_id), {}).items())
+    deadline = time.monotonic() + timeout
+    for thread, started_generation in pending:
+        while thread.is_alive() and time.monotonic() < deadline:
+            generation_control.check()  # the player may stop while we wait
+            if branches.generation(story_id, branch_id) != started_generation:
+                break
+            thread.join(0.1)
+
+
 def _locked_turn(fn):
     @wraps(fn)
     def wrapped(story_id, branch_id="main", *args, **kwargs):
-        with generation_control.turn(story_id, branch_id):
+        # A reply sent while the previous turn is still recording waits rather than
+        # failing with Busy; ensure_settled below still guards other writers.
+        with generation_control.turn(story_id, branch_id,
+                                     before_lock=lambda: _wait_for_recorders(story_id, branch_id)):
             expected = kwargs.pop("expected_generation", None)
             if expected is not None and expected != branches.generation(story_id, branch_id):
                 raise branches.BranchError("此重生已被回退或重置取消，未寫入回覆。")
@@ -510,6 +537,18 @@ def record_saved_turn(story_id, branch_id, message, user_message, *, recorder_fn
             maybe_schedule(story_id, branch_id)
 
     if async_recorder:
-        threading.Thread(target=_execute_pass2, name="card-recorder-"+turn_id, daemon=True).start()
+        key = (story_id, branch_id)
+
+        def _tracked():
+            try:
+                _execute_pass2()
+            finally:
+                with _recorders_guard:
+                    _recorders.get(key, {}).pop(thread, None)
+
+        thread = threading.Thread(target=_tracked, name="card-recorder-"+turn_id, daemon=True)
+        with _recorders_guard:
+            _recorders.setdefault(key, {})[thread] = branches.generation(story_id, branch_id)
+        thread.start()
     else:
         _execute_pass2()

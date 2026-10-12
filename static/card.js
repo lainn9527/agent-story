@@ -1249,8 +1249,26 @@
     [branchSelect, document.getElementById('cardBranchRename'), document.querySelector('#cardBranchForm [type=submit]'), focusSelect, presenceSelect, document.getElementById('ensembleRetryRecording'), document.getElementById('ensembleCreateBtn'), document.getElementById('ensembleAddBtn')].forEach(e => { if(e) e.disabled = busy; });
   }
 
+  // While a reply streams, the send button becomes 停止 (Esc also stops).
+  let streamActive = false, stopRequested = false;
+  const sendLabel = sendBtn?.textContent, sendTitle = sendBtn?.title || '';
+  async function stopGeneration() {
+    if (!streamActive || stopRequested) return;
+    stopRequested = true;
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      await fetch(`/api/card/${slug}/cancel`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({branch_id:currentBranch})});
+    } catch (_) {}
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && streamActive && !document.querySelector('dialog[open]')) stopGeneration();
+  });
+
   async function runStream(endpoint, body, userText) {
     setBusy(true);
+    streamActive = true; stopRequested = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '■'; sendBtn.title = '停止生成（Esc）'; sendBtn.classList.add('is-stop'); }
     const gm = { role: 'gm', content: '' };
     if (endpoint === 'edit') {
       renderMessages(displayedMessages.filter(m => m.index < body.message_index - 1));
@@ -1289,6 +1307,8 @@
       failure = err.message;
     } finally {
       loadingIndicator.style.display = 'none';
+      streamActive = false;
+      if (sendBtn) { sendBtn.textContent = sendLabel; sendBtn.title = sendTitle; sendBtn.classList.remove('is-stop'); }
       setBusy(false);
       // Invalidate an older in-flight poll; the next poll will reconcile if it is still loading.
       renderDirty = true;
@@ -1299,14 +1319,16 @@
         userInput.value = userText;
         userInput.dispatchEvent(new Event('input'));
       }
-      await showAlert('生成失敗：' + failure);
+      // A stop the player asked for is not an error: the text is back in the composer.
+      if (!stopRequested) await showAlert('生成失敗：' + failure);
     }
     return !failure;
   }
 
   async function handleSend(e) {
     if (e) e.preventDefault();
-    if (isGenerating) return;
+    // Only a click stops; Ctrl/Cmd+Enter while streaming does nothing.
+    if (isGenerating) { if (e && streamActive) stopGeneration(); return; }
     const text = userInput.value.trim();
     if (!text) return;
     userInput.value = '';
