@@ -687,6 +687,26 @@ def api_card_memories(slug):
         return jsonify(ok=False, error=str(exc)), 409
 
 
+@card_bp.route('/api/card/<slug>/lore', methods=['GET', 'POST'])
+def api_card_lore(slug):
+    from story_core.card_mode import lore_editor
+    load_card(slug)
+    if ensemble.enabled(slug):
+        raise branches.BranchError('群像模式尚未使用本線設定')
+    if request.method == 'GET':
+        # Reading needs no lock, so the panel stays usable while a turn is generating.
+        return jsonify(lore_editor.operate(slug, g.card_branch))
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise branches.BranchError('Expected JSON object')
+    try:
+        with branches.lock(slug, g.card_branch):
+            return jsonify(lore_editor.operate(slug, g.card_branch, body))
+    except OSError:
+        log.exception('lore storage failed for %s/%s', slug, g.card_branch)
+        return jsonify(ok=False, error='保存失敗，草稿仍保留，請稍後再試。'), 500
+
+
 @card_bp.route('/api/card/<slug>/candidates', methods=['GET', 'POST'])
 def api_card_candidates(slug):
     load_card(slug)

@@ -71,3 +71,11 @@ test('v2 consistency check needs context and retrieval, not just a matching GM q
   for(const check of c)check.context_ids=['mem:0:0'];
   assert.equal(s.submit({checks:c}).all_supported,true);
 });
+test('lore category is required only when the snapshot lists categories',()=>{
+  const lore={kind:'lore',target_ids:[],text:'七峰共管渡口。',title:'渡口',keywords:['渡口']};
+  assert.equal(ready().propose({operations:[lore]}).operations[0].title,'渡口');
+  const f=snapshot();f.lore_categories=['world','place'];const s=new MaintenanceSession(f);for(const r of f.records)s.read({id:r.id});
+  assert.throws(()=>s.propose({operations:[lore]}),/requires category/);
+  assert.throws(()=>s.propose({operations:[{...op,category:'place'}]}),/Only lore/);
+  assert.equal(s.propose({operations:[{...lore,category:'place'}]}).operations[0].category,'place');
+});

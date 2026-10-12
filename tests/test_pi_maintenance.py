@@ -28,7 +28,7 @@ def story(tmp_path, monkeypatch):
 
 
 MERGE = {'kind':'memory','character':0,'target_ids':['mem:0:0','mem:0:1'],'text':'收到艾迪送的草藥。'}
-LORE = {'kind':'lore','target_ids':[],'title':'渡口','keywords':['渡口'],'text':'七峰共同管理渡口。'}
+LORE = {'kind':'lore','target_ids':[],'title':'渡口','keywords':['渡口'],'category':'place','text':'七峰共同管理渡口。'}
 SUMMARY = {'kind':'summary','target_ids':['summary'],'text':'艾迪送她草藥，她收下了。她拒絕同行。'}
 
 
@@ -68,6 +68,7 @@ def test_apply_all_kinds_preserves_history_and_undo_restores_bytes(story):
     entries = lore.available('s','main',messages)
     assert entries[0]['text'] == '作者設定'
     assert entries[1]['sources'] == [{'index':0,'hash':lore.content_hash(messages[0]['content'])}]
+    assert entries[1]['category'] == 'place'
     assert compaction.load_recap('s','main')['compacted_through_index'] == 1
     assert tasks.undo(result['backup'])['status'] == 'undone'
     assert tasks._raw(tasks._paths('s','main')) == before
@@ -296,3 +297,11 @@ def test_apply_waits_for_busy_branch_lock(story):
     assert result['status'] == 'applied'
     t.join()
     assert lock_released.is_set()
+
+
+def test_lore_operation_requires_a_known_category(story):
+    frozen = tasks.freeze('s', kinds=('lore',))
+    assert frozen['lore_categories'][0] == 'world'
+    for bad in [{k: v for k, v in LORE.items() if k != 'category'}, {**LORE, 'category': '地點'}]:
+        with pytest.raises(subprocess.CalledProcessError):
+            receipt(story, frozen, [bad])

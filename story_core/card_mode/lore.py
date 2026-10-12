@@ -6,6 +6,9 @@ from story_core import story_io as io
 
 MAX_ENTRIES = 6
 MAX_CHARS = 4500
+# Player-facing grouping only; selection and grounding ignore it.
+CATEGORIES = [('world', '世界'), ('faction', '勢力'), ('place', '地點'), ('character', '人物'),
+              ('power', '功法與器物'), ('event', '事件與局勢'), ('other', '其他')]
 
 
 def path(slug, bid):
@@ -23,7 +26,10 @@ def inherit(slug, source, target):
 
 
 def available(slug, bid, messages):
-    doc = io._load_json(str(path(slug, bid)), {})
+    return available_from(io._load_json(str(path(slug, bid)), {}), messages)
+
+
+def available_from(doc, messages):
     if not doc or doc.get('schema_version') != 1:
         return []
     # A reused index after regen must not resurrect the discarded world's facts.

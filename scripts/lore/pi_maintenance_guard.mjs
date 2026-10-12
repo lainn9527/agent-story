@@ -57,6 +57,9 @@ export class MaintenanceSession {
         if (!d.empty) claims.push({id:`keep:${i}:${id}`,operation:i,text:`核對替換是否保留此舊記錄的重要事實、否定、歸屬與時序。若更新狀態，原文是否證明變更？\n${d.text}`});
       }
       if (op.kind==='lore' && (typeof op.title!=='string'||!op.title.trim()||op.title.length>100||!Array.isArray(op.keywords)||op.keywords.length>12||op.keywords.some(k=>typeof k!=='string'||!k.trim()||k.length>50))) throw Error('Lore requires bounded title/keywords');
+      // Snapshots frozen before categories existed carry no list and stay valid without one.
+      if (op.kind==='lore' && this.snapshot.lore_categories && !this.snapshot.lore_categories.includes(op.category)) throw Error(`Lore requires category: ${this.snapshot.lore_categories.join(', ')}`);
+      if (op.kind!=='lore' && op.category!==undefined) throw Error('Only lore operations take a category');
       if(this.snapshot.policy_version>=2)claims.push({id:`canon:${i}`,operation:i,text:'與作者設定及相關 memory/lore 比對。近期 GM 單次宣稱不能自行變成既有往事或永久設定；說明一致性、明確變更證據或未解矛盾。'});
       const parts=(op.kind==='inventory' && op.text ? op.item_name+'：'+op.text : op.text).match(/[^。；！？\n]+[。；！？]?/g)||[];
       parts.filter(s=>s.trim()).forEach((s,j)=>claims.push({id:`new:${i}:${j}`,operation:i,text:s.trim()}));

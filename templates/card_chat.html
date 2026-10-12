@@ -33,6 +33,7 @@
     <div class="header-right-actions">
       <button id="cardFavoritesOpen" type="button" class="header-lore-link" title="本路線收藏的回覆">收藏</button>
       <button id="cardMemoryOpen" type="button" class="header-lore-link">記憶</button>
+      <button id="cardLoreOpen" type="button" class="header-lore-link" title="本路線整理過的世界設定">設定</button>
       <button id="reset-btn" class="header-power-btn" title="回到開場白（清空歷史與記憶）">&#x21BA;</button>
       <a href="/card" class="header-lore-link" title="返回卡片列表">&#x1F4D6;</a>
     </div>
@@ -278,6 +279,19 @@
     <footer><button id="cardMemoryReload" type="button">重新載入</button><button id="cardMemorySave" type="button" disabled>保存變更</button></footer>
   </dialog>
   <dialog id="cardMemoryDiscard"><form method="dialog"><p id="cardMemoryDiscardText"></p><button value="cancel">保留草稿</button><button value="discard">放棄修改</button></form></dialog>
+  <dialog id="cardLoreDialog" aria-labelledby="cardLoreTitle">
+    <div class="memory-editor-heading"><h3 id="cardLoreTitle">本線設定</h3><button id="cardLoreClose" type="button" aria-label="關閉設定">×</button></div>
+    <p id="cardLoreIntro">GM 依關鍵字取用相關條目，★ 常駐條目每回合都會帶上。只影響目前分支，保存時留下還原備份。</p>
+    <div class="lore-toolbar">
+      <input id="cardLoreSearch" type="search" placeholder="搜尋標題、內容或關鍵字" aria-label="搜尋設定">
+      <select id="cardLoreFilter" aria-label="設定分類"></select>
+      <button id="cardLoreAdd" type="button">＋ 新增</button>
+    </div>
+    <div id="cardLoreGroups"></div>
+    <p id="cardLoreError" role="alert"></p>
+    <footer><button id="cardLoreReload" type="button">重新載入</button><button id="cardLoreSave" type="button" disabled>保存變更</button></footer>
+  </dialog>
+  <dialog id="cardLoreDiscard"><form method="dialog"><p id="cardLoreDiscardText"></p><button value="cancel">保留草稿</button><button value="discard">放棄修改</button></form></dialog>
   <dialog id="cardReplyEditDialog" aria-labelledby="cardReplyEditTitle">
     <form id="cardReplyEditForm">
       <header class="candidate-heading"><h3 id="cardReplyEditTitle">編輯正文</h3><button id="cardReplyEditClose" type="button" aria-label="關閉正文編輯">×</button></header>

@@ -62,6 +62,7 @@ memory：只新增真正未記錄的資訊或明確變化；再次提及舊事�
 不能把願望、提議、猜測、比喻寫成發生的事；不能將不再提及當作已失效。不得新增心理定論。
 一筆 memory operation 可將同一角色數筆 target_ids 合成一筆 text；新增則 target_ids 為空。
 lore：只整理跨場景仍有用的少量穩定世界規則、組織或地點。事件流水帳、當前行蹤、關係進度留給 memory/摘要。
+lore 操作要填 category（只用於玩家面板分組）：world 世界觀與地理、faction 宗門組織勢力、place 具體地點設施、character 人物、power 功法法寶器物與修煉體系、event 長期局勢與重大事件、other 其他。改寫既有條目時沿用原分類，除非明顯放錯。
 不要補複雜功法層級、数值或細節。保護作者設定，不修改 protected 記錄。
 inventory：target_ids 列出待替換物品記錄，item_name 使用原文中文名稱，text 為現有數量與狀態；刪除時 text 為真正空字串。可合併別名，但不可將同一批重複記錄的數量相加。每筆刪除也需原文證明已用完、交付、失效或併入另一筆；不因久未提及就刪除。狀態有歧義先回查原文；只整理現有清單，不補造物品。
 summary：保留舊摘要重要事件與因果、有效約定、未完成事項；用當前事實、歷史經過、未完成事項、最後場景四節，最多 8000 字。
@@ -127,7 +128,8 @@ def freeze(slug, bid='main', *, kinds=('memory', 'lore'), recent=20, focus=()):
         for entry in lore.available(slug, bid, messages):
             valid = all(sources.get(s.get('index')) == s.get('hash') for s in entry.get('sources', []))
             records.append({'id': f"lore:{entry['id']}", 'kind': 'lore', 'text': entry['text'],
-                            'protected': not entry.get('sources') or not valid, 'title': entry.get('title', '')})
+                            'protected': not entry.get('sources') or not valid, 'title': entry.get('title', ''),
+                            'category': entry.get('category', '')})
         inventory = _doc(raw['state'], {}).get('inventory', {})
         records.extend({'id': f'inv:{i}', 'kind': 'inventory', 'item_name': name,
                         'text': json.dumps({'name': name, 'status': status}, ensure_ascii=False)}
@@ -163,7 +165,8 @@ def freeze(slug, bid='main', *, kinds=('memory', 'lore'), recent=20, focus=()):
                 # Rebase anchors: apply accepts later appended turns, never a changed frozen prefix.
                 'anchor': {'index': messages[-1]['index'], 'turn_id': messages[-1].get('card_turn_id'),
                            'hash': lore.content_hash(messages[-1]['content'])},
-                'character_names': [n.get('name') for n in npcs]}
+                'character_names': [n.get('name') for n in npcs],
+                'lore_categories': [key for key, _ in lore.CATEGORIES]}
 
 
 class Stale(ValueError):
@@ -494,6 +497,8 @@ def _apply(run_dir, result, *, rebase=False):
                     refs = {(e['index'], e['hash']) for c in result['checks'] if c['claim_id'].startswith((f'new:{oi}:', f'keep:{oi}:', f'canon:{oi}')) for e in c['evidence']}
                     entry.update(title=op['title'], text=op['text'], keywords=op['keywords'],
                                  sources=[{'index': idx, 'hash': h} for idx, h in sorted(refs)])
+                    if op.get('category'):
+                        entry['category'] = op['category']
                     if previous is not None:
                         entry['previous_version'] = previous
                     entry['maintenance_anchor'] = {'index': messages[-1]['index'],

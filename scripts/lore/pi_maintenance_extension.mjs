@@ -7,7 +7,7 @@ export default function(pi) {
   const schemas={
     read:obj({id:str,offset:{type:'integer'}},['id']),
     search:obj({query:str,offset:{type:'integer'}},['query']),
-    propose:obj({operations:arr(obj({kind:{type:'string',enum:['memory','lore','summary','inventory']},target_ids:arr(str),text:str,item_name:str,character:{type:'integer'},title:str,keywords:arr(str)},['kind','target_ids','text']))}),
+    propose:obj({operations:arr(obj({kind:{type:'string',enum:['memory','lore','summary','inventory']},target_ids:arr(str),text:str,item_name:str,character:{type:'integer'},title:str,keywords:arr(str),category:str},['kind','target_ids','text']))}),
     submit:obj({checks:arr(obj({claim_id:str,verdict:{type:'string',enum:['supported','conflict','insufficient']},reason:str,context_ids:arr(str),evidence:arr(obj({source_id:str,quote:str}))},['claim_id','verdict','reason','evidence']))}),
   };
   const descriptions={read:'Read a frozen record completely, following next_offset. No filesystem access.',search:'Search ALL original records and existing memory/lore by exact substring. Paginate; snippets do not count as reading.',propose:'After reading required records, propose bounded replacements/additions (empty list is valid). Returns a checklist for every new claim and replaced record.',submit:'Check every checklist item against fully read GM originals, with exact quotations; any uncertainty prevents all writes.'};

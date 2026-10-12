@@ -126,6 +126,201 @@
     if (memoryDialog?.open && memoryChanges().length) {event.preventDefault(); event.returnValue = '';}
   });
 
+  const loreDialog = document.getElementById('cardLoreDialog');
+  const loreGroups = document.getElementById('cardLoreGroups');
+  const loreFilter = document.getElementById('cardLoreFilter');
+  const loreSearch = document.getElementById('cardLoreSearch');
+  const loreError = document.getElementById('cardLoreError');
+  const loreSave = document.getElementById('cardLoreSave');
+  const loreOrigins = {maintenance:'背景整理', manual:'手動', curated:'初始整理'};
+  const loreFields = ['title', 'text', 'category', 'keywords', 'always'];
+  let loreSession = null, loreBusy = false, loreNewKey = 0;
+  const loreOpenKeys = new Set();
+  const loreKey = entry => entry.id ?? `new:${entry.newKey}`;
+  const splitKeywords = value => value.split(/[,，、\s]+/).map(k => k.trim()).filter(Boolean);
+  function loreEntryChanged(entry) {
+    if (entry.deleted || entry.id === null) return true;
+    return loreFields.some(k => JSON.stringify(entry.draft[k]) !== JSON.stringify(entry[k]));
+  }
+  // Drafts that were added and then removed again never reach the server.
+  const loreChanges = () => (loreSession?.entries || [])
+    .filter(e => !(e.id === null && e.deleted) && loreEntryChanged(e))
+    .map(e => e.deleted ? {id:e.id, delete:true} : {id:e.id, ...e.draft});
+  function loreButtons() {
+    const count = loreChanges().length;
+    loreSave.disabled = loreBusy || !count;
+    loreSave.textContent = count ? `保存變更（${count}）` : '保存變更';
+    ['cardLoreReload','cardLoreAdd','cardLoreClose'].forEach(id => document.getElementById(id).disabled = loreBusy);
+    loreFilter.disabled = loreSearch.disabled = loreBusy || !loreSession;
+    loreGroups.querySelectorAll('input, textarea, select, button').forEach(el => el.disabled = loreBusy);
+  }
+  function loreMatches(entry) {
+    const query = loreSearch.value.trim().toLowerCase();
+    if (loreFilter.value && entry.draft.category !== (loreFilter.value === 'none' ? '' : loreFilter.value)) return false;
+    if (!query || entry.id === null) return true;
+    return [entry.draft.title, entry.draft.text, ...entry.draft.keywords].some(v => v.toLowerCase().includes(query));
+  }
+  function renderLoreFilter() {
+    const value = loreFilter.value;
+    const counts = {};
+    loreSession.entries.forEach(e => {const c = e.draft.category || 'none'; counts[c] = (counts[c] || 0) + 1;});
+    loreFilter.replaceChildren(new Option(`全部分類（${loreSession.entries.length}）`, ''),
+      ...loreSession.categories.map(c => new Option(`${c.label}（${counts[c.id] || 0}）`, c.id)),
+      ...(counts.none ? [new Option(`未分類（${counts.none}）`, 'none')] : []));
+    loreFilter.value = [...loreFilter.options].some(o => o.value === value) ? value : '';
+  }
+  function loreSummaryText(entry, summary) {
+    summary.replaceChildren();
+    const title = document.createElement('strong');
+    title.textContent = (entry.draft.always ? '★ ' : '') + (entry.draft.title || '（未命名）');
+    const meta = document.createElement('span'); meta.className = 'lore-entry-meta';
+    meta.textContent = entry.deleted ? '將刪除' : entry.id === null ? '新條目' : loreEntryChanged(entry) ? '已修改' : '';
+    const snippet = document.createElement('span'); snippet.className = 'lore-entry-snippet';
+    snippet.textContent = entry.draft.text.replace(/\s+/g, ' ');
+    summary.append(title, meta, snippet);
+  }
+  function loreEditor(entry) {
+    const details = document.createElement('details');
+    details.className = 'lore-entry'; details.open = loreOpenKeys.has(loreKey(entry));
+    details.classList.toggle('deleted', entry.deleted);
+    details.addEventListener('toggle', () => details.open ? loreOpenKeys.add(loreKey(entry)) : loreOpenKeys.delete(loreKey(entry)));
+    const summary = document.createElement('summary');
+    loreSummaryText(entry, summary);
+    const changed = () => {loreSummaryText(entry, summary); details.classList.toggle('dirty', loreEntryChanged(entry)); loreButtons();};
+    details.classList.toggle('dirty', loreEntryChanged(entry));
+    const body = document.createElement('div'); body.className = 'lore-entry-body';
+    const field = (labelText, input) => {
+      const label = document.createElement('label'); label.append(labelText, input); return label;
+    };
+    const title = document.createElement('input');
+    title.value = entry.draft.title; title.maxLength = 80;
+    title.addEventListener('input', () => {entry.draft.title = title.value; changed();});
+    const category = document.createElement('select');
+    category.append(new Option('未分類', ''), ...loreSession.categories.map(c => new Option(c.label, c.id)));
+    category.value = entry.draft.category;
+    category.addEventListener('change', () => {entry.draft.category = category.value; changed();});
+    const keywords = document.createElement('input');
+    keywords.value = entry.draft.keywords.join('、'); keywords.placeholder = '以頓號或逗號分隔';
+    keywords.addEventListener('input', () => {entry.draft.keywords = splitKeywords(keywords.value); changed();});
+    const always = document.createElement('input'); always.type = 'checkbox'; always.checked = entry.draft.always;
+    always.addEventListener('change', () => {entry.draft.always = always.checked; changed();});
+    const alwaysLabel = document.createElement('label'); alwaysLabel.className = 'lore-always';
+    alwaysLabel.append(always, ' 常駐（每回合都帶給 GM）');
+    const text = document.createElement('textarea');
+    text.value = entry.draft.text; text.rows = Math.min(12, Math.max(4, Math.ceil(entry.draft.text.length / 45))); text.maxLength = 2000;
+    text.addEventListener('input', () => {entry.draft.text = text.value; changed();});
+    const row = document.createElement('div'); row.className = 'lore-entry-row';
+    row.append(field('標題', title), field('分類', category));
+    const footer = document.createElement('div'); footer.className = 'lore-entry-footer';
+    const info = document.createElement('span');
+    info.textContent = entry.id === null ? '新條目，無原文來源' : [loreOrigins[entry.origin],
+      entry.sources.length ? `來源 ${entry.sources.map(i => '#' + i).join('、')}` : ''].filter(Boolean).join(' · ');
+    const remove = document.createElement('button'); remove.type = 'button';
+    remove.textContent = entry.deleted ? '復原' : '刪除';
+    remove.addEventListener('click', () => {
+      entry.deleted = !entry.deleted;
+      if (entry.id === null && entry.deleted) loreSession.entries = loreSession.entries.filter(e => e !== entry);
+      renderLore();
+    });
+    footer.append(info, remove);
+    body.append(row, field('關鍵字', keywords), alwaysLabel, field('內容', text), footer);
+    details.append(summary, body);
+    return details;
+  }
+  function renderLore() {
+    loreGroups.replaceChildren();
+    if (!loreSession) return loreButtons();
+    renderLoreFilter();
+    const groups = [{id:'', label:'未分類'}, ...loreSession.categories];
+    for (const group of groups) {
+      const entries = loreSession.entries.filter(e => e.draft.category === group.id && loreMatches(e));
+      if (!entries.length) continue;
+      const section = document.createElement('section'); section.className = 'lore-group';
+      const heading = document.createElement('h4'); heading.textContent = `${group.label} · ${entries.length}`;
+      section.append(heading, ...entries.map(loreEditor));
+      loreGroups.append(section);
+    }
+    if (!loreGroups.childElementCount) loreGroups.textContent = loreSession.entries.length ? '沒有符合的條目' : '這條路線還沒有整理過的設定';
+    loreButtons();
+  }
+  function setLoreData(data, branch) {
+    loreSession = {branch, revision:data.revision, categories:data.categories,
+      entries:data.entries.map(e => ({...e, deleted:false, draft:{title:e.title, text:e.text,
+        category:e.category, keywords:[...e.keywords], always:e.always}}))};
+    document.getElementById('cardLoreIntro').textContent =
+      'GM 依關鍵字取用相關條目，★ 常駐條目每回合都會帶上。只影響目前分支，保存時留下還原備份。' +
+      (Number.isInteger(data.curated_through_index) ? `背景整理已涵蓋到 #${data.curated_through_index}。` : '');
+    renderLore();
+  }
+  async function loreRequest(branch, body) {
+    const res = await fetch(`/api/card/${slug}/lore` + (body ? '' : `?branch_id=${encodeURIComponent(branch)}`),
+      body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({branch_id:branch, ...body})}
+           : {cache:'no-store'});
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || '設定載入失敗');
+    return data;
+  }
+  async function loadLore(branch) {
+    loreBusy = true; loreButtons(); loreError.textContent = '';
+    try { setLoreData(await loreRequest(branch), branch); }
+    catch (e) { loreError.textContent = e.message; }
+    finally { loreBusy = false; loreButtons(); }
+  }
+  function confirmLoreDiscard(message) {
+    const dialog = document.getElementById('cardLoreDiscard');
+    document.getElementById('cardLoreDiscardText').textContent = message;
+    dialog.returnValue = 'cancel';
+    return new Promise(resolve => {
+      dialog.addEventListener('close', () => resolve(dialog.returnValue === 'discard'), {once:true});
+      dialog.showModal();
+    });
+  }
+  document.getElementById('cardLoreOpen')?.addEventListener('click', async () => {
+    if (loreBusy || !currentBranch) return;
+    loreSession = null; loreOpenKeys.clear(); loreSearch.value = ''; loreFilter.value = '';
+    loreGroups.replaceChildren(); loreDialog.showModal();
+    await loadLore(currentBranch);
+  });
+  async function closeLore() {
+    if (loreBusy) return;
+    if (loreChanges().length && !await confirmLoreDiscard('放棄尚未保存的設定修改？')) return;
+    loreDialog.close();
+  }
+  document.getElementById('cardLoreClose')?.addEventListener('click', closeLore);
+  loreDialog?.addEventListener('cancel', event => {event.preventDefault(); closeLore();});
+  loreSearch?.addEventListener('input', renderLore);
+  loreFilter?.addEventListener('change', renderLore);
+  document.getElementById('cardLoreAdd')?.addEventListener('click', () => {
+    if (!loreSession || loreBusy) return;
+    const category = ['', 'none'].includes(loreFilter.value) ? '' : loreFilter.value;
+    const entry = {id:null, newKey:++loreNewKey, sources:[], deleted:false,
+      draft:{title:'', text:'', category, keywords:[], always:false}};
+    loreSession.entries.unshift(entry); loreOpenKeys.add(loreKey(entry)); loreSearch.value = '';
+    renderLore();
+    loreGroups.querySelector('details[open] input')?.focus();
+  });
+  document.getElementById('cardLoreReload')?.addEventListener('click', async () => {
+    if (loreBusy) return;
+    if (loreChanges().length && !await confirmLoreDiscard('重新載入會放棄目前草稿，確定？')) return;
+    await loadLore(loreSession?.branch || currentBranch);
+  });
+  loreSave?.addEventListener('click', async () => {
+    const changes = loreChanges();
+    if (loreBusy || !loreSession || !changes.length) return;
+    if (changes.some(c => !c.delete && (!c.title.trim() || !c.text.trim()))) {
+      loreError.textContent = '標題與內容不能空白；不要的條目請刪除。'; return;
+    }
+    loreBusy = true; loreButtons(); loreError.textContent = '';
+    try {
+      setLoreData(await loreRequest(loreSession.branch, {revision:loreSession.revision, changes}), loreSession.branch);
+      loreError.textContent = '已保存，並留下還原備份。';
+    } catch (e) { loreError.textContent = `${e.message}（未套用的草稿仍在此視窗）`; }
+    finally { loreBusy = false; loreButtons(); }
+  });
+  window.addEventListener('beforeunload', event => {
+    if (loreDialog?.open && loreChanges().length) {event.preventDefault(); event.returnValue = '';}
+  });
+
   const branchSelect = document.getElementById('cardBranchSelect');
   const branchDialog = document.getElementById('cardBranchDialog');
   let forkIndex = null;
@@ -367,6 +562,7 @@
     ensembleState = data.ensemble ? data : null;
     document.getElementById('ensembleControls').hidden = !ensembleState;
     document.getElementById('ensembleCreateBtn').hidden = !!ensembleState;
+    document.getElementById('cardLoreOpen').hidden = !!ensembleState;
     const recording = document.getElementById('ensembleRecording');
     const retry = document.getElementById('ensembleRetryRecording');
     const status = data.recorder?.status;
